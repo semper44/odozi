@@ -7,12 +7,14 @@ import hashlib
 # 1. Your configuration
 URL = "http://127.0.0.1:8000/webhook/"
 SECRET = "your_test_secret"  # Must match your settings.py
-REPO_URL = "https://github.com/semper44/odozi.git" # Use a real repo for cloning
-BRANCH = "main"
+REPO_URL = "https://github.com/semper44/Taskmaster-.git" # Use a real repo for cloning
+BRANCH = "master"
+BASE_BRANCH = "main" 
 
 # 2. Build the GitHub-style payload
 payload = json.dumps({
     "ref": f"refs/heads/{BRANCH}",
+    "base_branch": BASE_BRANCH, 
     "repository": {
         "clone_url": REPO_URL
     }

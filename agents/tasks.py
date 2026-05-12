@@ -24,12 +24,15 @@ def run_in_sandbox(path, command, image="python:3.11-slim"):
         *command
     ]
     
-    return subprocess.run(
-        docker_cmd, 
-        env=worker_env, # Uses the host path to find docker
-        capture_output=True, 
-        text=True
-    )
+     # 1. Capture the raw execution result
+    result = subprocess.run(docker_cmd, env=worker_env, capture_output=True, text=True)
+    
+    # 2. YOU MUST CONVERT IT TO A DICTIONARY HERE:
+    return {
+        "exit_code": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr
+    }
 
 
 @shared_task(bind=True, autoretry_for=(requests.exceptions.ConnectionError,), retry_backoff=True)
@@ -126,6 +129,7 @@ def run_security_scan(path):
     }
 
 
+
 @shared_task
 def run_ast_test(path):
     # Logic to run AST analysis
@@ -140,8 +144,10 @@ def run_code_in_a_container(path):
 def run_ci_suite(path, actions):
     # Create a list of tasks based on what the LLM said
     job_list = []
-    if actions.get("run_tests"):
-        job_list.append(run_pytest.s(path))
+    # if actions.get("run_tests"):
+    #     job_list.append(run_pytest.s(path))
+    if actions.get("run_lint"):
+        job_list.append(run_lint_check.s(path))
     if actions.get("check_security"):
         job_list.append(run_security_scan.s(path))
     if actions.get("check_ast"):
