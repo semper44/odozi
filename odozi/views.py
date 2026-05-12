@@ -54,12 +54,16 @@ def github_webhook(request):
         # For a push, the branch is in 'ref' (e.g., "refs/heads/main")
         branch = data.get('ref', '').split('/')[-1]
         repo_url = data.get('repository', {}).get('clone_url')
+        default_branch = data.get('repository', {}).get('default_branch')
+        base_branch = data.get('base_branch') or default_branch or 'main'
         
     elif event_type == 'pull_request':
         # For a PR, we usually want the branch that is being proposed (head)
         pr_data = data.get('pull_request', {})
         branch = pr_data.get('head', {}).get('ref')
         repo_url = data.get('repository', {}).get('clone_url')
+        default_branch = data.get('repository', {}).get('default_branch')
+        base_branch = data.get('base_branch') or default_branch or 'main'
         
     else:
         return JsonResponse({"status": "ignored", "message": f"Event {event_type} not handled"})
@@ -69,7 +73,11 @@ def github_webhook(request):
         return JsonResponse({"error": "Missing repo or branch data"}, status=400)
 
     # 4. Hand off to your orchestrator
-    start_agentic_workflow(repo_url, branch)
+    result = start_agentic_workflow(repo_url, branch, base_branch=base_branch)
+        # 5. Check if the orchestrator returned a git error
+    if result.get("status") == "error":
+        return JsonResponse(result, status=400) # Returns a clean 400 Bad Request payload
+
 
     return JsonResponse({"status": "processing", "branch": branch})
 

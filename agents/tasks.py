@@ -24,12 +24,16 @@ def run_in_sandbox(path, command, image="python:3.11-slim"):
         *command
     ]
     
-    return subprocess.run(
-        docker_cmd, 
-        env=worker_env, # Uses the host path to find docker
-        capture_output=True, 
-        text=True
-    )
+     # 1. Capture the raw execution result
+    result = subprocess.run(docker_cmd, env=worker_env, capture_output=True, text=True)
+    print(f"📦 [DOCKER ENGINE] Container process exited with code: {result.returncode}")
+    # 2. YOU MUST CONVERT IT TO A DICTIONARY HERE:
+    return {
+        "exit_code": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr
+    }
+
 
 
 @shared_task(bind=True, autoretry_for=(requests.exceptions.ConnectionError,), retry_backoff=True)
@@ -80,10 +84,18 @@ def run_pytest(self, path):
 
 @shared_task
 def run_lint_check(path):
-    # 1. Check for errors
-    initial_check = run_in_sandbox(path, ["ruff", "check", "."])
+    """
+    Checks for code quality using Ruff inside an isolated container.
+    """
+
+    # Dynamically install ruff, then execute the check
+    command = ["sh", "-c", "pip install --quiet ruff && ruff check --format json ."]
     
-    if initial_check["exit_code"] != 0:
+    # 1. Check for errors
+    response = run_in_sandbox(path, command, image="python:3.12-slim")
+    # initial_check = run_in_sandbox(path, ["ruff", "check", "."])
+    
+    if response["exit_code"] != 0:
         # 2. Run the fix in the sandbox
         run_in_sandbox(path, ["ruff", "check", "--fix", "."])
         
@@ -126,6 +138,7 @@ def run_security_scan(path):
     }
 
 
+
 @shared_task
 def run_ast_test(path):
     # Logic to run AST analysis
@@ -140,8 +153,10 @@ def run_code_in_a_container(path):
 def run_ci_suite(path, actions):
     # Create a list of tasks based on what the LLM said
     job_list = []
-    if actions.get("run_tests"):
-        job_list.append(run_pytest.s(path))
+    # if actions.get("run_tests"):
+    #     job_list.append(run_pytest.s(path))
+    if actions.get("run_lint"):
+        job_list.append(run_lint_check.s(path))
     if actions.get("check_security"):
         job_list.append(run_security_scan.s(path))
     if actions.get("check_ast"):
@@ -152,12 +167,18 @@ def run_ci_suite(path, actions):
      # Chord: (Group of tasks) | (Final task to run at the end)
     callback = cleanup_and_report.s(path)
     workflow = chord(job_list)(callback)
+    print("🔥 [CELERY MANAGER] Fan-out complete. Parallel processes running.")
+    print(f"📊 [CELERY MANAGER] Current workflow state: {workflow}")
     return "Workflow Started"
+
+
 
 @shared_task
 def cleanup_and_report(results, path):
     # 'results' is a list of outputs from all parallel tools
-    print(f"All tools finished: {results}")
+    print("🏁 [CELERY AGGREGATOR] All parallel sandboxes closed. Collecting results...")
+    print(f"📝 [SUMMARY REPORT]:\n{results}")  
+    print(f"🧹 [CLEANUP] Destroying ephemeral path: {path}")
     shutil.rmtree(path) # FINALLY delete the sandbox
 
 # @shared_task
