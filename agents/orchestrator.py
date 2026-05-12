@@ -1,5 +1,5 @@
 # agents/orchestrator.py
-from .services.git_service import CIWorkspace
+from .services.git_services import CIWorkspace
 from .tasks import run_ci_suite
 # from .tasks import run_parallel_checks # This would be your Celery group
 # from .services.llm_service import analyze_diff_with_llm
@@ -26,3 +26,4 @@ def start_agentic_workflow(repo_url, branch):
     # Use .delay() to push the job to Redis. 
     # The worker will pick up 'run_ci_suite' and then fan out the tools.
     run_ci_suite.delay(ws.root_dir, actions_json)
+

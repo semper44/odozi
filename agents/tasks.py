@@ -5,6 +5,33 @@ import os
 import requests
 # Celery tasks (the parallel tools)
 
+
+
+
+def run_in_sandbox(path, command, image="python:3.11-slim"):
+    # 1. Environment for the WORKER (to find docker)
+    worker_env = {"PATH": os.environ.get("PATH")}
+
+    # 2. Environment for the CONTAINER (to harden the tool)
+    docker_cmd = [
+        "docker", "run", "--rm",
+        "--net", "none",
+        "-e", "PYTEST_ADDOPTS=-c /dev/null",  # <--- Passed into the sandbox
+        "-e", "HOME=/tmp",                   # <--- Passed into the sandbox
+        "-v", f"{path}:/app",
+        "-w", "/app",
+        image,
+        *command
+    ]
+    
+    return subprocess.run(
+        docker_cmd, 
+        env=worker_env, # Uses the host path to find docker
+        capture_output=True, 
+        text=True
+    )
+
+
 @shared_task(bind=True, autoretry_for=(requests.exceptions.ConnectionError,), retry_backoff=True)
 def run_pytest(self, path):
     """
@@ -13,9 +40,16 @@ def run_pytest(self, path):
     try:
         # 1. Run the command
         # we use 'universal_newlines' to get string output instead of bytes
+        safe_env = {
+            "PATH": os.environ.get("PATH"),
+            "HOME": "/tmp",
+            "PYTEST_ADDOPTS": "-c /dev/null" # Prevents pytest from reading global configs
+        }
+
         result = subprocess.run(
             ["pytest", "--json-report", "--json-report-file=report.json"], 
             cwd=path,               # Run inside the sandbox folder
+            env=safe_env,
             capture_output=True, 
             text=True,
             timeout=300             # 5 minute timeout safety net
@@ -43,10 +77,54 @@ def run_pytest(self, path):
     #     raise self.retry(exc=e)
 
 
+
 @shared_task
-def run_security_check(path):
-    # Logic to run 'bandit' or security tools
-    return {"tool": "security", "result": "no issues"}
+def run_lint_check(path):
+    # 1. Check for errors
+    initial_check = run_in_sandbox(path, ["ruff", "check", "."])
+    
+    if initial_check["exit_code"] != 0:
+        # 2. Run the fix in the sandbox
+        run_in_sandbox(path, ["ruff", "check", "--fix", "."])
+        
+        # 3. Get the DIFF (This is the 'Senior' part)
+        # We ask git: "What did the linter just change?"
+        diff_result = subprocess.run(
+            ["git", "diff"], cwd=path, capture_output=True, text=True
+        )
+        
+        return {
+            "tool": "linter",
+            "status": "failed_but_fixable",
+            "fix_suggestion": diff_result.stdout, # <--- Pass this to the LLM/UI
+            "summary": "Found style issues. Suggested fixes are available."
+        }
+    
+    return {"tool": "linter", "status": "passed"}
+
+
+@shared_task
+def run_security_scan(path):
+    """
+    Scans for security vulnerabilities using Bandit.
+    """
+    # -lll: Only show high-severity issues
+    # -f json: Easy for our Agent to parse
+    command = ["bandit", "-r", ".", "-lll", "-f", "json"]
+    
+    # We can use a basic python image with bandit installed
+    response = run_in_sandbox(path, command, image="python:3.12-slim")
+    
+    # Bandit returns exit code 1 if it finds vulnerabilities
+    status = "passed" if response["exit_code"] == 0 else "failed"
+    
+    return {
+        "tool": "security_scan",
+        "status": status,
+        "vulnerabilities": response["stdout"], # JSON list of issues
+        "summary": "No critical vulnerabilities found" if status == "passed" else "Critical issues detected!"
+    }
+
 
 @shared_task
 def run_ast_test(path):
@@ -65,7 +143,7 @@ def run_ci_suite(path, actions):
     if actions.get("run_tests"):
         job_list.append(run_pytest.s(path))
     if actions.get("check_security"):
-        job_list.append(run_security_check.s(path))
+        job_list.append(run_security_scan.s(path))
     if actions.get("check_ast"):
         job_list.append(run_ast_test.s(path))
     if actions.get("run_in_container"):
@@ -81,4 +159,15 @@ def cleanup_and_report(results, path):
     # 'results' is a list of outputs from all parallel tools
     print(f"All tools finished: {results}")
     shutil.rmtree(path) # FINALLY delete the sandbox
+
+# @shared_task
+# def cleanup_and_report(results, path):
+#     # 'results' looks like: [{"tool": "pytest", "status": "passed"}, {"tool": "security", ...}]
+#     for report in results:
+#         if report['status'] == 'failed':
+#             print(f"Alert: {report['tool']} found issues!")
+    
+#     # Now safe to delete
+#     shutil.rmtree(path)
+
 
