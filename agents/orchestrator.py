@@ -27,7 +27,7 @@ def start_agentic_workflow(repo_url, branch, base_branch="main"):
         diff = ws.get_diff(base_branch=base_branch)
         # print(f"📊 diff {diff}...")
         
-        actions_json = {"run_tests": True, "check_security": True, "run_lint": True} # Placeholder for LLM output
+        actions_json = {"run_tests": True, "check_security": True, "run_lint": True, "check_ast":True} # Placeholder for LLM output
         # 3. CALLING THE TASK
         # Use .delay() to push the job to Redis. 
         # The worker will pick up 'run_ci_suite' and then fan out the tools.

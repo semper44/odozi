@@ -1,89 +1,5 @@
 import ast
 
-
-class TransactionAtomicVisitor(ast.NodeVisitor):
-
-    def __init__(self, rule):
-        self.rule = rule
-        self.findings = []
-
-    def visit_FunctionDef(self, node):
-
-        keyword = self.rule["function_contains"]
-
-        required = self.rule["required_call"]
-
-        if keyword not in node.name.lower():
-            return
-
-        found = False
-
-        for child in ast.walk(node):
-
-            if (
-                isinstance(child, ast.Attribute)
-                and child.attr == required
-            ):
-                found = True
-
-        if not found:
-
-            self.findings.append({
-                "type": "missing_required_call",
-                "function": node.name,
-                "required": required,
-                "line": node.lineno
-            })
-
-        self.generic_visit(node)
-
-class QueryOptimizationVisitor(ast.NodeVisitor):
-
-    def __init__(self, rule):
-
-        self.rule = rule
-
-        self.findings = []
-
-    def visit_For(self, node):
-
-        required = self.rule["required_optimization"]
-
-        for child in ast.walk(node):
-
-            if (
-                isinstance(child, ast.Call)
-                and isinstance(child.func, ast.Attribute)
-            ):
-
-                attr = child.func.attr
-
-                if attr == "all":
-
-                    query_has_optimization = False
-
-                    current = child.func.value
-
-                    while isinstance(current, ast.Call):
-
-                        if (
-                            isinstance(current.func, ast.Attribute)
-                            and current.func.attr == required
-                        ):
-                            query_has_optimization = True
-
-                        current = current.func.value
-
-                    if not query_has_optimization:
-
-                        self.findings.append({
-                            "type": "missing_query_optimization",
-                            "required": required,
-                            "line": child.lineno
-                        })
-
-        self.generic_visit(node)
-
 class APIAuthVisitor(ast.NodeVisitor):
 
     def __init__(self, rule):
@@ -134,48 +50,7 @@ class APIAuthVisitor(ast.NodeVisitor):
                 "line": node.lineno
             })
 
-class SerializerLengthVisitor(ast.NodeVisitor):
 
-    def __init__(self, rule):
-
-        self.rule = rule
-
-        self.findings = []
-
-    def visit_ClassDef(self, node):
-
-        is_serializer = False
-
-        for base in node.bases:
-
-            if (
-                isinstance(base, ast.Name)
-                and "Serializer" in base.id
-            ):
-                is_serializer = True
-
-        if not is_serializer:
-            return
-
-        start = node.lineno
-
-        end = node.end_lineno
-
-        total = end - start
-
-        limit = self.rule["max_lines"]
-
-        if total > limit:
-
-            self.findings.append({
-                "type": "serializer_too_large",
-                "class": node.name,
-                "lines": total,
-                "max_allowed": limit,
-                "line": node.lineno
-            })
-
-import ast
 
 
 # ast.NodeVisitor allows us to walk through Python code as a tree
@@ -184,12 +59,10 @@ class FunctionConstraintVisitor(ast.NodeVisitor):
     def __init__(self, rule):
 
         """
-
         Constructor
         Receives ONE rule dynamically defined by the LLM.       
 
         Example:       
-
         {
           "target": {
             "name_contains": "payment"
@@ -224,40 +97,23 @@ class FunctionConstraintVisitor(ast.NodeVisitor):
         # }
         target = self.rule["target"]
 
-        # Extract "constraints" section
-        # {
-        #   "must_call": "atomic"
-        # }
+        # Extract "constraints"
         constraints = self.rule["constraints"]
-
-
 
         # Get the keyword we want to match Example:"payment"
         keyword = target.get("name_contains")
 
-
         # Only continue if keyword exists
         if keyword:
-
-            # node.name is the function name
-            # Example:
-            # process_payment
+            # check keyword in node.name, where node.name is the function name Example:process_payment
             if keyword not in node.name.lower():
                 return
-
-
-
-        # Get required method/function call
-        #
-        # Example:
-        # "atomic"
-        #
+        # Get required constraints call that should exist inside the function Example:"atomic"
         required_call = constraints.get("must_call")
 
 
         # Only continue if rule requires a call
         if required_call:
-
             # Assume function DOES NOT contain required call
             found = False
 
@@ -315,56 +171,78 @@ class FunctionConstraintVisitor(ast.NodeVisitor):
                     # Line number in file
                     "line": node.lineno
                 })
-
-
         # Continue walking deeper into AST tree
         self.generic_visit(node)
 
 
 class ClassLengthVisitor(ast.NodeVisitor):
+    """
+    Visitor for checking class constraints like maximum line length and required parent classes.
+    
+    Walks through Python AST and validates classes against configured rules.
+    """
 
     def __init__(self, rule):
+        """
+        Initialize the ClassLengthVisitor.
+        
+        Args:
+            rule: Configuration dict with 'target' and 'constraints' keys
+        """
 
         self.rule = rule
 
         self.findings = []
 
     def visit_ClassDef(self, node):
+        """
+        Check class definition against configured constraints.
+        
+        Verifies that class inherits from required parent (if specified) 
+        and does not exceed maximum allowed line count.
+        
+        Args:
+            node: AST ClassDef node representing a class definition
+        """
 
+        # Extract target and constraints from the rule
         target = self.rule["target"]
 
         constraints = self.rule["constraints"]
 
+        # Check if rule requires a specific parent class
         required_parent = target.get("inherits_from")
 
         if required_parent:
-
             found = False
 
+            # Walk through class base classes to find required parent
             for base in node.bases:
-
                 if (
                     isinstance(base, ast.Name)
                     and required_parent in base.id
                 ):
                     found = True
 
+            # Skip this class if required parent not found
             if not found:
                 return
 
+        # Check maximum line count constraint
         max_lines = constraints.get("max_lines")
 
         if max_lines:
-
+            # Calculate total lines in class definition
             total = node.end_lineno - node.lineno
 
+            # Report finding if class exceeds max allowed lines
             if total > max_lines:
-
                 self.findings.append({
                     "type": "class_too_large",
                     "class": node.name,
                     "lines": total,
                     "max_allowed": max_lines
                 })
+
 
             

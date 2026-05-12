@@ -3,6 +3,9 @@ import shutil
 import subprocess
 import os
 import requests
+import uuid
+import json
+from .tools.rules_library.py import LIBRARY
 # Celery tasks (the parallel tools)
 
 
@@ -164,14 +167,44 @@ def run_security_scan(path):
 
 
 @shared_task
-def run_ast_test(path):
-    # Logic to run AST analysis
-    return {"tool": "ast_test", "result": "no issues"}
+def run_custom_semgrep(path, yaml_rule_text):
+    # 1. Create a UNIQUE filename so parallel tasks don't collide
+    rule_filename = f"rule_{uuid.uuid4().hex[:8]}.yaml"
+    rule_path = os.path.join(path, rule_filename)
 
-@shared_task
-def run_code_in_a_container(path):
-    # Logic to run code in a container
-    return {"tool": "container", "result": "passed"}
+    try:
+        # 2. Write the YAML string to the sandbox folder
+        with open(rule_path, "w") as f:
+            f.write(yaml_rule_text)
+
+        # 3. Run in sandbox. 
+        # Note: We use the filename, NOT the full path, because 
+        # inside Docker the working directory is already "/app"
+        command = ["semgrep", "scan", "--config", rule_filename, "--json", "."]
+        
+        # Use your custom image that has semgrep installed
+        response = run_in_sandbox(path, command, image="odozi-tools:latest")
+
+        # 4. Parse the results
+        # Semgrep's JSON is huge; let's try to just get the findings
+        try:
+            full_output = json.loads(response["stdout"])
+            findings = full_output.get("results", [])
+        except:
+            findings = response["stdout"]
+
+        return {
+            "tool": "semgrep_custom",
+            "status": "passed" if response["exit_code"] == 0 and not findings else "failed",
+            "findings": findings
+        }
+
+    finally:
+        # 5. ALWAYS cleanup the temp rule file
+        if os.path.exists(rule_path):
+            os.remove(rule_path)
+
+
 
 @shared_task
 def run_ci_suite(path, actions):
@@ -183,10 +216,14 @@ def run_ci_suite(path, actions):
         job_list.append(run_lint_check.s(path))
     if actions.get("check_security"):
         job_list.append(run_security_scan.s(path))
-    if actions.get("check_ast"):
-        job_list.append(run_ast_test.s(path))
-    if actions.get("run_in_container"):
-        job_list.append(run_code_in_a_container.s(path))
+    if actions.get("check_auth"):
+        job_list.append(run_custom_semgrep.s(path, LIBRARY["check_auth"]))
+
+    if actions.get("check_pii"):
+        job_list.append(run_custom_semgrep.s(path, LIBRARY["check_pii"]))
+
+    if actions.get("run_lint"):
+        job_list.append(run_lint_check.s(path))
     
      # Chord: (Group of tasks) | (Final task to run at the end)
     callback = cleanup_and_report.s(path)

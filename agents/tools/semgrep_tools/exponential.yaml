@@ -1,0 +1,13 @@
+rules:
+  - id: odozi-n-plus-one-query
+    patterns:
+      - pattern-inside: |
+          for $X in $Y:
+              ...
+      - pattern-either:
+          - pattern: $MODEL.objects.get(...)
+          - pattern: $MODEL.objects.filter(...)
+          - pattern: $MODEL.objects.create(...)
+    message: "Performance Alert: Database query detected inside a loop. Consider using select_related() or bulk_create()."
+    languages: [python]
+    severity: WARNING

@@ -1,0 +1,14 @@
+rules:
+  - id: odozi-missing-auth-decorator
+    patterns:
+      - pattern: |
+          def $FUNC(...):
+              ...
+      - pattern-not-inside: |
+          @login_required
+          def $FUNC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: ^(post_|api_).*
+    message: "Critical: Function '$FUNC' is missing the @login_required decorator."
