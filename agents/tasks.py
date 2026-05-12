@@ -15,6 +15,8 @@ def run_in_sandbox(path, command, image="python:3.11-slim"):
     # 2. Environment for the CONTAINER (to harden the tool)
     docker_cmd = [
         "docker", "run", "--rm",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
         "--net", "none",
         "-e", "PYTEST_ADDOPTS=-c /dev/null",  # <--- Passed into the sandbox
         "-e", "HOME=/tmp",                   # <--- Passed into the sandbox
@@ -24,9 +26,18 @@ def run_in_sandbox(path, command, image="python:3.11-slim"):
         *command
     ]
     
-     # 1. Capture the raw execution result
+    # result = subprocess.run(docker_cmd, env=worker_env, capture_output=True, text=True)
+    print(f"\n🐳 [DOCKER TARGET EXECUTION]: {' '.join(docker_cmd)}")
+    
     result = subprocess.run(docker_cmd, env=worker_env, capture_output=True, text=True)
-    print(f"📦 [DOCKER ENGINE] Container process exited with code: {result.returncode}")
+    
+    # --- THE SENIOR DEBUG LAYER ---
+    print(f"📦 [DOCKER STATUS]: Exited with code {result.returncode}")
+    if result.stdout:
+        print(f"📄 [DOCKER STDOUT]:\n{result.stdout.strip()}")
+    if result.stderr:
+        print(f"🛑 [DOCKER STDERR]:\n{result.stderr.strip()}")
+    print("═" * 50)
     # 2. YOU MUST CONVERT IT TO A DICTIONARY HERE:
     return {
         "exit_code": result.returncode,
@@ -89,30 +100,40 @@ def run_lint_check(path):
     """
 
     # Dynamically install ruff, then execute the check
-    command = ["sh", "-c", "pip install --quiet ruff && ruff check --format json ."]
+    # command = ["sh", "-c", "pip install --quiet ruff && ruff check --format json ."]
+    command = ["ruff", "check", "--output-format", "json", "."]
     
     # 1. Check for errors
-    response = run_in_sandbox(path, command, image="python:3.12-slim")
-    # initial_check = run_in_sandbox(path, ["ruff", "check", "."])
+    response = run_in_sandbox(path, command, image="odozi-tools:latest") # Use a pre-built image with ruff installed
     
-    if response["exit_code"] != 0:
-        # 2. Run the fix in the sandbox
-        run_in_sandbox(path, ["ruff", "check", "--fix", "."])
+    # if response["exit_code"] != 0:
+    #     # 2. Run the fix in the sandbox
+    #     run_in_sandbox(path, ["ruff", "check", "--fix", "."])
         
-        # 3. Get the DIFF (This is the 'Senior' part)
-        # We ask git: "What did the linter just change?"
-        diff_result = subprocess.run(
-            ["git", "diff"], cwd=path, capture_output=True, text=True
-        )
+    #     # 3. Get the DIFF (This is the 'Senior' part)
+    #     # We ask git: "What did the linter just change?"
+    #     diff_result = subprocess.run(
+    #         ["git", "diff"], cwd=path, capture_output=True, text=True
+    #     )
         
-        return {
-            "tool": "linter",
-            "status": "failed_but_fixable",
-            "fix_suggestion": diff_result.stdout, # <--- Pass this to the LLM/UI
-            "summary": "Found style issues. Suggested fixes are available."
-        }
+    #     return {
+    #         "tool": "linter",
+    #         "status": "failed_but_fixable",
+    #         "fix_suggestion": diff_result.stdout, # <--- Pass this to the LLM/UI
+    #         "summary": "Found style issues. Suggested fixes are available."
+    #     }
+    status = "passed" if response["exit_code"] == 0 else "failed"
+
+    errors = response["stdout"] if response["stdout"] else response["stderr"]
+
     
-    return {"tool": "linter", "status": "passed"}
+    return {
+        "tool": "linter",
+        "status": status,
+        "errors_found": errors,
+        "summary": "Code format is clean" if status == "passed" else "Linting errors detected"
+    }
+
 
 
 @shared_task
@@ -124,19 +145,22 @@ def run_security_scan(path):
     # -f json: Easy for our Agent to parse
     command = ["bandit", "-r", ".", "-lll", "-f", "json"]
     
+    # This command handles installation and execution sequentially inside the container
+    # command = ["sh", "-c", "pip install --quiet bandit && bandit -r . -lll -f json"]
+    
     # We can use a basic python image with bandit installed
-    response = run_in_sandbox(path, command, image="python:3.12-slim")
+    response = run_in_sandbox(path, command, image="odozi-tools:latest") # Use a pre-built image with bandit installed
     
     # Bandit returns exit code 1 if it finds vulnerabilities
     status = "passed" if response["exit_code"] == 0 else "failed"
+    errors = response["stdout"] if response["stdout"] else response["stderr"]
     
     return {
         "tool": "security_scan",
         "status": status,
-        "vulnerabilities": response["stdout"], # JSON list of issues
-        "summary": "No critical vulnerabilities found" if status == "passed" else "Critical issues detected!"
+        "vulnerabilities": errors,
+        "summary": "Security scan cleared" if status == "passed" else "Vulnerabilities detected!"
     }
-
 
 
 @shared_task

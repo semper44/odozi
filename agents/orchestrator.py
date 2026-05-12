@@ -25,7 +25,7 @@ def start_agentic_workflow(repo_url, branch, base_branch="main"):
     try:
         # Pass the user-defined base branch into the diff logic
         diff = ws.get_diff(base_branch=base_branch)
-        print(f"📊 diff {diff}...")
+        # print(f"📊 diff {diff}...")
         
         actions_json = {"run_tests": True, "check_security": True, "run_lint": True} # Placeholder for LLM output
         # 3. CALLING THE TASK
