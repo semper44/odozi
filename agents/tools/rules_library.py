@@ -1,21 +1,23 @@
+# rules_library.py
+
 LIBRARY = {
     "check_auth": """
 rules:
   - id: odozi-missing-auth-decorator
     languages: [python]
     severity: ERROR
-    message: "Critical: Function '$FUNC' is missing the @login_required decorator."
+    message: "Critical: Function '$FUNC' is missing the @{decorator_name} decorator."
     patterns:
       - pattern: |
           def $FUNC(...):
               ...
       - pattern-not-inside: |
-          @login_required
+          @{decorator_name}
           def $FUNC(...):
               ...
       - metavariable-regex:
           metavariable: $FUNC
-          regex: ^(post_|api_).*
+          regex: '^({function_prefix}).*'
 """,
 
     "check_required_call": """
@@ -23,16 +25,32 @@ rules:
   - id: odozi-missing-required-call
     languages: [python]
     severity: ERROR
-    message: "Function $FUNC matches keyword 'payment' but is missing the required 'atomic' call."
+    message: "Function $FUNC matches keyword '{keyword}' but is missing the required '{required_call}' call."
     patterns:
-      # 1. Target functions with the keyword in the name
-      - pattern-regex: def .*(?i)payment.*\(.*\):
-      # 2. Filter out functions that DO have the required call
+      - pattern-regex: 'def .*(?i){keyword}.*\\(.*\\):'
       - pattern-not-inside: |
           def $FUNC(...):
               ...
-              transaction.atomic(...)
+              {required_call}(...)
               ...
+""",
+
+    "check_function_length": """
+rules:
+  - id: odozi-function-too-large
+    languages: [python]
+    severity: WARNING
+    message: "Function $FUNC matches keyword '{keyword}' but exceeds the {max_lines}-line limit."
+    patterns:
+      - pattern: |
+          def $FUNC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: '(?i).*{keyword}.*'
+      - metavariable-comparison:
+          metavariable: $FUNC
+          comparison: (int(value.end_line) - int(value.start_line)) > {max_lines}
 """,
 
     "check_class_length": """
@@ -40,16 +58,14 @@ rules:
   - id: odozi-class-too-large
     languages: [python]
     severity: WARNING
-    message: "Class $CLASS inherits from BaseClassName but exceeds the 100-line limit."
+    message: "Class $CLASS inherits from {parent_class} but exceeds the {max_lines}-line limit."
     patterns:
-      # 1. Target classes inheriting from a specific parent
       - pattern: |
-          class $CLASS(..., BaseClassName, ...):
+          class $CLASS(..., {parent_class}, ...):
               ...
-      # 2. Calculate the line delta
       - metavariable-comparison:
           metavariable: $CLASS
-          comparison: (int(value.end_line) - int(value.start_line)) > 100
+          comparison: (int(value.end_line) - int(value.start_line)) > {max_lines}
 """,
 
     "check_error_handling": """
@@ -57,9 +73,9 @@ rules:
   - id: odozi-missing-try-except-request
     languages: [python]
     severity: ERROR
-    message: "Unsafe Request: 'requests.post' should be wrapped in a try/except block to handle network failures."
+    message: "Unsafe Execution: '{risky_call}' should be wrapped in a try/except block to handle execution failures."
     patterns:
-      - pattern: requests.post(...)
+      - pattern: '{risky_call}(...)'
       - pattern-not-inside: |
           try:
               ...
@@ -72,15 +88,12 @@ rules:
   - id: odozi-n-plus-one-query
     languages: [python]
     severity: WARNING
-    message: "Performance Alert: Database query detected inside a loop. Consider using select_related() or bulk_create()."
+    message: "Performance Alert: Database operations using '{orm_method}' detected inside a loop."
     patterns:
       - pattern-inside: |
           for $X in $Y:
               ...
-      - pattern-either:
-          - pattern: $MODEL.objects.get(...)
-          - pattern: $MODEL.objects.filter(...)
-          - pattern: $MODEL.objects.create(...)
+      - pattern: '$MODEL.{orm_method}(...)'
 """,
 
     "check_pii": """
@@ -88,13 +101,11 @@ rules:
   - id: odozi-pii-leakage
     languages: [python]
     severity: WARNING
-    message: "Potential PII Leak: Variable $VAR might contain sensitive data and should not be logged."
+    message: "Potential PII Leak: Variable $VAR might contain sensitive data and should not be passed to {logging_method}."
     patterns:
-      - pattern-either:
-          - pattern: logger.info(..., $VAR, ...)
-          - pattern: print(..., $VAR, ...)
+      - pattern: '{logging_method}(..., $VAR, ...)'
       - metavariable-regex:
           metavariable: $VAR
-          regex: (?i).*(password|secret|token|email|ssn).*
+          regex: '(?i).*({sensitive_keywords}).*'
 """,
 }

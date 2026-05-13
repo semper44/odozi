@@ -1,9 +1,22 @@
-# Dockerfile.ci
 FROM python:3.12-slim
 
-# Install ruff and bandit once during build time
-RUN pip install --no-cache-dir ruff bandit semgrep
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-
+# Install ONLY the core frameworks so manage.py can resolve its imports
+RUN pip install --no-cache-dir \
+    django \
+    djangorestframework \
+    ruff \
+    bandit \
+    semgrep \
+    pytest \
+    pytest-json-report \
+    pytest-django \
+    pytest-cov \
+    mypy \
+    django-stubs \
+    djangorestframework-stubs \
+    detect-secrets

@@ -14,7 +14,6 @@ remove the numbers in the comments and rewrite every comment that suggests that 
 def start_agentic_workflow(repo_url, branch, base_branch="main"):
     # 1. Setup workspace (Manual creation since Celery needs it to persist)
     ws = CIWorkspace(repo_url, branch)
-    print("🚀 [ORCHESTRATOR] Initializing secure git workspace...")
     ws.setup_persistent_folder() # Create folder and clone
     print(f"✅ [ORCHESTRATOR] Clone complete! Repository hosted at: {ws.root_dir}")
 
@@ -27,7 +26,15 @@ def start_agentic_workflow(repo_url, branch, base_branch="main"):
         diff = ws.get_diff(base_branch=base_branch)
         # print(f"📊 diff {diff}...")
         
-        actions_json = {"run_tests": True, "check_security": True, "run_lint": True, "check_ast":True} # Placeholder for LLM output
+        actions_json = {"run_tests": True, "check_security": True, 
+                        "run_lint": True, "check_ast":True,
+                        # "check_auth": True, "check_pii": True,
+                        # "check_required_call": True, "check_class_length": True,
+                        # "check_error_handling": True, "check_n_plus_one": True,
+                        "run_mypy": True, "scan_secrets": True,
+                        "check_migrations": True, 
+                        
+                        } # Placeholder for LLM output
         # 3. CALLING THE TASK
         # Use .delay() to push the job to Redis. 
         # The worker will pick up 'run_ci_suite' and then fan out the tools.
