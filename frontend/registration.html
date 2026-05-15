@@ -1,0 +1,22 @@
+<!-- HTML Button -->
+<button id="github-login-btn">Register / Login with GitHub</button>
+
+<script src="https://jquery.com"></script>
+<script>
+$(document).ready(function() {
+    $('#github-login-btn').on('click', function(e) {
+        e.preventDefault();
+        
+        // Define your OAuth parameters
+        const clientId = "YOUR_GITHUB_CLIENT_ID"; 
+        const redirectUri = "http://127.0.0"; // Your frontend URL handling the return
+        const scope = "user:email"; // Request access to user's email address
+        
+        // Construct the GitHub authorization URL
+        const githubAuthUrl = `https://github.com{clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
+        
+        // Send user to GitHub
+        window.location.href = githubAuthUrl;
+    });
+});
+</script>

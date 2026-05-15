@@ -1,0 +1,78 @@
+name: Agentic Mixed Orchestration Suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      tools_list:
+        description: 'JSON matrix array'
+        required: true
+        type: string # Example: '["pytest", "ruff", "bandit", "odozi_visitors"]'
+      custom_script_payload:
+        description: 'Compiled OdoziVisitor class code and file walker'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  execute-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: ${{ fromJSON(inputs.tools_list) }}
+
+    steps:
+      - name: Check out repo code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Eco-System Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install django djangorestframework pytest pytest-json-report pytest-cov ruff bandit
+
+      # =========================================================================
+      # LAYER A: STANDARD OUT-OF-THE-BOX CLI TOOLS
+      # =========================================================================
+      - name: Run Pytest
+        if: matrix.tool == 'pytest'
+        env:
+          PYTEST_ADDOPTS: "-c /dev/null"
+        run: |
+          echo "=== OUTPUT_START ==="
+          pytest --json-report --json-report-file=report.json --cov=. --cov-report=json || true
+          tail -c 2000 report.json || true
+          echo "=== OUTPUT_END ==="
+
+      - name: Run Ruff Linter
+        if: matrix.tool == 'ruff'
+        run: |
+          echo "=== OUTPUT_START ==="
+          ruff check --output-format json . || true
+          echo "=== OUTPUT_END ==="
+
+      - name: Run Bandit Security
+        if: matrix.tool == 'bandit'
+        run: |
+          echo "=== OUTPUT_START ==="
+          bandit -r . -lll -f json || true
+          echo "=== OUTPUT_END ==="
+
+      # =========================================================================
+      # LAYER B: CUSTOM Python/AST CODES
+      # =========================================================================
+      - name: Run Custom Odozi Code Engine
+        if: matrix.tool == 'odozi_visitors'
+        run: |
+          # 1. Write the payload string from the API directly into a runner script
+          echo "${{ inputs.custom_script_payload }}" > odozi_runner.py
+          
+          # 2. Execute it natively with standard Python
+          echo "=== OUTPUT_START ==="
+          python odozi_runner.py || true
+          echo "=== OUTPUT_END ==="

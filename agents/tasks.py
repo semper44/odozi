@@ -5,7 +5,10 @@ import os
 import requests
 import uuid
 import json
-from .tools.rules_library import LIBRARY
+from .custom_functions.rules_library import LIBRARY
+import inspect
+from .custom_functions.rules_registry import AST_TOOL_REGISTRY
+from .custom_functions import rule_classes
 # Celery tasks (the parallel tools)
 
 
@@ -486,33 +489,6 @@ def run_secret_scanning(path):
     }
 
 
-# @shared_task
-# def run_migration_check(path):
-#     # Find manage.py inside the workspace path (handles nested projects)
-#     manage_py_dir = "/app"
-#     for root, dirs, files in os.walk(path):
-#         if "manage.py" in files:
-#             # Convert host system path to container path format
-#             relative_subfolder = os.path.relpath(root, path)
-#             manage_py_dir = "/app" if relative_subfolder == "." else f"/app/{relative_subfolder}"
-#             break
-
-#     command = ["python", f"{manage_py_dir}/manage.py", "makemigrations", "--check", "--dry-run"]
-    
-#     response = run_in_sandbox(path, command, image="odozi-tools:latest")
-    
-#     status = "passed" if response["exit_code"] == 0 else "failed"
-#     errors = response["stdout"] if response["stdout"] else response["stderr"]
-
-#     return {
-#         "tool": "migration_consistency",
-#         "status": status,
-#         "errors_found": errors,
-#         "raw_log": response["stdout"] if response["stdout"] else response["stderr"],
-#         "summary": "Database schema definitions match model states" if status == "passed" else "Missing database migration files!"
-#     }
-
-
 @shared_task
 def run_migration_check(path):
     """
@@ -601,66 +577,6 @@ user_payload = {
 
 
 
-# @shared_task
-# def run_ci_suite(path, actions):
-#     # Create a list of tasks based on what the LLM said
-#     job_list = []
-
-#     # if actions.get("run_tests"):
-#     #     job_list.append(run_pytest.s(path))
-#     if actions.get("run_lint"):
-#         job_list.append(run_lint_check.s(path))
-#     if actions.get("check_security"):
-#         job_list.append(run_security_scan.s(path))
-#     # if actions.get("check_auth"):
-#     #     job_list.append(run_custom_semgrep.s(path, LIBRARY["check_auth"]))
-
-#     # if actions.get("check_pii"):
-#     #     job_list.append(run_custom_semgrep.s(path, LIBRARY["check_pii"]))
-
-#     # if actions.get("check_required_call"):
-#     #     job_list.append(run_custom_semgrep.s(path, LIBRARY["check_required_call"]))
-
-#     # if actions.get("check_class_length"):
-#     #     job_list.append(run_custom_semgrep.s(path, LIBRARY["check_class_length"]))
-
-#     # if actions.get("check_error_handling"):
-#     #     job_list.append(run_custom_semgrep.s(path, LIBRARY["check_error_handling"]))
-
-#     # if actions.get("check_n_plus_one"):
-#     #     job_list.append(run_custom_semgrep.s(path, LIBRARY["check_n_plus_one"]))
-
-#     constraints_to_run = user_payload.get("constraints", [])
-#     combined_yaml = "rules:\n"
-
-#     for item in constraints_to_run:
-#         rule_type = item.get("type")
-#         params = item.get("params", {})
-
-#         if rule_type in LIBRARY:
-#             raw_template = LIBRARY[rule_type]
-#             formatted_rule = raw_template.format(**params)
-            
-#             # 2. Extract lines after 'rules:' to append neatly
-#             rule_lines = formatted_rule.strip().split("\n")
-#             for line in rule_lines:
-#                 if not line.strip().startswith("rules:"):
-#                     combined_yaml += f"{line}\n"
-    
-#     # 3. Launch EXACTLY ONE sandbox task containing all rules simultaneously
-#     # This bypasses the chord entirely and eliminates Docker startup overhead!
-#     run_custom_semgrep.delay(path, combined_yaml)
-    
-
-#     if not job_list:
-#         return "No tasks to execute"
-    
-#      # Chord: (Group of tasks) | (Final task to run at the end)
-#     callback = cleanup_and_report.s(path)
-#     workflow = chord(job_list)(callback)
-#     return "Workflow Started"
-
-
 @shared_task
 def run_ci_suite(path, actions):
     job_list = []
@@ -713,6 +629,102 @@ def run_ci_suite(path, actions):
 
 
 
+
+# Inside agents/tasks.py
+
+import textwrap  # Built-in standard library
+
+@shared_task
+def run_agentic_pipeline(repo_owner, repo_name, git_token, commit_sha, user_requested_rules):
+    base_classes_text = inspect.getsource(rule_classes)
+      # 1. Initialize the empty list explicitly
+    visitor_instances_lines = []
+    
+    # 2. Extract rules from the user input and populate the list
+    for rule in user_requested_rules:
+        rule_key = rule["rule_key"]
+        params = rule["params"]
+        
+        # Get the actual class from your registry dictionary
+        if rule_key in AST_TOOL_REGISTRY:
+            class_name = AST_TOOL_REGISTRY[rule_key].__name__
+            # Add 8 spaces at the front to match the indented formatting inside visitors = [ ... ]
+            line = f"            {class_name}({json.dumps(params)}),"
+            visitor_instances_lines.append(line)
+    # ... your visitor_instances_lines extraction logic here ...
+    visitors_code_block = "\n".join(visitor_instances_lines)
+
+    # 1. Indent this normally! Clean, easy to read, no edge alignment required.
+    raw_template = f"""
+    if __name__ == "__main__":
+        import os
+        import json
+        
+        visitors = [
+    {visitors_code_block}
+        ]
+        
+        all_findings = []
+        
+        for root, dirs, files in os.walk("."):
+            if "venv" in root or ".git" in root or "migrations" in root:
+                continue
+            for file in files:
+                if file.endswith(".py") and file != "odozi_runner.py":
+                    full_path = os.path.join(root, file)
+                    try:
+                        with open(full_path, "r", encoding="utf-8") as f:
+                            code = f.read()
+                        
+                        for visitor in visitors:
+                            findings = visitor.analyze_file(full_path, code)
+                            all_findings.extend(findings)
+                    except Exception:
+                        continue
+                        
+        print(json.dumps({{"tool": "odozi_visitors", "findings": all_findings}}))
+    """
+
+    # 2. This function automatically shifts everything perfectly to the left margin!
+    execution_loop_template = textwrap.dedent(raw_template)
+
+    # 3. Glue and write
+    final_payload_string = base_classes_text.strip() + "\n\n" + execution_loop_template.strip()
+    
+    with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
+        debug_file.write(final_payload_string)
+        
+    print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
+
+    # =========================================================================
+    # LOCAL DEBUG / INSPECTION STEP
+    # =========================================================================
+    # This creates a local file named 'test_output_runner.py' in your current working folder
+    with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
+        debug_file.write(final_payload_string)
+
+    print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
+    # =========================================================================
+
+    # 5. SHIP TO GITHUB ACTIONS API
+    # selected_tools = ["pytest", "ruff", "bandit", "odozi_visitors"]
+    
+    # url = f"github.com{repo_owner}/{repo_name}/actions/workflows/orchestrator.yaml/dispatches"
+    # headers = {"Authorization": f"Bearer {git_token}", "Accept": "application/vnd.github+json"}
+    
+    # api_payload = {
+    #     "ref": commit_sha,
+    #     "inputs": {
+    #         "tools_list": json.dumps(selected_tools),
+    #         "custom_script_payload": final_payload_string # The combined file sent as text
+    #     }
+    # }
+    
+    # requests.post(url, json=api_payload, headers=headers)
+
+
+
+
 @shared_task
 def cleanup_and_report(results, path):
     # Runing the transformation code
@@ -720,14 +732,6 @@ def cleanup_and_report(results, path):
     print(f"📝 [SIMPLIFIED REPORT]:\n{json.dumps(clean_report, indent=2)}")
     shutil.rmtree(path) # FINALLY delete the sandbox
 
-# @shared_task
-# def cleanup_and_report(results, path):
-#     # 'results' looks like: [{"tool": "pytest", "status": "passed"}, {"tool": "security", ...}]
-#     for report in results:
-#         if report['status'] == 'failed':
-#             print(f"Alert: {report['tool']} found issues!")
-    
-#     # Now safe to delete
-#     shutil.rmtree(path)
+
 
 

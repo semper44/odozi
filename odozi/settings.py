@@ -40,6 +40,15 @@ INSTALLED_APPS = [
 
     # 3rd party
     'rest_framework',
+    'django.contrib.sites',
+    'rest_framework.authtoken',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'dj_rest_auth',
+    'dj_rest_auth.registration',
+    'allauth.socialaccount.providers.github',
+
 ]
 
 MIDDLEWARE = [
@@ -50,6 +59,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+
+    'allauth.account.middleware.AccountMiddleware'
 ]
 
 ROOT_URLCONF = 'odozi.urls'
@@ -116,6 +127,49 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
+
+SITE_ID = 1
+
+# Configure DRF to use JWT and dj-rest-auth settings
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'dj_rest_auth.jwt_auth.JWTCookieAuthentication',
+    ],
+}
+# Authentication Backends
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+# GitHub-Only Constraints (Add to settings.py)
+ACCOUNT_ADAPTER = 'allauth.account.adapter.DefaultAccountAdapter'
+SOCIALACCOUNT_PROVIDERS = {
+    'github': {
+        'SCOPE': ['user', 'repo', 'read:org'],
+    }
+}
+
+# 1. Use a custom adapter to block password-based registration only
+ACCOUNT_ADAPTER = 'odozi.adapters.NoPasswordRegistrationAdapter'
+
+# 2. Allauth Core Setup
+ACCOUNT_AUTHENTICATION_METHOD = "email"
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_EMAIL_VERIFICATION = "none" # Change to "mandatory" or "optional" later if needed
+
+# 3. Handle GitHub Handshake Automatically
+SOCIALACCOUNT_AUTO_SIGNUP = True
+
+# 4. Django REST Framework & JWT Configuration
+REST_USE_JWT = True
+JWT_AUTH_COOKIE = 'my-app-auth'          # Stores access token in cookie
+JWT_AUTH_REFRESH_COOKIE = 'my-refresh'   # Stores refresh token in cookie
+JWT_AUTH_HTTPONLY = True                 # Protects against XSS attacks
+JWT_AUTH_SECURE = True                   # Enforces HTTPS (Set to False ONLY during local development)
+
+
 
 STATIC_URL = 'static/'
 
