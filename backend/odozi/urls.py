@@ -15,12 +15,19 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
-from .views import ReceiveInput, github_webhook
+from django.urls import path, include
+
+from account_profile.views import github_webhook
+from .views import ReceiveInput
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("webhook/", github_webhook),
+    path('account/', include("account_profile.urls")),
+    # path('django_python/', include("django_python.urls")),
     path("receive_input/", ReceiveInput.as_view(), name="receive_input"),
 
 ]
+
+

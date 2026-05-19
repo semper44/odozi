@@ -4,3 +4,5 @@ dockerignore
 .dockerignore
 linuvenv
 linuvenv/
+odozy-ci-agent.2026-05-17.private-key.pem
+backend/.env

@@ -11,6 +11,9 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import os
+from decouple import config
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,6 +40,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    # apps
+    'account_profile',
+    'django_python',
 
     # 3rd party
     'rest_framework',
@@ -151,12 +158,11 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 
 # 1. Use a custom adapter to block password-based registration only
-ACCOUNT_ADAPTER = 'odozi.adapters.NoPasswordRegistrationAdapter'
+ACCOUNT_ADAPTER = 'account_profile.NoPasswordRegistrationAdapter.NoPasswordRegistrationAdapter'
 
 # 2. Allauth Core Setup
-ACCOUNT_AUTHENTICATION_METHOD = "email"
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_LOGIN_METHODS = {'email'}
+ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
 ACCOUNT_EMAIL_VERIFICATION = "none" # Change to "mandatory" or "optional" later if needed
 
 # 3. Handle GitHub Handshake Automatically
@@ -171,8 +177,28 @@ JWT_AUTH_SECURE = True                   # Enforces HTTPS (Set to False ONLY dur
 
 
 
+GITHUB_APP_CLIENT_SECRET = config('GITHUB_APP_CLIENT_SECRET')
+print(GITHUB_APP_CLIENT_SECRET, "hhhhh")
+
+
 STATIC_URL = 'static/'
 
 CELERY_BROKER_URL = "redis://localhost:6379/0"
 
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+
+
+
+
+
+# 1. Store the exact local file path configuration
+PRIVATE_KEY_PATH = os.path.join(BASE_DIR, "odozi-app-key.pem")
+
+# 2. Open and read the file text data into memory securely
+if os.path.exists(PRIVATE_KEY_PATH):
+    with open(PRIVATE_KEY_PATH, "r", encoding="utf-8") as key_file:
+        GITHUB_APP_PRIVATE_KEY = key_file.read()
+else:
+    # Fallback to prevent server crashes if the file isn't found locally
+    GITHUB_APP_PRIVATE_KEY = ""
+

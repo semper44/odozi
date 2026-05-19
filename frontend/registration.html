@@ -1,22 +1,39 @@
-<!-- HTML Button -->
-<button id="github-login-btn">Register / Login with GitHub</button>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Auth</title>
+</head>
+<body>
 
-<script src="https://jquery.com"></script>
-<script>
-$(document).ready(function() {
-    $('#github-login-btn').on('click', function(e) {
-        e.preventDefault();
-        
-        // Define your OAuth parameters
-        const clientId = "YOUR_GITHUB_CLIENT_ID"; 
-        const redirectUri = "http://127.0.0"; // Your frontend URL handling the return
-        const scope = "user:email"; // Request access to user's email address
-        
-        // Construct the GitHub authorization URL
-        const githubAuthUrl = `https://github.com{clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
-        
-        // Send user to GitHub
-        window.location.href = githubAuthUrl;
+    <button id="github-login-btn">Register / Login with GitHub</button> 
+
+    <!-- Cleaned up script tags: only one jQuery inclusion is necessary -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    
+    <script>
+    $(document).ready(function() {
+        $('#github-login-btn').on('click', function(e) {
+            e.preventDefault();
+            
+            const clientId = "Iv23liUEbKH7D09scRIZ"; 
+            
+            // # FIXED: Target the exact python local server port and callback file
+            const redirectUri = "http://127.0.0.1:8000/api/auth/github/callback/"; 
+            // ✅ FIXED: Expanded scope permissions to allow running workflows and cloning repositories
+            const scope = "repo workflow user:email"; 
+            
+            // # FIXED: Corrected the endpoint URL path and string interpolation parameters
+            // MUST use backticks (``), NOT normal quotes ('')
+            const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
+            console.log(githubAuthUrl);
+            
+            // Redirect the user to GitHub
+            window.location.href = githubAuthUrl;
+
+        });
     });
-});
-</script>
+    </script>
+</body>
+</html>
