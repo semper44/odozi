@@ -28,9 +28,13 @@ SECRET_KEY = 'django-insecure-b%qzdyvx!qapu)dok06xh)ydevyxl*ee(ae)y#^12&02=qp+p6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+]
 
-
+# CORS
+CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http://127.0.0.1:8000",'http://127.0.0.1']
 # Application definition
 
 INSTALLED_APPS = [
@@ -55,6 +59,7 @@ INSTALLED_APPS = [
     'dj_rest_auth',
     'dj_rest_auth.registration',
     'allauth.socialaccount.providers.github',
+    'corsheaders',
 
 ]
 
@@ -64,6 +69,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 
@@ -75,7 +81,10 @@ ROOT_URLCONF = 'odozi.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [
+            BASE_DIR / "templates",
+
+        ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [

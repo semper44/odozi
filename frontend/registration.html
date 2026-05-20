@@ -20,13 +20,14 @@
             const clientId = "Iv23liUEbKH7D09scRIZ"; 
             
             // # FIXED: Target the exact python local server port and callback file
-            const redirectUri = "http://127.0.0.1:8000/api/auth/github/callback/"; 
+            const redirectUri = "http://127.0.0.1:8000/account/api/auth/github/callback/"; 
             // ✅ FIXED: Expanded scope permissions to allow running workflows and cloning repositories
             const scope = "repo workflow user:email"; 
             
             // # FIXED: Corrected the endpoint URL path and string interpolation parameters
             // MUST use backticks (``), NOT normal quotes ('')
-            const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
+            // ✅ Wrap both redirect_uri AND scope inside encodeURIComponent()
+            const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
             console.log(githubAuthUrl);
             
             // Redirect the user to GitHub

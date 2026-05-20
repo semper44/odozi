@@ -25,7 +25,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path("webhook/", github_webhook),
     path('account/', include("account_profile.urls")),
-    # path('django_python/', include("django_python.urls")),
+    path('dashboard/', include("django_python.urls")),
     path("receive_input/", ReceiveInput.as_view(), name="receive_input"),
 
 ]

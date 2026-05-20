@@ -6,15 +6,19 @@ import hashlib
 import time
 import jwt
 import requests
+
+
+from django.shortcuts import get_object_or_404
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.conf import settings
-from rest_framework import generics
 from django.http import HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.shortcuts import redirect
 from django.contrib.auth import login
 from django.contrib.auth.models import User
+from rest_framework import generics
+from .models import UserProfileModel, Workspace, WorkspaceMembership
 
 
 
@@ -81,6 +85,7 @@ def verify_github_signature(request):
     
     # Use hmac.compare_digest to prevent timing attacks
     return hmac.compare_digest(expected_signature, signature_header)
+
 
 # ✅ FIX A: Restrict the endpoint securely to POST requests only
 @csrf_exempt
@@ -160,11 +165,13 @@ def github_callback_view(request):
         "client_id": client_id,
         "client_secret": client_secret,
         "code": code,
-        "redirect_uri": "http://127.0.0.1:8000/api/auth/github/callback/"
+        "redirect_uri": "http://127.0.0.1:8000/account/api/auth/github/callback/"
     }
 
     # Make the HTTP POST call to GitHub's token engine
     token_response = requests.post(token_url, json=token_payload, headers=token_headers)
+    print(token_response.status_code)
+    print(token_response.text)
     token_data = token_response.json()
 
     print("token_data", token_data)  # Debugging line to inspect the response from GitHub's token endpoint
@@ -207,26 +214,32 @@ def github_callback_view(request):
         return JsonResponse({"error": "Could not extract user details from profile"}, status=400)
 
     # 5. DB MANAGEMENT: Locate or create the user record in Django
+
     user, created = User.objects.get_or_create(
         username=github_username,
-        defaults={"email": github_email or ""}
+        defaults={
+            "email": github_email or ""
+        }
+    )
+    profile, _ = UserProfileModel.objects.get_or_create(
+        user=user
     )
 
+    profile.encrypted_access_token = token_data.get("access_token")
+    profile.encrypted_refresh_token = token_data.get("refresh_token")
+    profile.save()
+
     # Log the user into the active Django session layer
-    login(request, user)
+    login(request, user, backend='django.contrib.auth.backends.ModelBackend')
 
     # 6. SUCCESS: Send them back to your local frontend interface landing page
     # When using jQuery/Django Templates:
-    return redirect("/")
+    return redirect("/dashboard/")
     
     # When using React later, change the line above to redirect to your React app port:
     # return redirect(f"http://localhost:3000/dashboard/?token={access_token}")
 
 
-# agents/views.py
-from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
-from .models import WorkspaceMembership
 
 def revoke_developer_access(request, workspace_id, target_user_id):
     # 1. Enforce that only an active Admin of this specific workspace can execute a revoke command
@@ -253,5 +266,84 @@ def revoke_developer_access(request, workspace_id, target_user_id):
 
 
 
+@csrf_exempt
+@require_POST
+def github_installation_webhook(request):
+    """
+    Listens for real-time GitHub App installation events.
+    Creates the Workspace container and links the managing User.
+    """
+    # 1. Parse the incoming webhook body payload safely
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest("Malformed JSON payload")
 
-# Create your views here.
+    # 2. Verify this is explicitly an installation event step
+    event_type = request.headers.get('X-GitHub-Event')
+    if event_type != 'installation':
+        return JsonResponse({"status": "ignored", "message": f"Event {event_type} ignored by this endpoint"}, status=200)
+
+    action = payload.get("action")  # Can be "created", "deleted", or "suspend"
+    installation_data = payload.get("installation", {})
+    installation_id = installation_data.get("id")
+    
+    # Extract the company organization or personal profile username account slot
+    account_data = installation_data.get("account", {})
+    print("account_data", account_data)  # Debugging line to inspect the account data structure returned by GitHub
+    print(" ")
+    print(" ")
+    print(payload,"payload")  # Debugging line to inspect the entire payload structure returned by GitHub
+    github_account_name = account_data.get("login") # e.g., "benmore-tech" or "semper44"
+
+    if not installation_id or not github_account_name:
+        return JsonResponse({"error": "Missing critical architectural metadata"}, status=400)
+
+    # =========================================================================
+    # ACTION: CREATED (The User completes Step 2 Installation)
+    # =========================================================================
+    if action == "created":
+        # Look up which Django user profile owns this matching GitHub handle
+        try:
+            target_user = User.objects.get(username=github_account_name)
+        except User.DoesNotExist:
+            # Fallback fallback safety: if testing, map it to the first user or log it
+            target_user = User.objects.first() 
+            if not target_user:
+                return JsonResponse({"error": "No platform users exist to map this integration"}, status=404)
+
+        # Create or fetch the core organization workspace block container
+        workspace, ws_created = Workspace.objects.get_or_create(
+            installation_id=installation_id,
+            defaults={"name": github_account_name}
+        )
+
+        # Build or activate the member permission bridge mapping row
+        membership, mem_created = WorkspaceMembership.objects.get_or_create(
+            user=target_user,
+            workspace=workspace,
+            defaults={"role": "admin", "is_active": True}
+        )
+        
+        # If they were previously fired/deleted, restore access cleanly
+        if not membership.is_active:
+            membership.is_active = True
+            membership.save()
+
+        return JsonResponse({"status": "installed", "workspace_id": workspace.id})
+
+    # =========================================================================
+    # ACTION: DELETED (The Company Sacks Odozi or Uninstalls it on GitHub)
+    # =========================================================================
+    elif action == "deleted":
+        # Instantly locate and tear down the workspace to protect privacy compliance boundaries
+        try:
+            workspace = Workspace.objects.get(installation_id=installation_id)
+            # This cascades and toggles off memberships automatically via models design rules
+            workspace.delete() 
+            return JsonResponse({"status": "uninstalled_cleanly"})
+        except Workspace.DoesNotExist:
+            return JsonResponse({"status": "already_purged"}, status=200)
+
+    return JsonResponse({"status": "ignored_action", "action": action})
+
