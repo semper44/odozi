@@ -17,13 +17,13 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
-from account_profile.views import github_webhook
+from account_profile.views import github_push_webhook
 from .views import ReceiveInput
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path("webhook/", github_webhook),
+    path("push_webhook/", github_push_webhook),
     path('account/', include("account_profile.urls")),
     path('dashboard/', include("django_python.urls")),
     path("receive_input/", ReceiveInput.as_view(), name="receive_input"),

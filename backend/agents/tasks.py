@@ -5,10 +5,15 @@ import os
 import requests
 import uuid
 import json
+import time
+import jwt
+import base64
 from .custom_functions.rules_library import LIBRARY
 import inspect
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
+from django.conf import settings
+
 # Celery tasks (the parallel tools)
 
 
@@ -634,34 +639,269 @@ def run_ci_suite(path, actions):
 
 import textwrap  # Built-in standard library
 
-@shared_task
-def run_agentic_pipeline(repo_owner, repo_name, git_token, commit_sha, user_requested_rules):
-    base_classes_text = inspect.getsource(rule_classes)
-      # 1. Initialize the empty list explicitly
-    visitor_instances_lines = []
+# @shared_task
+# def run_agentic_pipeline(repo_owner, repo_name, git_token, commit_sha, user_requested_rules):
+#     base_classes_text = inspect.getsource(rule_classes)
+#       # 1. Initialize the empty list explicitly
+#     visitor_instances_lines = []
     
-    # 2. Extract rules from the user input and populate the list
+#     # 2. Extract rules from the user input and populate the list
+#     for rule in user_requested_rules:
+#         rule_key = rule["rule_key"]
+#         params = rule["params"]
+        
+#         # Get the actual class from your registry dictionary
+#         if rule_key in AST_TOOL_REGISTRY:
+#             class_name = AST_TOOL_REGISTRY[rule_key].__name__
+#             # Add 8 spaces at the front to match the indented formatting inside visitors = [ ... ]
+#             line = f"            {class_name}({json.dumps(params)}),"
+#             visitor_instances_lines.append(line)
+#     # ... your visitor_instances_lines extraction logic here ...
+#     visitors_code_block = "\n".join(visitor_instances_lines)
+
+#     # 1. Indent this normally! Clean, easy to read, no edge alignment required.
+#     raw_template = f"""
+#     if __name__ == "__main__":
+#         import os
+#         import json
+        
+#         visitors = [
+#     {visitors_code_block}
+#         ]
+        
+#         all_findings = []
+        
+#         for root, dirs, files in os.walk("."):
+#             if "venv" in root or ".git" in root or "migrations" in root:
+#                 continue
+#             for file in files:
+#                 if file.endswith(".py") and file != "odozi_runner.py":
+#                     full_path = os.path.join(root, file)
+#                     try:
+#                         with open(full_path, "r", encoding="utf-8") as f:
+#                             code = f.read()
+                        
+#                         for visitor in visitors:
+#                             findings = visitor.analyze_file(full_path, code)
+#                             all_findings.extend(findings)
+#                     except Exception:
+#                         continue
+                        
+#         print(json.dumps({{"tool": "odozi_visitors", "findings": all_findings}}))
+#     """
+
+#     # 2. This function automatically shifts everything perfectly to the left margin!
+#     execution_loop_template = textwrap.dedent(raw_template)
+
+#     # 3. Glue and write
+#     final_payload_string = base_classes_text.strip() + "\n\n" + execution_loop_template.strip()
+    
+#     with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
+#         debug_file.write(final_payload_string)
+        
+#     print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
+
+#     # =========================================================================
+#     # LOCAL DEBUG / INSPECTION STEP
+#     # =========================================================================
+#     # This creates a local file named 'test_output_runner.py' in your current working folder
+#     with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
+#         debug_file.write(final_payload_string)
+
+#     print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
+#     # =========================================================================
+
+#     # 5. SHIP TO GITHUB ACTIONS API
+#     # selected_tools = ["pytest", "ruff", "bandit", "odozi_visitors"]
+    
+#     # url = f"github.com{repo_owner}/{repo_name}/actions/workflows/orchestrator.yaml/dispatches"
+#     # headers = {"Authorization": f"Bearer {git_token}", "Accept": "application/vnd.github+json"}
+    
+#     # api_payload = {
+#     #     "ref": commit_sha,
+#     #     "inputs": {
+#     #         "tools_list": json.dumps(selected_tools),
+#     #         "custom_script_payload": final_payload_string # The combined file sent as text
+#     #     }
+#     # }
+    
+#     # requests.post(url, json=api_payload, headers=headers)
+
+
+
+
+def ensure_orchestrator_yaml_is_online(repo_owner, repo_name, git_token):
+    """
+    Ensures .github/workflows/orchestrator.yaml exists in the target repo.
+    Creates it automatically if missing.
+    """
+
+    url = (
+        f"https://api.github.com/repos/"
+        f"{repo_owner}/{repo_name}/contents/"
+        f".github/workflows/orchestrator.yaml"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {git_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+
+    # --------------------------------------------------
+    # STEP 2: Read local template
+    # --------------------------------------------------
+    yaml_file_path = os.path.join(
+        settings.BASE_DIR,
+        "agents",
+        "orchestrator.yaml"
+    )
+
+    try:
+        with open(yaml_file_path, "r", encoding="utf-8") as f:
+            yaml_content = f.read()
+
+    except FileNotFoundError:
+        print(f"ERROR: File not found -> {yaml_file_path}")
+        return False
+
+    # --------------------------------------------------
+    # STEP 3: Base64 encode content
+    # --------------------------------------------------
+    encoded_content = base64.b64encode(
+        yaml_content.encode("utf-8")
+    ).decode("utf-8")
+
+    # --------------------------------------------------
+    # STEP 4: Upload workflow file
+    # --------------------------------------------------
+    commit_payload = {
+        "message": "ci: initialize Odozi orchestrator workflow",
+        "content": encoded_content,
+
+        # IMPORTANT:
+        # Your repo appears to use master
+        "branch": "master"
+    }
+
+    # 2. Check if the file is already online
+    check_response = requests.get(url, headers=headers)
+    
+    if check_response.status_code == 200:
+        # File exists! Extract its current Version SHA hash key string from GitHub metadata
+        file_metadata = check_response.json()
+        current_sha = file_metadata.get("sha")
+        
+        # Senior Tip: Optional optimization loop boundary. 
+        # Decrypted content matching can be added here to bypass uploading if it hasn't changed.
+        
+        # Inject the mandatory version controller SHA token back into your payload!
+        commit_payload["sha"] = current_sha
+        print(f"YAML STATE: File exists online. Preparing file version rewrite using SHA: {current_sha}")
+        
+    elif check_response.status_code != 404:
+        print(f"YAML FAULT: Failed checking file status parameters: {check_response.text}")
+        return False
+
+    # 3. Issue the programmatic PUT update call securely
+    upload_response = requests.put(url, json=commit_payload, headers=headers)
+
+    if upload_response.status_code in [200, 201]:
+        print(f"🎉 SUCCESS: 'orchestrator.yaml' is fully synchronized online in {repo_name}!")
+        return True
+    else:
+        print(f"❌ UPLOAD FAULT [{upload_response.status_code}]: {upload_response.text}")
+        return False
+
+def get_installation_access_token(installation_id):
+    """
+    Uses your Private Key to mint a JWT, then exchanges it for a 
+    short-lived 1-hour installation access token from GitHub.
+    """
+    # 1. Prepare the cryptographic JWT claims payload
+    issued_at = int(time.time()) - 60  # Account for minor clock drifts (1 min ago)
+    expires_at = issued_at + (10 * 60) # JWTs have a maximum lifetime limit of 10 minutes
+    
+    payload = {
+        "iss": settings.ODOZI_APP_ID,  # Your GitHub App's unique identifier
+        "iat": issued_at,
+        "exp": expires_at,
+    }
+    
+    print(type(settings.ODOZI_APP_ID))
+    print(type(payload["iss"]))
+
+    # 2. Encode and sign the JWT using your multi-line RSA Private Key
+    encoded_jwt = jwt.encode(payload, settings.GITHUB_APP_PRIVATE_KEY, algorithm="RS256")
+    
+    # 3. Request the temporary installation token from GitHub
+    url = (
+        f"https://api.github.com/app/installations/{installation_id}/access_tokens"
+    )
+    headers = {
+            "Authorization": f"Bearer {encoded_jwt}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+
+        }
+    
+    response = requests.post(url, headers=headers)
+    print("Status:", response.status_code)
+    print("Response:", response.text)
+    
+    if response.status_code == 201:
+        # Success: Returns a dictionary containing your temporary token string
+        return response.json().get("token")
+    else:
+        raise Exception(f"Failed to generate installation token: {response.text}")
+
+
+
+@shared_task
+def run_agentic_pipeline(repo_owner, repo_name, installation_id, commit_sha, user_requested_rules):
+    """
+    Asynchronous platform dispatcher.
+    """
+    # =========================================================================
+    # ✅ STEP 0: GENERATE DYNAMIC 1-HOUR TOKEN VIA PRIVATE KEY
+    # =========================================================================
+    try:
+        # Trade installation_id + private key file for an active execution token
+        git_token = get_installation_access_token(installation_id)
+        print("SUCCESS: Fresh 1-hour installation token generated safely.")
+    except Exception as e:
+        print(f"CRITICAL: Token generation failed: {str(e)}")
+        return {"status": "error", "message": "Authentication token exchange failure"}
+
+    # =========================================================================
+    # STEP 1: SCRIPT STITCHING ENGINE (Your existing logic)
+    # =========================================================================
+    ensure_orchestrator_yaml_is_online(repo_owner, repo_name, git_token)
+    base_classes_text = inspect.getsource(rule_classes)
+    
+    # Strip any local manual __main__ loop if it exists in your file text
+    if 'if __name__ == "__main__":' in base_classes_text:
+        base_classes_text = base_classes_text.split('if __name__ == "__main__":')[0].strip()
+
+    visitor_instances_lines = []
     for rule in user_requested_rules:
         rule_key = rule["rule_key"]
         params = rule["params"]
         
-        # Get the actual class from your registry dictionary
         if rule_key in AST_TOOL_REGISTRY:
             class_name = AST_TOOL_REGISTRY[rule_key].__name__
-            # Add 8 spaces at the front to match the indented formatting inside visitors = [ ... ]
             line = f"            {class_name}({json.dumps(params)}),"
             visitor_instances_lines.append(line)
-    # ... your visitor_instances_lines extraction logic here ...
+            
     visitors_code_block = "\n".join(visitor_instances_lines)
 
-    # 1. Indent this normally! Clean, easy to read, no edge alignment required.
     raw_template = f"""
     if __name__ == "__main__":
         import os
         import json
         
         visitors = [
-    {visitors_code_block}
+{visitors_code_block}
         ]
         
         all_findings = []
@@ -685,43 +925,51 @@ def run_agentic_pipeline(repo_owner, repo_name, git_token, commit_sha, user_requ
         print(json.dumps({{"tool": "odozi_visitors", "findings": all_findings}}))
     """
 
-    # 2. This function automatically shifts everything perfectly to the left margin!
     execution_loop_template = textwrap.dedent(raw_template)
-
-    # 3. Glue and write
     final_payload_string = base_classes_text.strip() + "\n\n" + execution_loop_template.strip()
     
+    # Write files locally for debugging inspection
     with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
         debug_file.write(final_payload_string)
         
     print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
 
     # =========================================================================
-    # LOCAL DEBUG / INSPECTION STEP
+    # STEP 2: DISPATCH TO LIVE GITHUB API (Uncomment when ready to go live)
     # =========================================================================
-    # This creates a local file named 'test_output_runner.py' in your current working folder
-    with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
-        debug_file.write(final_payload_string)
-
-    print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
-    # =========================================================================
-
-    # 5. SHIP TO GITHUB ACTIONS API
-    # selected_tools = ["pytest", "ruff", "bandit", "odozi_visitors"]
+    selected_tools = ["pytest", "ruff", "bandit", "odozi_visitors"]
+    url = (
+        f"https://api.github.com/repos/"
+        f"{repo_owner}/{repo_name}/actions/workflows/"
+        f"orchestrator.yaml/dispatches"
+    )    
+    headers = {
+        "Authorization": f"Bearer {git_token}", 
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
     
-    # url = f"github.com{repo_owner}/{repo_name}/actions/workflows/orchestrator.yaml/dispatches"
-    # headers = {"Authorization": f"Bearer {git_token}", "Accept": "application/vnd.github+json"}
-    
-    # api_payload = {
-    #     "ref": commit_sha,
-    #     "inputs": {
-    #         "tools_list": json.dumps(selected_tools),
-    #         "custom_script_payload": final_payload_string # The combined file sent as text
-    #     }
-    # }
-    
-    # requests.post(url, json=api_payload, headers=headers)
-
+    api_payload = {
+        "ref": "master",
+        "inputs": {
+            "tools_list": json.dumps(selected_tools),
+            "custom_script_payload": final_payload_string 
+        }
+    }
+    print("DEBUG: Dispatching to GitHub API with payload:")
+    feedback_r = requests.post(url, json=api_payload, headers=headers)
+    if feedback_r.status_code == 204:
+        print("🎉 SUCCESS! GitHub successfully accepted the workflow dispatch request.")
+        return {"status": "success", "message": "Pipeline launched successfully in the cloud."}
+        
+    else:
+        # ✅ DEFENSIVE FIX: Print raw text instead of .json() to stop the JSONDecodeError crash
+        print(f"❌ GITHUB ERROR [{feedback_r.status_code}]: {feedback_r.text}")
+        return {
+            "status": "validation_error", 
+            "http_code": feedback_r.status_code, 
+            "github_raw_message": feedback_r.text
+        }
 
 
 

@@ -19,7 +19,11 @@ class UserProfileModel(models.Model):
 
 
 class Workspace(models.Model):
-    name = models.CharField(max_length=150) # e.g., "Benmore Technologies"
+    name = models.CharField(max_length=150, unique=True) # e.g., "Benmore Technologies"
+    owner = models.ForeignKey(
+        User, related_name="workspace_owner",
+        on_delete=models.CASCADE
+    )
     # user = models.ForeignKey(UserProfileModel, on_delete=models.CASCADE, related_name="github_integration")
     # 1. This is just a standard ID number, safe to keep as plain text
     installation_id = models.BigIntegerField(unique=True, db_index=True)    

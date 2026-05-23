@@ -187,7 +187,8 @@ JWT_AUTH_SECURE = True                   # Enforces HTTPS (Set to False ONLY dur
 
 
 GITHUB_APP_CLIENT_SECRET = config('GITHUB_APP_CLIENT_SECRET')
-print(GITHUB_APP_CLIENT_SECRET, "hhhhh")
+TOKEN_ENCRYPTION_KEY = config('TOKEN_ENCRYPTION_KEY')
+ODOZI_APP_ID = config('ODOZI_APP_ID')
 
 
 STATIC_URL = 'static/'
@@ -201,13 +202,19 @@ CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 
 
 # 1. Store the exact local file path configuration
-PRIVATE_KEY_PATH = os.path.join(BASE_DIR, "odozi-app-key.pem")
+PROJECT_ROOT = BASE_DIR.parent
 
+PRIVATE_KEY_PATH = os.path.join(PROJECT_ROOT, "odozy-ci-agent.2026-05-17.private-key.pem")
 # 2. Open and read the file text data into memory securely
 if os.path.exists(PRIVATE_KEY_PATH):
+    print("part66")
     with open(PRIVATE_KEY_PATH, "r", encoding="utf-8") as key_file:
         GITHUB_APP_PRIVATE_KEY = key_file.read()
 else:
     # Fallback to prevent server crashes if the file isn't found locally
     GITHUB_APP_PRIVATE_KEY = ""
 
+
+
+yaml_file_path = os.path.join(BASE_DIR, 'agents', 'orchestrator.yaml')
+print(yaml_file_path)
