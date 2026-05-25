@@ -9,7 +9,7 @@ on:
         description: 'The API target endpoint (Use Ngrok/LocalTunnel for local testing)'
         required: true
         type: string
-        default: 'https://twelve-worlds-enjoy.loca.lt'
+        default: 'https://social-items-hope.loca.lt'
       custom_script_payload:
         description: 'Compiled OdoziVisitor class code and file walker'
         required: false
@@ -125,13 +125,14 @@ jobs:
         if: always()
         run: |
           if [ -f "report.json" ]; then
-            curl -X POST "${{ inputs.backend_url }}/dashboard/results/"
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}"
-              -H "bypass-tunnel-reminder: true"
-              -F "run_id=${{ github.run_id }}" 
-              -F "repo=${{ github.repository }}" 
-              -F "tool=pytest" 
-              -F "file=@report.json"
+            curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \ 
+              -F "repo=${{ github.repository }}" \ 
+              -F "tool=pytest" \ 
+              -F "file=@report.json" 
           fi
           exit ${{ env.TEST_EXIT_CODE }}
 
@@ -175,6 +176,13 @@ jobs:
           python-version: '3.11'
       - name: Install Ruff
         run: pip install ruff
+
+      - name: Dump All GitHub Context Values
+        run: |
+          echo "=== DEBUG START ==="
+          echo '${{ toJson(github) }}'
+          echo "=== DEBUG END ==="
+
       - name: Run Ruff Linter
         run: |
           echo "=== OUTPUT_START ==="
@@ -184,8 +192,9 @@ jobs:
           curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
-            -F "run_id=${{ github.run_id }}" \
             -F "repo=${{ github.repository }}" \
+            -F "repo_owner=${{ github.repository_owner }}" \
+            -F "run_id=${{ github.run_id }}" \
             -F "tool=ruff" \
             -F "file=@ruff_report.json"
           echo "=== OUTPUT_END ==="
@@ -213,6 +222,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
             -F "run_id=${{ github.run_id }}" \
+            -F "repo_owner=${{ github.repository_owner }}" \
             -F "repo=${{ github.repository }}" \
             -F "tool=bandit" \
             -F "file=@bandit_report.json"
@@ -240,6 +250,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
             -F "run_id=${{ github.run_id }}" \
+            -F "repo_owner=${{ github.repository_owner }}" \
             -F "repo=${{ github.repository }}" \
             -F "tool=odozi_visitors" \
             -F "file=@odozi_report.json"

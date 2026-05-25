@@ -6,7 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 
 from agents.tasks import process_scan_payload_task
-from account_profile.models import GitHubRepository
+from account_profile.models import GitHubRepository, Workspace
 from .models import UserProfileModel
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.security import verify_signature
@@ -93,14 +93,14 @@ def receive_ci_results(request):
     print("")
     run_id = request.POST.get('run_id')
     repo_name = request.POST.get('repo')
+    repository_owner = request.POST.get('repo_owner')
     tool_type = request.POST.get('tool')
     uploaded_file = request.FILES.get('file')
 
     if not uploaded_file:
         return JsonResponse({'error': 'Missing file payload'}, status=400)
     
-    repo = GitHubRepository.objects.select_related('workspace').get(repo_full_name=repo_name)
-    target_workspace = repo.workspace
+    workspace = Workspace.objects.get(name = repository_owner)
             
 
     try:
@@ -108,7 +108,7 @@ def receive_ci_results(request):
         file_content = uploaded_file.read().decode('utf-8')
         
         # Trigger Celery background worker immediately (Takes ~2-5ms)
-        process_scan_payload_task.delay(run_id, request.user, target_workspace, repo_name, tool_type, file_content) # type: ignore
+        process_scan_payload_task.delay(run_id, request.user, workspace, repo_name, tool_type, file_content) # type: ignore
 
         return JsonResponse({'status': 'queued', 'message': 'Payload accepted for background processing'})
         

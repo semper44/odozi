@@ -31,7 +31,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "twelve-worlds-enjoy.loca.lt",
+    "social-items-hope.loca.lt",
 ]
 
 # CORS

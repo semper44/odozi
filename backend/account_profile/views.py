@@ -235,8 +235,18 @@ def github_callback_view(request):
         return JsonResponse({"error": "Could not extract user details from profile"}, status=400)
 
     if installation_id:
-        company = user_profile.get("company") + github_username  # Fallback to username if company field is empty
-        workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
+        workspace, created = Workspace.objects.get_or_create(
+            name = github_username,
+                # Django searches the DB using these lookup fields:
+            
+            # If not found, Django creates it using lookup fields + these defaults:
+            defaults={
+                "installation_id": installation_id,
+                "owner": request.user,
+                "github_account_name": github_username,
+            }
+        )
+        # workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
         W_Membership= WorkspaceMembership.objects.create(role="admin", workspace=workspace, user=request.user)
 
     # 5. DB MANAGEMENT: Locate or create the user record in Django

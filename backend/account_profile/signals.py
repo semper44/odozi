@@ -2,15 +2,14 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.auth import get_user_model
-from .models import Workspace, WorkspaceMembership
+from account_profile.models import Workspace, WorkspaceMembership
 
 User = get_user_model()
 
 @receiver(post_save, sender=User)
 def create_default_user_workspace(sender, instance, created, **kwargs):
     """
-    SENIOR DESIGN PATTERN: Automatically provisions a standard workspace 
-    for every new user instantly upon registration.
+    Automatically provisions a standard workspace for every new user instantly upon registration.
     """
     if created:
         # 1. Provision a standard workspace seamlessly
