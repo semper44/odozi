@@ -119,7 +119,7 @@ def github_push_webhook(request):
         ]
 
         # 4. HAND OFF TO CELERY: Trigger Phase 2 asynchronously out of sight
-        run_agentic_pipeline.delay(
+        run_agentic_pipeline.delay( #type: ignore
             repo_owner=repo_owner,
             repo_name=repo_name,
             default_branch=default_branch,

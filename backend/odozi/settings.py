@@ -31,7 +31,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "fluffy-cougars-mate.loca.lt",
+    "twelve-worlds-enjoy.loca.lt",
 ]
 
 # CORS

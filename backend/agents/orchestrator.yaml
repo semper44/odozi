@@ -9,7 +9,7 @@ on:
         description: 'The API target endpoint (Use Ngrok/LocalTunnel for local testing)'
         required: true
         type: string
-        default: 'https://fluffy-cougars-mate.loca.lt'
+        default: 'https://twelve-worlds-enjoy.loca.lt'
       custom_script_payload:
         description: 'Compiled OdoziVisitor class code and file walker'
         required: false
@@ -125,7 +125,13 @@ jobs:
         if: always()
         run: |
           if [ -f "report.json" ]; then
-            curl -X POST "${{ inputs.backend_url }}/dashboard/results/" -F "run_id=${{ github.run_id }}" -F "repo=${{ github.repository }}" -F "tool=pytest" -F "file=@report.json"
+            curl -X POST "${{ inputs.backend_url }}/dashboard/results/"
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}"
+              -H "bypass-tunnel-reminder: true"
+              -F "run_id=${{ github.run_id }}" 
+              -F "repo=${{ github.repository }}" 
+              -F "tool=pytest" 
+              -F "file=@report.json"
           fi
           exit ${{ env.TEST_EXIT_CODE }}
 
@@ -176,6 +182,7 @@ jobs:
           cat ruff_report.json
           
           curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
             -F "run_id=${{ github.run_id }}" \
             -F "repo=${{ github.repository }}" \
@@ -203,6 +210,7 @@ jobs:
           cat bandit_report.json
           
           curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
             -F "run_id=${{ github.run_id }}" \
             -F "repo=${{ github.repository }}" \
@@ -229,6 +237,7 @@ jobs:
           cat odozi_report.json
           
           curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
             -F "run_id=${{ github.run_id }}" \
             -F "repo=${{ github.repository }}" \

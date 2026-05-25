@@ -1,5 +1,6 @@
 from django.db import models, transaction
-from account_profile.models import UserProfileModel
+from account_profile.models import UserProfileModel, Workspace
+from django.contrib.auth.models import User
 
 
 class UserInputModel(models.Model):
@@ -21,7 +22,8 @@ class RepositoryScan(models.Model):
         ('passed', 'Passed'),
         ('failed', 'Failed'),
     ]
-    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="repo_user_profile")
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="repo_workspace")
     run_id = models.CharField(max_length=100, unique=True)
     repo = models.CharField(max_length=255)
     tool = models.CharField(max_length=50, choices=TOOL_CHOICES)

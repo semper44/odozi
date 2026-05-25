@@ -17,7 +17,6 @@ class UserProfileModel(models.Model):
         return f"{self.user.username}"
 
 
-
 class Workspace(models.Model):
     name = models.CharField(max_length=150, unique=True) # e.g., "Benmore Technologies"
     owner = models.ForeignKey(
@@ -35,6 +34,52 @@ class Workspace(models.Model):
 
     def __str__(self):
         return self.name
+
+
+
+class GitHubRepository(models.Model):
+    """
+    Represents an actual code repository.
+    """
+    # installation = models.ForeignKey(GitHubInstallation, on_delete=models.CASCADE, related_name="repositories")
+    
+    # GitHub's internal global database ID for this repo (e.g., 81729482)
+    # Crucial because users can rename their repos, but this ID never changes.
+    # github_id = models.BigIntegerField(unique=True)
+    workspace = models.ForeignKey(
+        Workspace, 
+        on_delete=models.CASCADE, 
+        related_name="repositories",
+        db_index=True
+    )
+    
+    repo_name = models.CharField(max_length=255)        # e.g., "Taskmaster"
+    repo_owner = models.CharField(max_length=255)       # e.g., "OdoziEngine"
+    
+    # Pre-calculated full slug field for ultra-fast database lookups
+    # Indexed to guarantee lightning-fast performance for your curl webhooks
+    repo_full_name = models.CharField(max_length=255, unique=True, db_index=True) # e.g., "OdoziEngine/Taskmaster"
+    
+    # Settings for your app orchestrator
+    is_active = models.BooleanField(default=True)
+    default_branch = models.CharField(max_length=100, default="main")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "GitHub Repository"
+        verbose_name_plural = "GitHub Repositories"
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.repo_full_name
+
+    def save(self, *args, **kwargs):
+        # Automatically enforce the standard slug layout format on save
+        self.repo_full_name = f"{self.repo_owner}/{self.repo_name}"
+        super().save(*args, **kwargs)
+
 
 
 # Governance levels: Admin (can invite/revoke), Developer (can only view logs)

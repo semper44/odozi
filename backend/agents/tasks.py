@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import textwrap
 import os
+import re
 import requests
 import uuid
 import json
@@ -952,7 +953,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
 
 
 @shared_task
-def process_scan_payload_task(run_id, repo, tool, raw_content_str):
+def process_scan_payload_task(run_id,test_initiator, workspace, repo, tool, raw_content_str):
     try:
         findings = []
         total_issues = 0
@@ -1017,6 +1018,8 @@ def process_scan_payload_task(run_id, repo, tool, raw_content_str):
             run_id=run_id,
             defaults={
                 'repo': repo,
+                'user':test_initiator,
+                'workspace': workspace,
                 'tool': tool,
                 'status': status,
                 'total_issues': total_issues,
