@@ -91,6 +91,7 @@ def github_push_webhook(request):
     if event_type == 'push':
         # For a push, the branch is parsed out of the reference string
         # branch = data.get('ref', '').split('/')[-1]
+
         repo_url = data.get('repository', {}).get('clone_url')
         default_branch = data.get('repository', {}).get('default_branch', 'master')
         base_branch = default_branch
@@ -118,6 +119,26 @@ def github_push_webhook(request):
             {"rule_key": "check_function_length", "params": {"keyword": "list", "max_lines": 1}}
         ]
 
+
+#         How to Fix the Pipeline Token Exchange
+# To ensure your dynamic code functions exactly like your hardcoded logic, you need to route the event loop exclusively through your GitHub App implementation framework.
+# Step 1: Update your Local Development Tunnel Target
+# Go to your GitHub Developer Settings -> GitHub Apps.
+# Select your App engine profile.
+# Scroll to the Webhook URL field configuration block.
+# Replace whatever old path is there with your current active localtunnel link: https://loca.lt.
+# Step 2: Remove Repository-Level Webhook Links
+# Go to your Taskmaster- code repository settings interface, open the Webhooks side tab, and Delete any manually created URL endpoints targeting your local machine. This ensures GitHub sends pure, App-authorized integration events containing genuine validation metadata.
+# Step 3: Implement Backend Fail-Safe Fallbacks
+# To protect your background Celery tasks from crashing when mixed payloads hit your webserver routing modules, implement a fallback pattern inside your view. If the incoming payload lacks a valid app context wrapper, fallback cleanly to your sandbox developer credential layout:
+# python
+#         # Extract the real App installation payload signature block
+#         installation_id = data.get("installation", {}).get("id")
+
+#         if not installation_id:
+            # DEFENSIVE PROGRAMMING: Fallback 
+
+
         # 4. HAND OFF TO CELERY: Trigger Phase 2 asynchronously out of sight
         run_agentic_pipeline.delay( #type: ignore
             repo_owner=repo_owner,
@@ -127,7 +148,7 @@ def github_push_webhook(request):
             commit_sha=commit_sha,
             target_branch=branch,
             ref_string=ref_string,
-            installation_id=134664223,
+            installation_id=135546524,
             user_requested_rules=mock_user_rules
         )
 
@@ -169,7 +190,7 @@ def github_callback_view(request):
         return JsonResponse({"error": "No authorization code returned from GitHub"}, status=400)
     installation_id = request.GET.get('installation_id')
     setup_action = request.GET.get('setup_action')
-    print(installation_id, setup_action)
+    print(installation_id, "jesu")
     # 2. Prepare the background request to trade the code for an Access Token
     # OAuth configuration credentials (keep your Client Secret in your settings.py env)
     client_id = "Iv23liUEbKH7D09scRIZ"

@@ -31,7 +31,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "social-items-hope.loca.lt",
+    "puny-books-clean.loca.lt",
 ]
 
 # CORS

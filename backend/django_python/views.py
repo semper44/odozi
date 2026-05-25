@@ -108,7 +108,7 @@ def receive_ci_results(request):
         file_content = uploaded_file.read().decode('utf-8')
         
         # Trigger Celery background worker immediately (Takes ~2-5ms)
-        process_scan_payload_task.delay(run_id, request.user, workspace, repo_name, tool_type, file_content) # type: ignore
+        process_scan_payload_task.delay(run_id, workspace.installation_id, repo_name, tool_type, file_content) # type: ignore
 
         return JsonResponse({'status': 'queued', 'message': 'Payload accepted for background processing'})
         

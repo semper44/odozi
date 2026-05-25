@@ -22,7 +22,6 @@ class RepositoryScan(models.Model):
         ('passed', 'Passed'),
         ('failed', 'Failed'),
     ]
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="repo_user_profile")
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="repo_workspace")
     run_id = models.CharField(max_length=100, unique=True)
     repo = models.CharField(max_length=255)

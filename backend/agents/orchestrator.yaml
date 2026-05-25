@@ -9,7 +9,7 @@ on:
         description: 'The API target endpoint (Use Ngrok/LocalTunnel for local testing)'
         required: true
         type: string
-        default: 'https://social-items-hope.loca.lt'
+        default: 'https://puny-books-clean.loca.lt'
       custom_script_payload:
         description: 'Compiled OdoziVisitor class code and file walker'
         required: false

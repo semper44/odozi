@@ -10,13 +10,15 @@ import json
 import time
 import jwt
 import base64
+import inspect
 from concurrent.futures import ThreadPoolExecutor
 from .custom_functions.rules_library import LIBRARY
-import inspect
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
 from django.conf import settings
 from django_python.models import RepositoryScan
+from account_profile.models import Workspace
+from django.contrib.auth.models import User
 
 # Celery tasks (the parallel tools)
 
@@ -953,7 +955,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
 
 
 @shared_task
-def process_scan_payload_task(run_id,test_initiator, workspace, repo, tool, raw_content_str):
+def process_scan_payload_task(run_id, workspace_id, repo, tool, raw_content_str):
     try:
         findings = []
         total_issues = 0
@@ -1014,12 +1016,13 @@ def process_scan_payload_task(run_id,test_initiator, workspace, repo, tool, raw_
         # =====================================================================
         # SAVE STRUCTURAL METRICS TO DATABASE
         # =====================================================================
+         # Fetch models locally inside the background thread using the IDs we passed
+        
         RepositoryScan.objects.update_or_create(
             run_id=run_id,
             defaults={
                 'repo': repo,
-                'user':test_initiator,
-                'workspace': workspace,
+                'workspace': workspace_id,
                 'tool': tool,
                 'status': status,
                 'total_issues': total_issues,
