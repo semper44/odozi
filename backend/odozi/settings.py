@@ -31,6 +31,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
+    "fluffy-cougars-mate.loca.lt",
 ]
 
 # CORS
@@ -189,6 +190,7 @@ JWT_AUTH_SECURE = True                   # Enforces HTTPS (Set to False ONLY dur
 GITHUB_APP_CLIENT_SECRET = config('GITHUB_APP_CLIENT_SECRET')
 TOKEN_ENCRYPTION_KEY = config('TOKEN_ENCRYPTION_KEY')
 ODOZI_APP_ID = config('ODOZI_APP_ID')
+ODOZI_WEBHOOK_SECRET = config('ODOZI_WEBHOOK_SECRET')
 
 
 STATIC_URL = 'static/'

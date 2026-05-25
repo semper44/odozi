@@ -27,25 +27,158 @@ class BaseOdoziVisitor(ast.NodeVisitor):
         })
 
 
-class AuthDecoratorVisitor(BaseOdoziVisitor):
-    """Checks if functions matching a prefix are missing a mandatory decorator."""
+class AuthenticationVisitor(BaseOdoziVisitor):
+
     def visit_FunctionDef(self, node):
-        prefix = self.params.get("function_prefix", "")
-        decorator_name = self.params.get("decorator_name", "")
-        
-        if re.match(f"^{prefix}", node.name):
-            has_decorator = False
-            for dec in node.decorator_list:
-                # Handle direct calls (@login_required) and factory calls (@permission_required('admin'))
-                dec_name = dec.id if isinstance(dec, ast.Name) else getattr(getattr(dec, 'func', None), 'id', None)
-                if dec_name == decorator_name:
-                    has_decorator = True
+
+        prefix = self.params.get(
+            "function_prefix",
+            ""
+        )
+
+        decorator_name = self.params.get(
+            "decorator_name",
+            "login_required"
+        )
+
+        if (
+            prefix
+            and not node.name.lower().startswith(
+                prefix.lower()
+            )
+        ):
+            return
+
+        has_auth_decorator = any(
+            getattr(dec, "id", None)
+            == decorator_name
+            for dec in node.decorator_list
+        )
+
+        if not has_auth_decorator:
+           self.findings.append(
+                {
+                    "rule": "missing_authentication",
+                    "type": "function",
+                    "name": node.name,
+                    "line": node.lineno,
+                    "message": (
+                        f"Function '{node.name}' "
+                        f"is missing {decorator_name}"
+                    )
+                }
+            )
+
+    def visit_ClassDef(self, node):
+        prefix = self.params.get(
+            "function_prefix",
+            ""
+        )
+
+        # Only inspect classes matching the requested prefix
+        if (
+            prefix
+            and not node.name.lower().startswith(
+                prefix.lower()
+            )
+        ):
+            return
+
+        auth_found = False
+
+        # --------------------------------------------------
+        # Check inheritance
+        # Example:
+        # class CreateTask(LoginRequiredMixin, APIView):
+        # --------------------------------------------------
+        AUTH_BASES = {
+            "LoginRequiredMixin",
+            "IsAuthenticated",
+            "TokenAuthentication",
+            "SessionAuthentication",
+            "JWTAuthentication",
+        }
+
+        for base in node.bases:
+
+            base_name = getattr(base, "id", None)
+
+            if base_name in AUTH_BASES:
+                auth_found = True
+                break
+
+        # --------------------------------------------------
+        # Check class attributes
+        #
+        # permission_classes = [IsAuthenticated]
+        # authentication_classes = [JWTAuthentication]
+        # --------------------------------------------------
+        if not auth_found:
+
+            for statement in node.body:
+
+                if not isinstance(statement, ast.Assign):
+                    continue
+
+                for target in statement.targets:
+
+                    target_name = getattr(
+                        target,
+                        "id",
+                        ""
+                    )
+
+                    if target_name in {
+                        "permission_classes",
+                        "authentication_classes"
+                    }:
+                        auth_found = True
+                        break
+
+                if auth_found:
                     break
-            
-            if not has_decorator:
-                self._add_finding("missing_auth_decorator", node, 
-                    f"Critical: Function '{node.name}' is missing the @{decorator_name} decorator.")
-        self.generic_visit(node)
+
+        # --------------------------------------------------
+        # Report if no authentication mechanism found
+        # --------------------------------------------------
+        if not auth_found:
+
+            self.findings.append(
+                {
+                    "rule": "missing_authentication",
+                    "type": "class",
+                    "name": node.name,
+                    "line": node.lineno,
+                    "message": (
+                        f"Class '{node.name}' "
+                        f"has no authentication configured"
+                    )
+                }
+            )
+
+
+    def analyze_file(
+        self,
+        file_path,
+        source_code
+    ):
+
+        # Only analyze views.py
+
+        if not file_path.endswith("views.py"):
+            return []
+
+        self.findings = []
+
+        try:
+            tree = ast.parse(source_code)
+
+        except SyntaxError:
+            return []
+
+        self.visit(tree)
+
+        return self.findings
 
 
 class RequiredCallVisitor(BaseOdoziVisitor):

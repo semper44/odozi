@@ -24,6 +24,7 @@ from odozi.utils.crypto import encrypt_token, decrypt_token
 from agents.tasks import run_agentic_pipeline
 
 
+
 def is_input_safe(user_text):
     # Block common shell injection characters
     forbidden_chars = [";", "&&", "||", ">", "<", "|", "$(", "{"]
@@ -113,16 +114,20 @@ def github_push_webhook(request):
         # ⚠️ MOCK MAPPING: In production, your AI agent / DB fetches what the user requested.
         # For this testing kickoff, we pass a default setup array.
         mock_user_rules = [
-            {"rule_key": "check_auth", "params": {"function_prefix": "api_", "decorator_name": "login_required"}},
-            {"rule_key": "check_function_length", "params": {"keyword": "fetch", "max_lines": 50}}
+            {"rule_key": "check_auth", "params": {"function_prefix": "create", "decorator_name": "login_required"}},
+            {"rule_key": "check_function_length", "params": {"keyword": "list", "max_lines": 1}}
         ]
 
         # 4. HAND OFF TO CELERY: Trigger Phase 2 asynchronously out of sight
         run_agentic_pipeline.delay(
             repo_owner=repo_owner,
             repo_name=repo_name,
+            default_branch=default_branch,
+            repo_data=repo_data,
+            commit_sha=commit_sha,
+            target_branch=branch,
+            ref_string=ref_string,
             installation_id=134664223,
-            commit_sha="master",
             user_requested_rules=mock_user_rules
         )
 
@@ -259,6 +264,8 @@ def github_callback_view(request):
     
     # When using React later, change the line above to redirect to your React app port:
     # return redirect(f"http://localhost:3000/dashboard/?token={access_token}")
+
+
 
 
 

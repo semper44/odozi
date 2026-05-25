@@ -1,6 +1,7 @@
 from celery import shared_task, group, chord
 import shutil
 import subprocess
+import textwrap
 import os
 import requests
 import uuid
@@ -8,11 +9,13 @@ import json
 import time
 import jwt
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from .custom_functions.rules_library import LIBRARY
 import inspect
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
 from django.conf import settings
+from django_python.models import RepositoryScan
 
 # Celery tasks (the parallel tools)
 
@@ -634,108 +637,33 @@ def run_ci_suite(path, actions):
 
 
 
+def workflow_exists(url, headers, branch):
+    response = requests.get(
+        url,
+        headers=headers,
+        params={"ref": branch}
+    )
 
-# Inside agents/tasks.py
+    if response.status_code == 200:
+        return {
+            "exists": False,
+            "sha": response.json().get("sha")
+        }
 
-import textwrap  # Built-in standard library
-
-# @shared_task
-# def run_agentic_pipeline(repo_owner, repo_name, git_token, commit_sha, user_requested_rules):
-#     base_classes_text = inspect.getsource(rule_classes)
-#       # 1. Initialize the empty list explicitly
-#     visitor_instances_lines = []
-    
-#     # 2. Extract rules from the user input and populate the list
-#     for rule in user_requested_rules:
-#         rule_key = rule["rule_key"]
-#         params = rule["params"]
-        
-#         # Get the actual class from your registry dictionary
-#         if rule_key in AST_TOOL_REGISTRY:
-#             class_name = AST_TOOL_REGISTRY[rule_key].__name__
-#             # Add 8 spaces at the front to match the indented formatting inside visitors = [ ... ]
-#             line = f"            {class_name}({json.dumps(params)}),"
-#             visitor_instances_lines.append(line)
-#     # ... your visitor_instances_lines extraction logic here ...
-#     visitors_code_block = "\n".join(visitor_instances_lines)
-
-#     # 1. Indent this normally! Clean, easy to read, no edge alignment required.
-#     raw_template = f"""
-#     if __name__ == "__main__":
-#         import os
-#         import json
-        
-#         visitors = [
-#     {visitors_code_block}
-#         ]
-        
-#         all_findings = []
-        
-#         for root, dirs, files in os.walk("."):
-#             if "venv" in root or ".git" in root or "migrations" in root:
-#                 continue
-#             for file in files:
-#                 if file.endswith(".py") and file != "odozi_runner.py":
-#                     full_path = os.path.join(root, file)
-#                     try:
-#                         with open(full_path, "r", encoding="utf-8") as f:
-#                             code = f.read()
-                        
-#                         for visitor in visitors:
-#                             findings = visitor.analyze_file(full_path, code)
-#                             all_findings.extend(findings)
-#                     except Exception:
-#                         continue
-                        
-#         print(json.dumps({{"tool": "odozi_visitors", "findings": all_findings}}))
-#     """
-
-#     # 2. This function automatically shifts everything perfectly to the left margin!
-#     execution_loop_template = textwrap.dedent(raw_template)
-
-#     # 3. Glue and write
-#     final_payload_string = base_classes_text.strip() + "\n\n" + execution_loop_template.strip()
-    
-#     with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
-#         debug_file.write(final_payload_string)
-        
-#     print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
-
-#     # =========================================================================
-#     # LOCAL DEBUG / INSPECTION STEP
-#     # =========================================================================
-#     # This creates a local file named 'test_output_runner.py' in your current working folder
-#     with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
-#         debug_file.write(final_payload_string)
-
-#     print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
-#     # =========================================================================
-
-#     # 5. SHIP TO GITHUB ACTIONS API
-#     # selected_tools = ["pytest", "ruff", "bandit", "odozi_visitors"]
-    
-#     # url = f"github.com{repo_owner}/{repo_name}/actions/workflows/orchestrator.yaml/dispatches"
-#     # headers = {"Authorization": f"Bearer {git_token}", "Accept": "application/vnd.github+json"}
-    
-#     # api_payload = {
-#     #     "ref": commit_sha,
-#     #     "inputs": {
-#     #         "tools_list": json.dumps(selected_tools),
-#     #         "custom_script_payload": final_payload_string # The combined file sent as text
-#     #     }
-#     # }
-    
-#     # requests.post(url, json=api_payload, headers=headers)
+    return {
+        "exists": False,
+        "sha": None
+    }
 
 
 
-
-def ensure_orchestrator_yaml_is_online(repo_owner, repo_name, git_token):
-    """
-    Ensures .github/workflows/orchestrator.yaml exists in the target repo.
-    Creates it automatically if missing.
-    """
-
+def ensure_orchestrator_yaml_is_online(
+    repo_owner,
+    repo_name,
+    default_branch,
+    target_branch,
+    git_token
+):
     url = (
         f"https://api.github.com/repos/"
         f"{repo_owner}/{repo_name}/contents/"
@@ -748,70 +676,102 @@ def ensure_orchestrator_yaml_is_online(repo_owner, repo_name, git_token):
         "X-GitHub-Api-Version": "2022-11-28"
     }
 
-    # --------------------------------------------------
-    # STEP 2: Read local template
-    # --------------------------------------------------
     yaml_file_path = os.path.join(
         settings.BASE_DIR,
         "agents",
         "orchestrator.yaml"
     )
 
-    try:
-        with open(yaml_file_path, "r", encoding="utf-8") as f:
-            yaml_content = f.read()
+    with open(yaml_file_path, "r", encoding="utf-8") as f:
+        yaml_content = f.read()
 
-    except FileNotFoundError:
-        print(f"ERROR: File not found -> {yaml_file_path}")
-        return False
-
-    # --------------------------------------------------
-    # STEP 3: Base64 encode content
-    # --------------------------------------------------
     encoded_content = base64.b64encode(
         yaml_content.encode("utf-8")
     ).decode("utf-8")
 
-    # --------------------------------------------------
-    # STEP 4: Upload workflow file
-    # --------------------------------------------------
-    commit_payload = {
-        "message": "ci: initialize Odozi orchestrator workflow",
-        "content": encoded_content,
+    # ----------------------------------------------------
+    # PARALLEL BRANCH CHECKS
+    # ----------------------------------------------------
 
-        # IMPORTANT:
-        # Your repo appears to use master
-        "branch": "master"
-    }
+    with ThreadPoolExecutor(max_workers=2) as executor:
 
-    # 2. Check if the file is already online
-    check_response = requests.get(url, headers=headers)
-    
-    if check_response.status_code == 200:
-        # File exists! Extract its current Version SHA hash key string from GitHub metadata
-        file_metadata = check_response.json()
-        current_sha = file_metadata.get("sha")
-        
-        # Senior Tip: Optional optimization loop boundary. 
-        # Decrypted content matching can be added here to bypass uploading if it hasn't changed.
-        
-        # Inject the mandatory version controller SHA token back into your payload!
-        commit_payload["sha"] = current_sha
-        print(f"YAML STATE: File exists online. Preparing file version rewrite using SHA: {current_sha}")
-        
-    elif check_response.status_code != 404:
-        print(f"YAML FAULT: Failed checking file status parameters: {check_response.text}")
-        return False
+        default_future = executor.submit(
+            workflow_exists,
+            url,
+            headers,
+            default_branch
+        )
 
-    # 3. Issue the programmatic PUT update call securely
-    upload_response = requests.put(url, json=commit_payload, headers=headers)
+        target_future = executor.submit(
+            workflow_exists,
+            url,
+            headers,
+            target_branch
+        )
 
-    if upload_response.status_code in [200, 201]:
-        print(f"🎉 SUCCESS: 'orchestrator.yaml' is fully synchronized online in {repo_name}!")
-        return True
-    else:
-        print(f"❌ UPLOAD FAULT [{upload_response.status_code}]: {upload_response.text}")
-        return False
+        default_result = default_future.result()
+        target_result = target_future.result()
+
+    # ----------------------------------------------------
+    # ENSURE DEFAULT BRANCH
+    # ----------------------------------------------------
+
+    if not default_result["exists"]:
+
+        payload = {
+            "message": "ci: initialize Odozi workflow",
+            "content": encoded_content,
+            "branch": default_branch,
+            "sha": default_result["sha"]
+        }
+
+        response = requests.put(
+            url,
+            json=payload,
+            headers=headers
+        )
+
+        if response.status_code not in (200, 201):
+            print(
+                f"Default branch upload failed: "
+                f"{response.status_code} {response.text}"
+            )
+            return False
+
+    # ----------------------------------------------------
+    # ENSURE TARGET BRANCH
+    # ----------------------------------------------------
+
+    if not target_result["exists"]:
+
+        payload = {
+            "message": "ci: initialize Odozi workflow",
+            "content": encoded_content,
+            "branch": target_branch,
+            "sha": target_result["sha"]
+        }
+
+        response = requests.put(
+            url,
+            json=payload,
+            headers=headers
+        )
+
+        if response.status_code not in (200, 201):
+            print(
+                f"Target branch upload failed: "
+                f"{response.status_code} {response.text}"
+            )
+            return False
+
+    print(
+        f"Workflow present on "
+        f"{default_branch} and {target_branch}"
+    )
+
+    return True
+
+
 
 def get_installation_access_token(installation_id):
     """
@@ -828,8 +788,6 @@ def get_installation_access_token(installation_id):
         "exp": expires_at,
     }
     
-    print(type(settings.ODOZI_APP_ID))
-    print(type(payload["iss"]))
 
     # 2. Encode and sign the JWT using your multi-line RSA Private Key
     encoded_jwt = jwt.encode(payload, settings.GITHUB_APP_PRIVATE_KEY, algorithm="RS256")
@@ -858,7 +816,7 @@ def get_installation_access_token(installation_id):
 
 
 @shared_task
-def run_agentic_pipeline(repo_owner, repo_name, installation_id, commit_sha, user_requested_rules):
+def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
     """
     Asynchronous platform dispatcher.
     """
@@ -876,7 +834,9 @@ def run_agentic_pipeline(repo_owner, repo_name, installation_id, commit_sha, use
     # =========================================================================
     # STEP 1: SCRIPT STITCHING ENGINE (Your existing logic)
     # =========================================================================
-    ensure_orchestrator_yaml_is_online(repo_owner, repo_name, git_token)
+    ensure_orchestrator_yaml_is_online(repo_owner, repo_name, default_branch, target_branch, git_token)
+    print("")
+    print({"default_branch": default_branch, "commit_sha": commit_sha, "target_branch": target_branch, "ref_string": ref_string})
     base_classes_text = inspect.getsource(rule_classes)
     
     # Strip any local manual __main__ loop if it exists in your file text
@@ -895,6 +855,11 @@ def run_agentic_pipeline(repo_owner, repo_name, installation_id, commit_sha, use
             
     visitors_code_block = "\n".join(visitor_instances_lines)
 
+    # DEBUG
+    print("RULES:", user_requested_rules)
+    print("VISITORS:")
+    print(visitors_code_block)
+
     raw_template = f"""
     if __name__ == "__main__":
         import os
@@ -903,7 +868,7 @@ def run_agentic_pipeline(repo_owner, repo_name, installation_id, commit_sha, use
         visitors = [
 {visitors_code_block}
         ]
-        
+        print("VISITORS CREATED:", visitors)
         all_findings = []
         
         for root, dirs, files in os.walk("."):
@@ -912,22 +877,34 @@ def run_agentic_pipeline(repo_owner, repo_name, installation_id, commit_sha, use
             for file in files:
                 if file.endswith(".py") and file != "odozi_runner.py":
                     full_path = os.path.join(root, file)
+                    print("ANALYZING:", full_path)
                     try:
                         with open(full_path, "r", encoding="utf-8") as f:
                             code = f.read()
                         
                         for visitor in visitors:
                             findings = visitor.analyze_file(full_path, code)
+                            print(
+                                visitor.__class__.__name__,
+                                "found",
+                                len(findings),
+                                "issues in",
+                                full_path
+                            )
                             all_findings.extend(findings)
-                    except Exception:
-                        continue
-                        
+                    except Exception as e:
+                        print(
+                            f"ERROR processing {{full_path}}: {{e}}"
+                        )
+                                            
         print(json.dumps({{"tool": "odozi_visitors", "findings": all_findings}}))
     """
 
     execution_loop_template = textwrap.dedent(raw_template)
     final_payload_string = base_classes_text.strip() + "\n\n" + execution_loop_template.strip()
-    
+    encoded_script = base64.b64encode(
+        final_payload_string.encode()
+    ).decode()
     # Write files locally for debugging inspection
     with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
         debug_file.write(final_payload_string)
@@ -950,10 +927,10 @@ def run_agentic_pipeline(repo_owner, repo_name, installation_id, commit_sha, use
     }
     
     api_payload = {
-        "ref": "master",
+        "ref":  target_branch,  
         "inputs": {
             "tools_list": json.dumps(selected_tools),
-            "custom_script_payload": final_payload_string 
+            "custom_script_payload": encoded_script
         }
     }
     print("DEBUG: Dispatching to GitHub API with payload:")
@@ -970,6 +947,94 @@ def run_agentic_pipeline(repo_owner, repo_name, installation_id, commit_sha, use
             "http_code": feedback_r.status_code, 
             "github_raw_message": feedback_r.text
         }
+
+
+
+
+@shared_task
+def process_scan_payload_task(run_id, repo, tool, raw_content_str):
+    try:
+        findings = []
+        total_issues = 0
+        high_severity = 0
+        loc = 0
+        status = 'passed'
+
+        # =====================================================================
+        # ANALYZER ENGINE A: BANDIT SECURITY
+        # =====================================================================
+        if tool == 'bandit':
+            data = json.loads(raw_content_str)
+            
+            # Read global counts out of the totals object
+            totals = data.get('metrics', {}).get('_totals', {})
+            loc = totals.get('loc', 0)
+            high_severity = totals.get('SEVERITY.HIGH', 0)
+            
+            # Parse out explicit vulnerability alerts
+            raw_results = data.get('results', [])
+            total_issues = len(raw_results)
+            status = 'failed' if high_severity > 0 else 'passed'
+            
+            for item in raw_results:
+                findings.append({
+                    'file': item.get('filename'),
+                    'line': item.get('line_number'),
+                    'name': item.get('test_id'),
+                    'message': item.get('issue_text'),
+                    'severity': item.get('issue_severity') # HIGH, MEDIUM, LOW
+                })
+
+        # =====================================================================
+        # ANALYZER ENGINE B: CUSTOM ODOZI AST LOG STREAM
+        # =====================================================================
+        elif tool == 'odozi_visitors':
+            # Extract the raw lines of code analyzed using regular expressions
+            loc = len(re.findall(r'ANALYZING:', raw_content_str))
+            
+            # Use Regex to isolate the embedded target JSON payload line at the bottom
+            json_match = re.search(r'\{"tool":\s*"odozi_visitors".*\}', raw_content_str)
+            
+            if json_match:
+                parsed_json = json.loads(json_match.group(0))
+                raw_findings = parsed_json.get('findings', [])
+                total_issues = len(raw_findings)
+                status = 'failed' if total_issues > 0 else 'passed'
+                
+                for item in raw_findings:
+                    findings.append({
+                        'file': './backend/task/views.py', # Set default or match pattern
+                        'line': item.get('line'),
+                        'name': item.get('name'),
+                        'message': item.get('message'),
+                        'severity': 'HIGH' if item.get('rule') == 'missing_authentication' else 'LOW'
+                    })
+
+        # =====================================================================
+        # SAVE STRUCTURAL METRICS TO DATABASE
+        # =====================================================================
+        RepositoryScan.objects.update_or_create(
+            run_id=run_id,
+            defaults={
+                'repo': repo,
+                'tool': tool,
+                'status': status,
+                'total_issues': total_issues,
+                'high_severity_count': high_severity,
+                'lines_of_code': loc,
+                'structured_findings': findings,
+                'raw_payload': json.loads(raw_content_str) if tool == 'bandit' else {"log": raw_content_str}
+            }
+        )
+        
+        # PRO-TIP: Trigger a WebSocket or SSE broadcast right here 
+        # to notify the frontend that the clean dashboard data is ready!
+        # broadcast_to_frontend(run_id)
+
+    except Exception as e:
+        print(f"Async analysis failed for run {run_id}: {str(e)}")
+
+
 
 
 

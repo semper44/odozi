@@ -51,6 +51,7 @@ mock_payload_dict = {
         # Your view uses clone_url during cloning, or strips it for names
         "name": REPO_NAME,
         "clone_url": f"https://github.com/{REPO_OWNER}/{REPO_NAME}.git",
+        "default_branch": "main",
         "owner": {
             "login": REPO_OWNER
         }

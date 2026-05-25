@@ -1,6 +1,6 @@
 # agents/tools/registry.py
 from .rule_classes import (
-    AuthDecoratorVisitor,
+    AuthenticationVisitor,
     RequiredCallVisitor,
     FunctionLengthVisitor,
     ClassLengthVisitor,
@@ -10,7 +10,7 @@ from .rule_classes import (
 )
 
 AST_TOOL_REGISTRY = {
-    "check_auth": AuthDecoratorVisitor,
+    "check_auth": AuthenticationVisitor,
     "check_required_call": RequiredCallVisitor,
     "check_function_length": FunctionLengthVisitor,
     "check_class_length": ClassLengthVisitor,
