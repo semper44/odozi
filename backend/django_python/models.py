@@ -23,18 +23,28 @@ class RepositoryScan(models.Model):
         ('failed', 'Failed'),
     ]
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="repo_workspace")
-    run_id = models.CharField(max_length=100, unique=True)
+    run_id = models.CharField(max_length=100)
     repo = models.CharField(max_length=255)
     tool = models.CharField(max_length=50, choices=TOOL_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='passed')
     
-    # Pre-calculated summary counters for ultra-fast frontend rendering
+    # Pre-calculated summary counters 
     total_issues = models.IntegerField(default=0)
     high_severity_count = models.IntegerField(default=0)
     lines_of_code = models.IntegerField(default=0)
     
-    # Store clean UI-ready lists and raw data
+    # UI-ready lists and raw data
     structured_findings = models.JSONField(default=list) 
     raw_payload = models.JSONField() 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Repository Scan"
+        verbose_name_plural = "Repository Scans"
+        ordering = ['-created_at']
+        
+        unique_together = ('run_id', 'tool')
+
+    def __str__(self):
+        return f"{self.repo} | {self.tool} | Run: {self.run_id}"
 

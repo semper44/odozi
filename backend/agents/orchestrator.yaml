@@ -9,7 +9,7 @@ on:
         description: 'The API target endpoint (Use Ngrok/LocalTunnel for local testing)'
         required: true
         type: string
-        default: 'https://puny-books-clean.loca.lt'
+        default: 'https://twelve-lies-live.loca.lt'
       custom_script_payload:
         description: 'Compiled OdoziVisitor class code and file walker'
         required: false
@@ -63,7 +63,7 @@ jobs:
           # Odozi-required tooling
           # --------------------------------------------------
 
-          pip install \
+          pip install --upgrade \
             pytest \
             pytest-django \
             pytest-json-report \
@@ -75,6 +75,8 @@ jobs:
 
       - name: Auto-Discover, Run & Stream Pytest in Chunks
         shell: bash
+        env:
+          RUNNER_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "=== OUTPUT_START ==="
           MANAGE_PY_PATH=$(find . -name "manage.py" | head -n 1)
@@ -82,29 +84,44 @@ jobs:
             RUN_CMD="pytest --json-report --json-report-file=report.json --cov=. --cov-report=json"
           else
             PROJECT_DIR=$(dirname "$MANAGE_PY_PATH")
-            if [ -f "$PROJECT_DIR/requirements.txt" ]; then pip install -r "$PROJECT_DIR/requirements.txt"; fi
+            echo "Found Django project root at: $PROJECT_DIR"
+            
             SETTINGS_MOD=$(grep -oE "['\"][a-zA-Z0-9_\.]+\.settings['\"]" "$MANAGE_PY_PATH" | tr -d "'\"" | head -n 1)
             if [ -z "$SETTINGS_MOD" ]; then
                SETTINGS_DIR=$(find "$PROJECT_DIR" -name "settings.py" | head -n 1)
                SETTINGS_MOD=$(echo "$SETTINGS_DIR" | sed "s|^$PROJECT_DIR/||" | sed 's|/|.|g' | sed 's|\.py$||')
             fi
+            echo "Detected settings module: $SETTINGS_MOD"
+            
             export PYTHONPATH="$PROJECT_DIR:$PYTHONPATH"
             export DJANGO_SETTINGS_MODULE="$SETTINGS_MOD"
             RUN_CMD="pytest $PROJECT_DIR --json-report --json-report-file=report.json --cov=$PROJECT_DIR --cov-report=json"
           fi
           
-          # Inline Python script buffers output into 2-second or 20-line chunks
+          # Inline Python script buffers output and passes the Bearer auth token securely
           python -c "
-          import sys, urllib.request, json, time
+          import sys, urllib.request, json, time, os
           buffer = []
           last_flush = time.time()
           url = '${{ inputs.backend_url }}/dashboard/results/'
-          headers = {'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true'}
+          token = os.environ.get('RUNNER_AUTH_TOKEN', '')
+          
+          headers = {
+              'Content-Type': 'application/json', 
+              'bypass-tunnel-reminder': 'true',
+              'Authorization': f'Bearer {token}'
+          }
           
           def flush():
               global buffer, last_flush
               if not buffer: return
-              payload = {'run_id': '${{ github.run_id }}', 'tool': 'pytest', 'logs': buffer}
+              payload = {
+                  'run_id': '${{ github.run_id }}', 
+                  'repo_owner': '${{ github.repository_owner }}',
+                  'repo': '${{ github.repository }}',
+                  'tool': 'pytest', 
+                  'logs': buffer
+              }
               try:
                   req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method='POST')
                   with urllib.request.urlopen(req, timeout=5) as response: pass
@@ -132,9 +149,17 @@ jobs:
               -F "run_id=${{ github.run_id }}" \ 
               -F "repo=${{ github.repository }}" \ 
               -F "tool=pytest" \ 
-              -F "file=@report.json" 
+              -F "file=@report.json"
+          else
+            # Pytest crashed before generating report.json!
+            # Using tail to grab the LAST 20 lines of the console log file (the true error) and send it as 1 single diagnostic payload to the backend.
+            tail -n 20 pytest_stream.log > pytest_crash.log
+            curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+              -F "tool=pytest_crash" \
+              -F "file=@pytest_crash.log" 
           fi
           exit ${{ env.TEST_EXIT_CODE }}
+
 
   # run-pytest:
   #   runs-on: ubuntu-latest
@@ -255,5 +280,6 @@ jobs:
             -F "tool=odozi_visitors" \
             -F "file=@odozi_report.json"
           echo "=== OUTPUT_END ==="
+
 
 

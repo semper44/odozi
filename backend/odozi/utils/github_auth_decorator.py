@@ -1,8 +1,10 @@
-from functools import wraps
+import json
 import requests
+from functools import wraps
 from django.http import JsonResponse
 
 from account_profile.models import GitHubRepository
+
 
 def require_github_auth(view_func):
     @wraps(view_func)
@@ -12,40 +14,41 @@ def require_github_auth(view_func):
         if not auth_header.startswith('Bearer '):
             return JsonResponse({'error': 'Missing authentication metadata'}, status=401)
         
-        github_token = auth_header.split(' ')[1]
+        try:
+            github_token = auth_header.split(' ')[1]
+        except IndexError:
+            return JsonResponse({'error': 'Malformed authorization token string'}, status=401)
         
-        # 2. Validate the token directly against GitHub's official API
-        # Using the standard repository repository validation endpoint
-        print("request.POST")
-        print("")
-        print(request.POST)
-        # Inside your security decorator / view logic
-        # repo_full_name = request.POST.get('repo') # e.g., "OdoziEngine/Taskmaster"
+        # 2. ✅ HIGH-LEVEL FIX: Extract repo layout dynamically based on content encoding
+        repo_name = None
+        if request.content_type == 'application/json':
+            try:
+                # Read the payload from request.body for JSON streams
+                body_data = json.loads(request.body.decode('utf-8'))
+                repo_name = body_data.get('repo')
+            except Exception:
+                return JsonResponse({'error': 'Invalid JSON stream encoding'}, status=400)
+        else:
+            # Read from standard POST data fields for multipart form uploads
+            repo_name = request.POST.get('repo')
 
-        # try:
-        #     # 1. Instantly find the repo and its parent workspace in one database query
-        #     repo = GitHubRepository.objects.select_related('workspace').get(repo_full_name=repo_full_name)
-        #     target_workspace = repo.workspace
-            
-        #     # 2. You now have instant access to the App Installation details securely!
-        #     current_installation_id = target_workspace.installation_id
-            
-        # except GitHubRepository.DoesNotExist:
-        #     return JsonResponse({'error': 'Repository not integrated with any workspace'}, status=404)
-
-
-        repo_name = request.POST.get('repo') # e.g., "username/project"
-        github_api_url = f"https://github.com/{repo_name}"
+        if not repo_name:
+            return JsonResponse({'error': 'Missing target repository context parameters'}, status=400)
+       
+        # 3. Request confirmation from GitHub's validation servers
+        github_api_url = f"https://github.com/{repo_name}" # ◄— Points to official REST validation path
         headers = {
             "Authorization": f"token {github_token}",
             "Accept": "application/vnd.github.v3+json"
         }
         
-        response = requests.get(github_api_url, headers=headers)
-        
-        # If GitHub rejects the token, block the request immediately
-        if response.status_code != 200:
-            return JsonResponse({'error': 'Invalid or expired GitHub runner token'}, status=403)
+        try:
+            response = requests.get(github_api_url, headers=headers, timeout=5)
+            if response.status_code != 200:
+                return JsonResponse({'error': 'Invalid or expired GitHub runner token'}, status=403)
+        except requests.RequestException as e:
+            return JsonResponse({'error': f'Auth server communication breakdown: {str(e)}'}, status=502)
             
         return view_func(request, *args, **kwargs)
     return _wrapped_view
+

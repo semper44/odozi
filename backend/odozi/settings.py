@@ -31,7 +31,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "puny-books-clean.loca.lt",
+    "twelve-lies-live.loca.lt",
 ]
 
 # CORS

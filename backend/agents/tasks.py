@@ -908,12 +908,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     encoded_script = base64.b64encode(
         final_payload_string.encode()
     ).decode()
-    # Write files locally for debugging inspection
-    with open("test_output_runner.py", "w", encoding="utf-8") as debug_file:
-        debug_file.write(final_payload_string)
-        
-    print("SUCCESS: 'test_output_runner.py' has been generated for manual inspection!")
-
+    
     # =========================================================================
     # STEP 2: DISPATCH TO LIVE GITHUB API (Uncomment when ready to go live)
     # =========================================================================
@@ -955,7 +950,8 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
 
 
 @shared_task
-def process_scan_payload_task(run_id, workspace_id, repo, tool, raw_content_str):
+def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_str):
+    print(f"Processing payload for run_id={run_id}, repo={repo}, tool={tool}")
     try:
         findings = []
         total_issues = 0
@@ -988,6 +984,8 @@ def process_scan_payload_task(run_id, workspace_id, repo, tool, raw_content_str)
                     'severity': item.get('issue_severity') # HIGH, MEDIUM, LOW
                 })
 
+            print(f"DEBUG: Findings after Bandit parsing: {findings}")
+
         # =====================================================================
         # ANALYZER ENGINE B: CUSTOM ODOZI AST LOG STREAM
         # =====================================================================
@@ -1012,27 +1010,77 @@ def process_scan_payload_task(run_id, workspace_id, repo, tool, raw_content_str)
                         'message': item.get('message'),
                         'severity': 'HIGH' if item.get('rule') == 'missing_authentication' else 'LOW'
                     })
+            print(f"DEBUG: Findings after Odozi Visitors parsing: {findings}")
+
+
+        elif tool == 'pytest':
+            print("DEBUG: Processing pytest output")
+            
+            # 🎯 THE FIX: Always declare your variables up front so they are never unbound
+            is_json_format = False
+            parsed_json = None  
+            raw_text_data = raw_content_str
+            
+            try:
+                parsed_json = json.loads(raw_content_str)
+                is_json_format = True
+            except json.JSONDecodeError:
+                is_json_format = False
+
+            patterns = [
+                r"UndefinedValueError:\s+([A-Z0-9_]+)\s+not found",
+                r"KeyError:\s*['\"]([A-Z0-9_]+)['\"]",
+                r"Environment variable\s+([A-Z0-9_]+)",
+            ]
+
+            # 🛠️ Case A: Handle raw string traceback logs safely using regex
+            if not is_json_format:
+                status = 'failed'
+                for pattern in patterns:
+                    matches = re.findall(pattern, raw_text_data)
+                    for missing_var in matches:
+                        total_issues += 1
+                        findings.append({
+                            "status": "missing_env",
+                            "variable": missing_var,
+                            "message": f"Repository requires {missing_var}"
+                        })
+                        print(f"DEBUG: Found missing environment variable: {missing_var}")
+            
+            # 🛠️ Case B: Handle valid final report JSON schemas smoothly
+            else:
+                # Defensive check to make Pylance 100% happy that it is safe to parse
+                if parsed_json is not None:
+                    summary = parsed_json.get('summary', {})
+                    total_issues = summary.get('failed', 0)
+                    status = 'failed' if total_issues > 0 else 'passed'
+                
+            print(f"DEBUG: Findings after Pytest parsing: {findings}")
 
         # =====================================================================
         # SAVE STRUCTURAL METRICS TO DATABASE
         # =====================================================================
          # Fetch models locally inside the background thread using the IDs we passed
         
-        RepositoryScan.objects.update_or_create(
+        print(f"DEBUG: Attempting to save results for run_id={run_id} with repo={repo} and tool={tool}")
+
+
+        workspace = Workspace.objects.get(name = repository_owner)
+        repo_result= RepositoryScan.objects.create(
             run_id=run_id,
-            defaults={
-                'repo': repo,
-                'workspace': workspace_id,
-                'tool': tool,
-                'status': status,
-                'total_issues': total_issues,
-                'high_severity_count': high_severity,
-                'lines_of_code': loc,
-                'structured_findings': findings,
-                'raw_payload': json.loads(raw_content_str) if tool == 'bandit' else {"log": raw_content_str}
-            }
+            repo = repo,
+            workspace = workspace,
+            tool = tool,
+            status =  status,
+            total_issues =  total_issues,
+            high_severity_count =  high_severity,
+            lines_of_code =  loc,
+            structured_findings =  findings,
+            raw_payload =  json.loads(raw_content_str) if tool == 'bandit' else {"log": raw_content_str}
         )
-        
+        print(repo_result.tool)
+        print("ali0ve")
+
         # PRO-TIP: Trigger a WebSocket or SSE broadcast right here 
         # to notify the frontend that the clean dashboard data is ready!
         # broadcast_to_frontend(run_id)

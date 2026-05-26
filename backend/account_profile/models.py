@@ -82,6 +82,21 @@ class GitHubRepository(models.Model):
 
 
 
+class RepositoryVariable(models.Model):
+    repository = models.ForeignKey(
+        GitHubRepository,
+        on_delete=models.CASCADE
+    )
+
+    key = models.CharField(max_length=255, blank=True, null=True)
+
+    encrypted_value = models.BinaryField(blank=True, null=True)
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+
 # Governance levels: Admin (can invite/revoke), Developer (can only view logs)
 ROLE_CHOICES = [
     ('admin', 'Admin'),
