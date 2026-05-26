@@ -1,3 +1,5 @@
+name: Agentic Mixed Orchestration Suite
+
 on:
   workflow_dispatch:
     inputs:
@@ -9,32 +11,33 @@ on:
         description: 'The API target endpoint (Use Ngrok/LocalTunnel for local testing)'
         required: true
         type: string
-        default: 'https://twelve-lies-live.loca.lt'
+        default: 'https://slick-weeks-say.loca.lt'
       custom_script_payload:
         description: 'Compiled OdoziVisitor class code and file walker'
         required: false
         type: string
         default: ''
+      env_keys_list:
+        description: 'JSON array of environment variable names required by this repository'
+        required: false
+        type: string
+        default: '[]'
 
-# PRODUCTION SECURITY: Set global permissions to read-only
 permissions:
   contents: read
 
 jobs:
   # =========================================================================
-  # JOB 1: PYTEST RUNNER
+  # JOB 1: PYTEST RUNNER (With Dynamic Process Termination Catch)
   # =========================================================================
   run-pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     if: contains(fromJson(inputs.tools_list), 'pytest')
-
     permissions:
       contents: read
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -48,30 +51,11 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-
-          # --------------------------------------------------
-          # Customer project dependencies
-          # --------------------------------------------------
-
           REQ_FILE=$(find . -name "requirements.txt" | head -n 1)
           if [ -n "$REQ_FILE" ]; then
-              echo "Installing from $REQ_FILE"
               pip install -r "$REQ_FILE"
           fi
-
-          # --------------------------------------------------
-          # Odozi-required tooling
-          # --------------------------------------------------
-
-          pip install --upgrade \
-            pytest \
-            pytest-django \
-            pytest-json-report \
-            pytest-cov
-
-      - name: Display Python Version
-        run: echo $PYTHONPATH
-             echo $DJANGO_SETTINGS_MODULE
+          pip install --upgrade pytest pytest-django pytest-json-report pytest-cov
 
       - name: Auto-Discover, Run & Stream Pytest in Chunks
         shell: bash
@@ -84,21 +68,17 @@ jobs:
             RUN_CMD="pytest --json-report --json-report-file=report.json --cov=. --cov-report=json"
           else
             PROJECT_DIR=$(dirname "$MANAGE_PY_PATH")
-            echo "Found Django project root at: $PROJECT_DIR"
-            
             SETTINGS_MOD=$(grep -oE "['\"][a-zA-Z0-9_\.]+\.settings['\"]" "$MANAGE_PY_PATH" | tr -d "'\"" | head -n 1)
             if [ -z "$SETTINGS_MOD" ]; then
                SETTINGS_DIR=$(find "$PROJECT_DIR" -name "settings.py" | head -n 1)
                SETTINGS_MOD=$(echo "$SETTINGS_DIR" | sed "s|^$PROJECT_DIR/||" | sed 's|/|.|g' | sed 's|\.py$||')
             fi
-            echo "Detected settings module: $SETTINGS_MOD"
-            
             export PYTHONPATH="$PROJECT_DIR:$PYTHONPATH"
             export DJANGO_SETTINGS_MODULE="$SETTINGS_MOD"
             RUN_CMD="pytest $PROJECT_DIR --json-report --json-report-file=report.json --cov=$PROJECT_DIR --cov-report=json"
           fi
           
-          # Inline Python script buffers output and passes the Bearer auth token securely
+          # Inline streaming chunk framework
           python -c "
           import sys, urllib.request, json, time, os
           buffer = []
@@ -132,11 +112,12 @@ jobs:
               sys.stdout.write(line)
               buffer.append(line.strip())
               if len(buffer) >= 20 or (time.time() - last_flush) > 2.0: flush()
-          flush()
+          
+          # 🎯 ✅ FIX: Force-flush any residual terminal string text left behind at death
+          if len(buffer) > 0:
+              flush()
           " < <($RUN_CMD 2>&1)
-
           echo "TEST_EXIT_CODE=${PIPESTATUS}" >> $GITHUB_ENV
-          echo "=== OUTPUT_END ==="
 
       - name: Send Final Pytest Structured Report
         if: always()
@@ -146,43 +127,12 @@ jobs:
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "bypass-tunnel-reminder: true" \
               -F "repo_owner=${{ github.repository_owner }}" \
-              -F "run_id=${{ github.run_id }}" \ 
-              -F "repo=${{ github.repository }}" \ 
-              -F "tool=pytest" \ 
+              -F "run_id=${{ github.run_id }}" \
+              -F "repo=${{ github.repository }}" \
+              -F "tool=pytest" \
               -F "file=@report.json"
-          else
-            # Pytest crashed before generating report.json!
-            # Using tail to grab the LAST 20 lines of the console log file (the true error) and send it as 1 single diagnostic payload to the backend.
-            tail -n 20 pytest_stream.log > pytest_crash.log
-            curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
-              -F "tool=pytest_crash" \
-              -F "file=@pytest_crash.log" 
           fi
           exit ${{ env.TEST_EXIT_CODE }}
-
-
-  # run-pytest:
-  #   runs-on: ubuntu-latest
-  #   if: contains(fromJson(inputs.tools_list), 'pytest')
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-python@v5
-  #       with:
-  #         python-version: '3.11'
-  #     - name: Install Pytest & Dependencies
-  #       run: pip install django djangorestframework pytest pytest-json-report pytest-cov
-  #     - name: Run Pytest
-  #       # env:
-  #       #   PYTEST_ADDOPTS: "-c /dev/null"
-  #       run: |
-  #         echo "=== OUTPUT_START ==="
-  #          pwd
-  #         find . -name "test*.py"
-  #         pytest --collect-only
-  #         pytest --json-report --json-report-file=report.json --cov=. --cov-report=json || true
-  #         tail -c 2000 report.json || true
-  #         echo "=== OUTPUT_END ==="
-
 
   # =========================================================================
   # JOB 2: RUFF RUNNER
@@ -201,19 +151,9 @@ jobs:
           python-version: '3.11'
       - name: Install Ruff
         run: pip install ruff
-
-      - name: Dump All GitHub Context Values
-        run: |
-          echo "=== DEBUG START ==="
-          echo '${{ toJson(github) }}'
-          echo "=== DEBUG END ==="
-
       - name: Run Ruff Linter
         run: |
-          echo "=== OUTPUT_START ==="
-          ruff check --output-format json .  > ruff_report.json || true
-          cat ruff_report.json
-          
+          ruff check --output-format json . > ruff_report.json || true
           curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
@@ -222,14 +162,17 @@ jobs:
             -F "run_id=${{ github.run_id }}" \
             -F "tool=ruff" \
             -F "file=@ruff_report.json"
-          echo "=== OUTPUT_END ==="
 
   # =========================================================================
   # JOB 3: BANDIT RUNNER
   # =========================================================================
   run-bandit:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: contains(fromJson(inputs.tools_list), 'bandit')
+    permissions:
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -239,47 +182,42 @@ jobs:
         run: pip install bandit
       - name: Run Bandit Security
         run: |
-          echo "=== OUTPUT_START ==="
-          bandit -r . -lll -f json  > bandit_report.json || true
-          cat bandit_report.json
-          
+          bandit -r . -lll -f json > bandit_report.json || true
           curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
-            -F "run_id=${{ github.run_id }}" \
-            -F "repo_owner=${{ github.repository_owner }}" \
             -F "repo=${{ github.repository }}" \
+            -F "repo_owner=${{ github.repository_owner }}" \
+            -F "run_id=${{ github.run_id }}" \
             -F "tool=bandit" \
             -F "file=@bandit_report.json"
-          echo "=== OUTPUT_END ==="
 
   # =========================================================================
   # JOB 4: ODOZI RUNNER
   # =========================================================================
   run-odozi:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: contains(fromJson(inputs.tools_list), 'odozi_visitors')
+    permissions:
+      contents: read
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Run Custom Odozi Code Engine
         run: |
           echo '${{ inputs.custom_script_payload }}' | base64 -d > odozi_runner.py
-          echo "=== OUTPUT_START ==="
           python odozi_runner.py > odozi_report.json || true
-          cat odozi_report.json
-          
           curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
-            -F "run_id=${{ github.run_id }}" \
-            -F "repo_owner=${{ github.repository_owner }}" \
             -F "repo=${{ github.repository }}" \
+            -F "repo_owner=${{ github.repository_owner }}" \
+            -F "run_id=${{ github.run_id }}" \
             -F "tool=odozi_visitors" \
             -F "file=@odozi_report.json"
-          echo "=== OUTPUT_END ==="
-
-
-

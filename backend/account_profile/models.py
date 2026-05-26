@@ -53,8 +53,8 @@ class GitHubRepository(models.Model):
         db_index=True
     )
     
-    repo_name = models.CharField(max_length=255)        # e.g., "Taskmaster"
-    repo_owner = models.CharField(max_length=255)       # e.g., "OdoziEngine"
+    repo_name = models.CharField(max_length=255, db_index=True)        # e.g., "Taskmaster"
+    repo_owner = models.CharField(max_length=255, db_index=True)       # e.g., "OdoziEngine"
     
     # Pre-calculated full slug field for ultra-fast database lookups
     # Indexed to guarantee lightning-fast performance for your curl webhooks
@@ -81,20 +81,6 @@ class GitHubRepository(models.Model):
         super().save(*args, **kwargs)
 
 
-
-class RepositoryVariable(models.Model):
-    repository = models.ForeignKey(
-        GitHubRepository,
-        on_delete=models.CASCADE
-    )
-
-    key = models.CharField(max_length=255, blank=True, null=True)
-
-    encrypted_value = models.BinaryField(blank=True, null=True)
-
-    created_at = models.DateTimeField(
-        auto_now_add=True
-    )
 
 
 # Governance levels: Admin (can invite/revoke), Developer (can only view logs)

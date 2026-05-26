@@ -16,8 +16,8 @@ from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
 from django.conf import settings
-from django_python.models import RepositoryScan
-from account_profile.models import Workspace
+from django_python.models import RepositoryScan, RepoEnvKey
+from account_profile.models import GitHubRepository, Workspace
 from django.contrib.auth.models import User
 
 # Celery tasks (the parallel tools)
@@ -913,6 +913,21 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     # STEP 2: DISPATCH TO LIVE GITHUB API (Uncomment when ready to go live)
     # =========================================================================
     selected_tools = ["pytest", "ruff", "bandit", "odozi_visitors"]
+     # 1. Look up the repository full slug name in your DB
+    # repo_slug = f"{repo_owner}/{repo_name}"
+
+    print(repo_name, repo_data, repo_owner, "repo")
+    
+    # 2. Fetch only the variable names registered for THIS specific repository
+    repo_merge = f'{repo_owner}/{repo_name}'
+    repo_instance = GitHubRepository.objects.get(repo_name=repo_merge)
+    registered_keys = RepoEnvKey.objects.filter(
+         repo__repo_name=repo_merge
+    ).values_list('key_name', flat=True)
+    
+    # Example output string: '["DJANO_SECRET_KEY"]'
+    env_keys_payload = json.dumps(list(registered_keys)) if registered_keys else "[]"
+
     url = (
         f"https://api.github.com/repos/"
         f"{repo_owner}/{repo_name}/actions/workflows/"
@@ -928,9 +943,11 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
         "ref":  target_branch,  
         "inputs": {
             "tools_list": json.dumps(selected_tools),
-            "custom_script_payload": encoded_script
+            "custom_script_payload": encoded_script,
+            "env_keys_list": env_keys_payload
         }
     }
+    
     print("DEBUG: Dispatching to GitHub API with payload:")
     feedback_r = requests.post(url, json=api_payload, headers=headers)
     if feedback_r.status_code == 204:
@@ -951,7 +968,8 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
 
 @shared_task
 def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_str):
-    print(f"Processing payload for run_id={run_id}, repo={repo}, tool={tool}")
+    print(f"\n⚡ --- [CELERY JOB RECEIVED: {tool.upper()}] ---")
+    
     try:
         findings = []
         total_issues = 0
@@ -959,135 +977,131 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
         loc = 0
         status = 'passed'
 
-        # =====================================================================
-        # ANALYZER ENGINE A: BANDIT SECURITY
-        # =====================================================================
-        if tool == 'bandit':
-            data = json.loads(raw_content_str)
-            
-            # Read global counts out of the totals object
-            totals = data.get('metrics', {}).get('_totals', {})
-            loc = totals.get('loc', 0)
-            high_severity = totals.get('SEVERITY.HIGH', 0)
-            
-            # Parse out explicit vulnerability alerts
-            raw_results = data.get('results', [])
-            total_issues = len(raw_results)
-            status = 'failed' if high_severity > 0 else 'passed'
-            
-            for item in raw_results:
-                findings.append({
-                    'file': item.get('filename'),
-                    'line': item.get('line_number'),
-                    'name': item.get('test_id'),
-                    'message': item.get('issue_text'),
-                    'severity': item.get('issue_severity') # HIGH, MEDIUM, LOW
-                })
-
-            print(f"DEBUG: Findings after Bandit parsing: {findings}")
+        # 1. 🎯 GLOBAL DEFENSIVE GATE: Determine if payload is clean JSON or a raw Crash Traceback
+        is_json_format = False
+        parsed_json = None
+        
+        try:
+            parsed_json = json.loads(raw_content_str)
+            is_json_format = True
+        except json.JSONDecodeError:
+            is_json_format = False
+            print(f"⚠️ ALERT: {tool.upper()} payload is raw text (Possible infrastructure crash).")
 
         # =====================================================================
-        # ANALYZER ENGINE B: CUSTOM ODOZI AST LOG STREAM
+        # 🛡️ CASE A: THE PAYLOAD IS A CRASH TRACEBACK (Any Tool)
         # =====================================================================
-        elif tool == 'odozi_visitors':
-            # Extract the raw lines of code analyzed using regular expressions
-            loc = len(re.findall(r'ANALYZING:', raw_content_str))
+        if not is_json_format:
+            status = 'failed'
+            total_issues = 1
             
-            # Use Regex to isolate the embedded target JSON payload line at the bottom
-            json_match = re.search(r'\{"tool":\s*"odozi_visitors".*\}', raw_content_str)
-            
-            if json_match:
-                parsed_json = json.loads(json_match.group(0))
-                raw_findings = parsed_json.get('findings', [])
+            # Use Regex to see if it's an infrastructure/environment issue or code syntax
+            if "UndefinedValueError" in raw_content_str or "KeyError" in raw_content_str:
+                msg = "Runtime infrastructure configuration error: Missing required environment variables."
+            elif "SyntaxError" in raw_content_str:
+                msg = "Code execution blocked: Severe Python syntax error detected in repository code."
+            else:
+                msg = f"Internal execution failure: The tool container terminated unexpectedly during analysis."
+
+            findings.append({
+                "status": "tool_crash",
+                "variable": "SYSTEM",
+                "message": msg
+            })
+
+        # =====================================================================
+        # 📦 CASE B: THE PAYLOAD IS CLEAN VALID JSON (Normal Behavior)
+        # =====================================================================
+        else:
+            if tool == 'bandit':
+                totals = parsed_json.get('metrics', {}).get('_totals', {}) if parsed_json else {}
+                loc = totals.get('loc', 0)
+                high_severity = totals.get('SEVERITY.HIGH', 0)
+                
+                raw_results = parsed_json.get('results', []) if parsed_json else []
+                total_issues = len(raw_results)
+                status = 'failed' if high_severity > 0 else 'passed'
+                
+                for item in raw_results:
+                    findings.append({
+                        'file': item.get('filename'),
+                        'line': item.get('line_number'),
+                        'name': item.get('test_id'),
+                        'message': item.get('issue_text'),
+                        'severity': item.get('issue_severity')
+                    })
+
+            elif tool == 'ruff':
+                # Ruff returns a flat list array of issue dicts when running --output-format json
+                raw_results = parsed_json if isinstance(parsed_json, list) else []
+                total_issues = len(raw_results)
+                status = 'failed' if total_issues > 0 else 'passed'
+                
+                for item in raw_results:
+                    findings.append({
+                        'file': item.get('filename'),
+                        'line': item.get('location', {}).get('row'),
+                        'name': item.get('code'),
+                        'message': item.get('message'),
+                        'severity': 'MEDIUM'
+                    })
+
+            elif tool == 'odozi_visitors':
+                raw_findings = parsed_json.get('findings', []) if parsed_json else []
                 total_issues = len(raw_findings)
                 status = 'failed' if total_issues > 0 else 'passed'
                 
                 for item in raw_findings:
                     findings.append({
-                        'file': './backend/task/views.py', # Set default or match pattern
+                        'file': './backend/task/views.py',
                         'line': item.get('line'),
                         'name': item.get('name'),
                         'message': item.get('message'),
                         'severity': 'HIGH' if item.get('rule') == 'missing_authentication' else 'LOW'
                     })
-            print(f"DEBUG: Findings after Odozi Visitors parsing: {findings}")
 
-
-        elif tool == 'pytest':
-            print("DEBUG: Processing pytest output")
-            
-            # 🎯 THE FIX: Always declare your variables up front so they are never unbound
-            is_json_format = False
-            parsed_json = None  
-            raw_text_data = raw_content_str
-            
-            try:
-                parsed_json = json.loads(raw_content_str)
-                is_json_format = True
-            except json.JSONDecodeError:
-                is_json_format = False
-
-            patterns = [
-                r"UndefinedValueError:\s+([A-Z0-9_]+)\s+not found",
-                r"KeyError:\s*['\"]([A-Z0-9_]+)['\"]",
-                r"Environment variable\s+([A-Z0-9_]+)",
-            ]
-
-            # 🛠️ Case A: Handle raw string traceback logs safely using regex
-            if not is_json_format:
-                status = 'failed'
-                for pattern in patterns:
-                    matches = re.findall(pattern, raw_text_data)
-                    for missing_var in matches:
-                        total_issues += 1
-                        findings.append({
-                            "status": "missing_env",
-                            "variable": missing_var,
-                            "message": f"Repository requires {missing_var}"
-                        })
-                        print(f"DEBUG: Found missing environment variable: {missing_var}")
-            
-            # 🛠️ Case B: Handle valid final report JSON schemas smoothly
-            else:
-                # Defensive check to make Pylance 100% happy that it is safe to parse
-                if parsed_json is not None:
-                    summary = parsed_json.get('summary', {})
-                    total_issues = summary.get('failed', 0)
-                    status = 'failed' if total_issues > 0 else 'passed'
-                
-            print(f"DEBUG: Findings after Pytest parsing: {findings}")
+            elif tool == 'pytest':
+                summary = parsed_json.get('summary', {}) if parsed_json else {}
+                total_issues = summary.get('failed', 0)
+                status = 'failed' if total_issues > 0 else 'passed'
 
         # =====================================================================
-        # SAVE STRUCTURAL METRICS TO DATABASE
+        # 🎯 OPTIMIZED MULTI-TENANT DB SAVE ENGINE (Single DB Trip)
         # =====================================================================
-         # Fetch models locally inside the background thread using the IDs we passed
-        
-        print(f"DEBUG: Attempting to save results for run_id={run_id} with repo={repo} and tool={tool}")
-
-
         workspace = Workspace.objects.get(name = repository_owner)
-        repo_result= RepositoryScan.objects.create(
-            run_id=run_id,
-            repo = repo,
-            workspace = workspace,
-            tool = tool,
-            status =  status,
-            total_issues =  total_issues,
-            high_severity_count =  high_severity,
-            lines_of_code =  loc,
-            structured_findings =  findings,
-            raw_payload =  json.loads(raw_content_str) if tool == 'bandit' else {"log": raw_content_str}
-        )
-        print(repo_result.tool)
-        print("ali0ve")
 
-        # PRO-TIP: Trigger a WebSocket or SSE broadcast right here 
-        # to notify the frontend that the clean dashboard data is ready!
-        # broadcast_to_frontend(run_id)
+        repo_result, created = RepositoryScan.objects.update_or_create(
+            run_id=run_id,
+            tool=tool,
+            defaults={
+                'repo': repo,
+                'workspace': workspace,
+                'status': status,
+                'total_issues': len(findings) if tool in ['pytest', 'ruff'] and is_json_format else total_issues,
+                'high_severity_count': high_severity,
+                'lines_of_code': loc,
+                'structured_findings': findings,
+                'raw_payload': parsed_json if is_json_format else {"log": raw_content_str}
+            }
+        )
+
+        # Append chunks strictly for Pytest streams
+        if not created and tool == 'pytest' and not is_json_format:
+            current_findings = repo_result.structured_findings or []
+            for item in findings:
+                if item not in current_findings:
+                    current_findings.append(item)
+            
+            old_log = repo_result.raw_payload.get("log", "") if isinstance(repo_result.raw_payload, dict) else ""
+            repo_result.structured_findings = current_findings
+            repo_result.total_issues = len(current_findings)
+            repo_result.raw_payload = {"log": f"{old_log}\n{raw_content_str}"}
+            repo_result.save()
+
+        print(f"🎉 SUCCESS: Sync Complete. Tool: {repo_result.tool} | Created: {created} | Total Issues Saved: {repo_result.total_issues}")
 
     except Exception as e:
-        print(f"Async analysis failed for run {run_id}: {str(e)}")
-
+        print(f"❌ CRITICAL GENERAL TASK EXCEPTION: {str(e)}")
 
 
 

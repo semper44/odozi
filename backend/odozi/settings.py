@@ -31,7 +31,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "twelve-lies-live.loca.lt",
+    "slick-weeks-say.loca.lt",
 ]
 
 # CORS

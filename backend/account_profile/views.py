@@ -91,7 +91,7 @@ def github_push_webhook(request):
     if event_type == 'push':
         # For a push, the branch is parsed out of the reference string
         # branch = data.get('ref', '').split('/')[-1]
-
+        print(data, "data")
         repo_url = data.get('repository', {}).get('clone_url')
         default_branch = data.get('repository', {}).get('default_branch', 'master')
         base_branch = default_branch
