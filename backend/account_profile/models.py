@@ -41,11 +41,6 @@ class GitHubRepository(models.Model):
     """
     Represents an actual code repository.
     """
-    # installation = models.ForeignKey(GitHubInstallation, on_delete=models.CASCADE, related_name="repositories")
-    
-    # GitHub's internal global database ID for this repo (e.g., 81729482)
-    # Crucial because users can rename their repos, but this ID never changes.
-    # github_id = models.BigIntegerField(unique=True)
     workspace = models.ForeignKey(
         Workspace, 
         on_delete=models.CASCADE, 
@@ -55,13 +50,14 @@ class GitHubRepository(models.Model):
     
     repo_name = models.CharField(max_length=255, db_index=True)        # e.g., "Taskmaster"
     repo_owner = models.CharField(max_length=255, db_index=True)       # e.g., "OdoziEngine"
+    repo_id = models.BigIntegerField(unique=True, db_index=True)
     
     # Pre-calculated full slug field for ultra-fast database lookups
     # Indexed to guarantee lightning-fast performance for your curl webhooks
     repo_full_name = models.CharField(max_length=255, unique=True, db_index=True) # e.g., "OdoziEngine/Taskmaster"
     
     # Settings for your app orchestrator
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True, db_index=True)
     default_branch = models.CharField(max_length=100, default="main")
     
     created_at = models.DateTimeField(auto_now_add=True)

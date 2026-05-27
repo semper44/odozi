@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import UserInputModel 
+from .models import UserInputModel, GitHubRepository 
 from account_profile.models import UserProfileModel
 
 class UserInputModelSerializer(serializers.ModelSerializer):
@@ -10,4 +10,9 @@ class UserInputModelSerializer(serializers.ModelSerializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfileModel
+        fields = '__all__'
+
+class GitHubRepositorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GitHubRepository
         fields = '__all__'

@@ -11,7 +11,7 @@ on:
         description: 'The API target endpoint (Use Ngrok/LocalTunnel for local testing)'
         required: true
         type: string
-        default: 'https://slick-weeks-say.loca.lt'
+        default: 'https://free-pandas-clap.loca.lt'
       custom_script_payload:
         description: 'Compiled OdoziVisitor class code and file walker'
         required: false
@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   # =========================================================================
-  # JOB 1: PYTEST RUNNER (With Dynamic Process Termination Catch)
+  # JOB 1: PYTEST RUNNER (With Smart Universal Test File Overrides)
   # =========================================================================
   run-pytest:
     runs-on: ubuntu-latest
@@ -61,8 +61,32 @@ jobs:
         shell: bash
         env:
           RUNNER_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SECRETS_CONTEXT: ${{ toJson(secrets) }}
+          ENV_KEYS_INPUT: ${{ inputs.env_keys_list }}
         run: |
           echo "=== OUTPUT_START ==="
+          # =========================================================================
+          # 🎯 AUTOMATED DYNAMIC VARIABLE INJECTOR (Fixed Main Process Scope)
+          # =========================================================================
+          echo "🔍 VERIFICATION: Checking variable payload request..."
+          echo "Requested from Django DB: $ENV_KEYS_INPUT"
+          
+          while read -r KEY_NAME; do
+            if [ -n "$KEY_NAME" ] && [ "$KEY_NAME" != "null" ]; then
+              SECRET_VALUE=$(echo "$SECRETS_CONTEXT" | jq -r --arg key "$KEY_NAME" '.[$key]')
+              if [ "$SECRET_VALUE" != "null" ] && [ -n "$SECRET_VALUE" ]; then
+                echo "$KEY_NAME=$SECRET_VALUE" >> $GITHUB_ENV
+                export "$KEY_NAME=$SECRET_VALUE"
+                echo "🚀 DYNAMIC INJECTION SUCCESS: Loaded environment variable: $KEY_NAME"
+              else
+                echo "❌ DYNAMIC INJECTION FAILURE: Variable name '$KEY_NAME' is missing from GitHub Secrets vault!"
+              fi
+            fi
+          done <<< "$(echo "$ENV_KEYS_INPUT" | jq -r '.[]')"
+
+          # =========================================================================
+          # 🐍 RUN DYNAMIC PROJECT DISCOVERY & TEST COMMAND
+          # =========================================================================
           MANAGE_PY_PATH=$(find . -name "manage.py" | head -n 1)
           if [ -z "$MANAGE_PY_PATH" ]; then
             RUN_CMD="pytest --json-report --json-report-file=report.json --cov=. --cov-report=json"
@@ -73,10 +97,29 @@ jobs:
                SETTINGS_DIR=$(find "$PROJECT_DIR" -name "settings.py" | head -n 1)
                SETTINGS_MOD=$(echo "$SETTINGS_DIR" | sed "s|^$PROJECT_DIR/||" | sed 's|/|.|g' | sed 's|\.py$||')
             fi
-            export PYTHONPATH="$PROJECT_DIR:$PYTHONPATH"
+            
+            # Move the active shell process into the Django directory first for path safety
+            cd "$PROJECT_DIR"
+            
+            # 🎯 ✅ THE HOOK FIX: Added -name "test.py" to catch your singular file natively!
+            TEST_FILES=$(find . \
+              \( -name "test.py" \
+              -o -name "tests.py" \
+              -o -name "test_*.py" \
+              -o -name "*_test.py" \))
+
+            echo "Moved execution root to Django project root: $(pwd)"
+            echo "Detected settings module: $SETTINGS_MOD"
+            echo "Discovered tests relative to root:"
+            echo "$TEST_FILES"
+
+            export PYTHONPATH=".:$PYTHONPATH"
             export DJANGO_SETTINGS_MODULE="$SETTINGS_MOD"
-            RUN_CMD="pytest $PROJECT_DIR --json-report --json-report-file=report.json --cov=$PROJECT_DIR --cov-report=json"
+
+            # Run pytest directly inside the project root directory
+            RUN_CMD="pytest $TEST_FILES --json-report --json-report-file=report.json --cov=. --cov-report=json"
           fi
+
           
           # Inline streaming chunk framework
           python -c "
@@ -113,7 +156,6 @@ jobs:
               buffer.append(line.strip())
               if len(buffer) >= 20 or (time.time() - last_flush) > 2.0: flush()
           
-          # 🎯 ✅ FIX: Force-flush any residual terminal string text left behind at death
           if len(buffer) > 0:
               flush()
           " < <($RUN_CMD 2>&1)
@@ -133,6 +175,7 @@ jobs:
               -F "file=@report.json"
           fi
           exit ${{ env.TEST_EXIT_CODE }}
+
 
   # =========================================================================
   # JOB 2: RUFF RUNNER
@@ -221,3 +264,4 @@ jobs:
             -F "run_id=${{ github.run_id }}" \
             -F "tool=odozi_visitors" \
             -F "file=@odozi_report.json"
+

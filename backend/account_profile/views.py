@@ -15,13 +15,15 @@ from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbid
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect
 from django.contrib.auth import login
 from django.contrib.auth.models import User
 from rest_framework import generics
-from .models import UserProfileModel, Workspace, WorkspaceMembership
+from .models import UserProfileModel, Workspace, WorkspaceMembership, GitHubRepository
 from odozi.utils.crypto import encrypt_token, decrypt_token
 from agents.tasks import run_agentic_pipeline
+
 
 
 
@@ -235,6 +237,14 @@ def github_callback_view(request):
     github_email = user_profile.get("email")
     print("user_profile", user_profile)  # Debugging line to inspect the user profile data returned by GitHub
 
+    user_repos_url = f"https://api.github.com/users/{github_username}/repos"
+    user_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    user_repos = requests.get(user_repos_url, headers=user_headers).json()
+    print("user_repos", user_repos)  # Debugging line to inspect the user repos data returned by GitHub
+
     # 4. Fallback if user's email is private (GitHub returns empty email if hidden)
     if not github_email:
         emails_url = "https://api.github.com/user/emails"
@@ -267,8 +277,10 @@ def github_callback_view(request):
                 "github_account_name": github_username,
             }
         )
+        print("wahala", request.user)
         # workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
-        W_Membership= WorkspaceMembership.objects.create(role="admin", workspace=workspace, user=request.user)
+        if created:
+            W_Membership= WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
 
     # 5. DB MANAGEMENT: Locate or create the user record in Django
 
@@ -323,6 +335,91 @@ def revoke_developer_access(request, workspace_id, target_user_id):
     
     return JsonResponse({"status": "success", "message": "Developer access successfully revoked."})
 
+
+
+
+
+@login_required
+def get_and_sanitize_repositories(request, workspace_id):
+    try:
+        workspace = Workspace.objects.get(id=workspace_id, owner=request.user)
+        
+        # 1. Map existing records using their immutable github_id as the lookup key
+        db_repos = GitHubRepository.objects.filter(workspace=workspace)
+        db_map = {repo.github_id: repo for repo in db_repos} # Keyed by dynamic Integer ID
+        
+        # 2. Call GitHub Live API
+        github_token = request.session.get('github_access_token')
+        headers = {"Authorization": f"token {github_token}"}
+        gh_response = requests.get("https://github.com", headers=headers, timeout=4)
+        
+        if gh_response.status_code != 200:
+            return JsonResponse({'error': 'Failed to pull live repo states'}, status=500)
+            
+        live_github_repos = gh_response.json()
+
+        # Tracking sets to isolate deleted repos
+        live_github_ids = set()
+        merged_list = []
+        repos_to_update = []
+
+        # 3. Loop through live GitHub data
+        for gh_repo in live_github_repos:
+            gh_id = gh_repo.get('id') # The permanent number (e.g., 1101253462)
+            live_github_ids.add(gh_id)
+            
+            current_slug = gh_repo.get('full_name')
+            current_name = gh_repo.get('name')
+            current_owner = gh_repo.get('owner', {}).get('login')
+
+            if gh_id in db_map:
+                # REPO IS CONNECTED! Let's check if it was renamed on GitHub
+                repo_record = db_map[gh_id]
+                
+                if repo_record.repo_full_name != current_slug:
+                    # 🔄 SELF-HEALING ACTION: A rename happened! 
+                    # Update our local cached fields automatically to stay in sync
+                    repo_record.repo_name = current_name
+                    repo_record.repo_owner = current_owner
+                    repo_record.repo_full_name = current_slug
+                    repos_to_update.append(repo_record) # Batch save later for performance
+
+                merged_list.append({
+                    "full_name": current_slug,
+                    "is_connected": True,
+                    "is_active": repo_record.is_active,
+                    "backend_id": repo_record.id
+                })
+            else:
+                # Repo exists on GitHub but hasn't been connected to our app yet
+                merged_list.append({
+                    "full_name": current_slug,
+                    "is_connected": False,
+                    "is_active": False,
+                    "backend_id": None
+                })
+
+        # 🚀 High-performance bulk save for any detected renames
+        if repos_to_update:
+            GitHubRepository.objects.bulk_update(repos_to_update, ['repo_name', 'repo_owner', 'repo_full_name'])
+
+        # =====================================================================
+        # 🎯 AUTOMATED SANITIZATION GATE: Purge Dead/Deleted Repositories
+        # =====================================================================
+        # If a repo exists in our database map but is completely absent from 
+        # GitHub's live payload array, it has been hard-deleted by the user.
+        saved_db_ids = set(db_map.keys())
+        deleted_repo_ids = saved_db_ids - live_github_ids # Mathematical difference calculation
+        
+        if deleted_repo_ids:
+            print(f"🗑️ Sanitizing Database: Purging deleted repositories: {deleted_repo_ids}")
+            # Wipe stale metadata records out of the system cleanly in a single execution
+            GitHubRepository.objects.filter(github_id__in=deleted_repo_ids).delete()
+
+        return JsonResponse({"repositories": merged_list})
+
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 # @csrf_exempt

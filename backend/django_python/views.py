@@ -12,7 +12,7 @@ from odozi.utils.crypto import decrypt_token
 from odozi.utils.security import verify_signature
 from odozi.utils.github_auth_decorator import require_github_auth
 from rest_framework import generics
-from .serializer import UserProfileSerializer
+from .serializer import GitHubRepositorySerializer, UserProfileSerializer
 
 
 # def dashboard_view(request):
@@ -66,6 +66,11 @@ def dashboard_view(request):
     cleaned_repos = []
     for repo in repositories_data:
         cleaned_repos.append({
+            "id": repo.get("id"),
+            "owner": repo.get("login"),
+            "collaborators_url": repo.get("collaborators_url"),
+            "branches_url": repo.get("branches_url"),
+            "contributors_url": repo.get("contributors_url"),
             "name": repo.get("name"),
             "full_name": repo.get("full_name"), # e.g. "semper44/odozi"
             "is_private": repo.get("private"),
@@ -81,6 +86,10 @@ def dashboard_view(request):
         "repositories": cleaned_repos
     })
 
+
+class CreateUserSELECTEDrEPO(generics.CreateAPIView):
+    serializer_class = GitHubRepositorySerializer
+    queryset = GitHubRepository.objects.all()
 
 
 @csrf_exempt
