@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'daphne',
     'django.contrib.staticfiles',
 
     # apps
@@ -61,6 +62,7 @@ INSTALLED_APPS = [
     'dj_rest_auth.registration',
     'allauth.socialaccount.providers.github',
     'corsheaders',
+    'channels',
 
 ]
 
@@ -220,3 +222,13 @@ else:
 
 yaml_file_path = os.path.join(BASE_DIR, 'agents', 'orchestrator.yaml')
 print(yaml_file_path)
+
+ASGI_APPLICATION = 'odozi.asgi.application'
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [('127.0.0.1', 6379)],
+        },
+    },
+}

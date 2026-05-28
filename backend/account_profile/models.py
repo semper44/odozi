@@ -58,6 +58,10 @@ class GitHubRepository(models.Model):
     
     # Settings for your app orchestrator
     is_active = models.BooleanField(default=True, db_index=True)
+    is_private = models.BooleanField(default=False)
+    branches_url = models.URLField(max_length=500, blank=True, null=True)
+    collaborators_url = models.URLField(max_length=500, blank=True, null=True)
+    contributors_url = models.URLField(max_length=500, blank=True, null=True)
     default_branch = models.CharField(max_length=100, default="main")
     
     created_at = models.DateTimeField(auto_now_add=True)

@@ -11,8 +11,14 @@ from .models import UserProfileModel
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.security import verify_signature
 from odozi.utils.github_auth_decorator import require_github_auth
-from rest_framework import generics
 from .serializer import GitHubRepositorySerializer, UserProfileSerializer
+
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+
 
 
 # def dashboard_view(request):
@@ -74,8 +80,8 @@ def dashboard_view(request):
             "name": repo.get("name"),
             "full_name": repo.get("full_name"), # e.g. "semper44/odozi"
             "is_private": repo.get("private"),
-            "html_url": repo.get("html_url"),
-            "clone_url": repo.get("clone_url")
+            # "html_url": repo.get("html_url"),
+            # "clone_url": repo.get("clone_url")
         })
 
     # For testing right now, return it as JSON to your browser screen!
@@ -87,9 +93,79 @@ def dashboard_view(request):
     })
 
 
-class CreateUserSELECTEDrEPO(generics.CreateAPIView):
-    serializer_class = GitHubRepositorySerializer
-    queryset = GitHubRepository.objects.all()
+
+class CreateUserSelectedRepos(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        # 1. Capture payload data array and workspace tracking context headers
+        repo_list = request.data.get('repositories', []) # Expects an array list of dicts
+        workspace_id = request.data.get('workspace_id')
+
+        if not repo_list or not isinstance(repo_list, list):
+            return Response(
+                {"error": "Malformed payload structure. 'repositories' must be a non-empty array list."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 2. Securely isolate the target workspace profile layout context
+            workspace = Workspace.objects.get(id=workspace_id, owner=request.user)
+        except Workspace.DoesNotExist:
+            return Response(
+                {"error": f"Workspace context matching ID '{workspace_id}' not found or unauthorized."}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 3. Mass validate the entire payload matrix using our serializer mapping wrapper
+        serializer = GitHubRepositorySerializer(data=repo_list, many=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # 4. 🏎️ THE ULTIMATE PERFORMANCE STEP: In-Memory Instance Compiling
+        # We build the raw Python model objects in local worker memory WITHOUT touching the database yet.
+        validated_data_list = serializer.validated_data
+        
+        # Pull existing saved IDs to prevent duplicate database integrity crashes
+        incoming_ids = [item['github_id'] for item in validated_data_list]
+        existing_ids = set(GitHubRepository.objects.filter(
+            github_id__in=incoming_ids
+        ).values_list('github_id', flat=True))
+
+        new_repo_instances = []
+        for data in validated_data_list:
+            # Skip records that are already connected to keep the database stable
+            if data['github_id'] in existing_ids:
+                continue
+
+            new_repo_instances.append(
+                GitHubRepository(
+                    workspace=workspace,
+                    github_id=data['github_id'],
+                    repo_name=data['repo_name'],
+                    repo_owner=data['repo_owner'],
+                    repo_full_name=data['repo_full_name'],
+                    # Optional metadata fields:
+                    # collaborators_url=data.get('collaborators_url'),
+                    # branches_url=data.get('branches_url'),
+                    # contributors_url=data.get('contributors_url')
+                )
+            )
+
+        # 5. Execute ONE single pinpoint atomic INSERT database trip request statement
+        if new_repo_instances:
+            GitHubRepository.objects.bulk_create(new_repo_instances)
+            print(f"🎉 BULK INSERT SUCCESS: Saved {len(new_repo_instances)} new repositories.")
+
+        return Response(
+            {
+                "status": "success",
+                "message": f"Successfully processed {len(repo_list)} repository records. Connected {len(new_repo_instances)} new pipelines.",
+                "saved_count": len(new_repo_instances)
+            }, 
+            status=status.HTTP_201_CREATED
+        )
+
 
 
 @csrf_exempt
