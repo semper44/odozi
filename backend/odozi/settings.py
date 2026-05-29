@@ -35,7 +35,9 @@ ALLOWED_HOSTS = [
 ]
 
 # CORS
-CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http://127.0.0.1:8000",'http://127.0.0.1']
+CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", 
+                        "http://127.0.0.1:8000",'http://127.0.0.1',
+                        "ws://127.0.0.1:8000", "ws://localhost:8000"]
 # Application definition
 
 INSTALLED_APPS = [
