@@ -6,9 +6,6 @@ from channels.db import database_sync_to_async
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         print("🔥 WebSocket connection attempt")
-        # Allow connections without a room_name in the URL by falling
-        # back to a default room (e.g. 'lobby'). This prevents KeyError
-        # when the routing pattern doesn't provide a room_name.
         # self.room_name = self.scope['url_route']['kwargs'].get('room_name', 'lobby')
         # self.room_group_name = f'chat_{self.room_name}'
 
@@ -16,6 +13,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
         #     self.room_group_name,
         #     self.channel_name
         # )
+
+        self.user_group = f"user_{self.scope['user'].id}"
+
+        await self.channel_layer.group_add(
+            self.user_group,
+            self.channel_name
+        )
 
         await self.accept()
         print("✅ WebSocket connected")
@@ -28,8 +32,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # )
 
     async def receive(self, text_data):
+        print("RECEIVE CALLED")
+        print("RAW:", text_data)
         data = json.loads(text_data)
         message = data.get('message', '')
+        print("message", message)
 
         # await self.channel_layer.group_send(
         #     self.room_group_name,
@@ -46,3 +53,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'message': message
         }))
 
+        await self.channel_layer.group_send(
+            "user_123",
+            {
+                "type": "chat_message",
+                "message": "Hello from Celery"
+            }
+        )
+
+    

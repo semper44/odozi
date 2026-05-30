@@ -1,3 +1,3 @@
-export interface ChatMessage {
+export interface StreamingMessage {
   message: string;
 }

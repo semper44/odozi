@@ -20,6 +20,9 @@ from django_python.models import RepositoryScan, RepoEnvKey
 from account_profile.models import GitHubRepository, Workspace
 from django.contrib.auth.models import User
 
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+
 # Celery tasks (the parallel tools)
 
 
@@ -967,7 +970,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
 
 
 @shared_task
-def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_str):
+def process_scan_payload_task(run_id, user_id, repository_owner, repo, tool, raw_content_str):
     print(f"\n⚡ --- [CELERY JOB RECEIVED: {tool.upper()}] ---")
     
     try:
@@ -1097,6 +1100,14 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
             repo_result.total_issues = len(current_findings)
             repo_result.raw_payload = {"log": f"{old_log}\n{raw_content_str}"}
             repo_result.save()
+
+        async_to_sync(channel_layer.group_send)(
+            f"user_{user_id}",
+            {
+                "type": "chat_message",
+                "message": findings
+            }
+        )
 
         print(f"🎉 SUCCESS: Sync Complete. Tool: {repo_result.tool} | Created: {created} | Total Issues Saved: {repo_result.total_issues}")
 

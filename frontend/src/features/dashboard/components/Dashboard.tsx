@@ -2,7 +2,7 @@ import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft } from "luci
 import { useSelectionStore } from "../../store/selectionStore";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { items as dummyItems } from "@/features/data/dummyData";
-import { useChatSocket } from "@/features/streaming/hooks/useChatSocket";
+import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import { useState } from "react";
 import gradientBg  from "../../../assets/gradient.jpg"
 import { RepoCard } from "./RepoCard";
@@ -14,7 +14,7 @@ export default function Dashboard() {
     const [isProcessingRequest, setIsProcessingRequest] = useState(false);
     const [isOn, setIsOn] = useState(false);
     const [prompt, setPrompt] = useState("");
-    const { sendMessage } = useChatSocket();
+    const { sendMessage } = useStreamingSocket();
     const selected = useSelectionStore((state) => state.selected);
     
     const {
@@ -23,6 +23,19 @@ export default function Dashboard() {
         error,
     } = useRepos();
 
+
+    function SolveSendIconTasks(){
+        setIsProcessingRequest(true);
+
+        // sending message to the websocket
+        sendMessage({
+            type: "start_processing",
+            repos: Array.from(selected),
+            prompt,
+        });
+        // clearing the input prompt
+        setPrompt("")
+    }
     // if (isLoading) {
     //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
     // }
@@ -164,20 +177,17 @@ export default function Dashboard() {
                                         <input
                                             value={prompt}
                                             onChange={(e) =>
-                                                setPrompt(e.target.value)
+                                                {
+                                                    setPrompt(e.target.value);
+                                                    console.log(prompt)
+
+                                                }
+                                                
                                             } 
                                             id="ai-chat" type="text" placeholder="Chat"
                                             className="pl-4 rounded-xl border w-full h-full" style={{borderColor: "black"}} />
                                         <div onClick={() => 
-                                            {
-                                                setIsProcessingRequest(true)
-
-                                                sendMessage({
-                                                    type: "start_processing",
-                                                    repos: Array.from(selected),
-                                                    prompt,
-                                                })
-                                            }
+                                            SolveSendIconTasks()
                                             }
                                             id="send-icon" className="absolute top-[30%] right-[5%] cursor-pointer">
                                             <SendHorizontal  className={isProcessingRequest ? "hidden" : ""}/>            

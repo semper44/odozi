@@ -1,17 +1,23 @@
 // socket.ts
-import type { ChatMessage } from "./types";
+import type { StreamingMessage } from "./types";
 
 class SocketService {
   private socket: WebSocket | null = null;
-  private messageCallback: ((data: ChatMessage) => void) | null = null;
+  private messageCallback: ((data: StreamingMessage) => void) | null = null;
 
   connect(url: string) {
-    if (this.socket) return; // Prevent duplicate connections
+     console.log("CONNECTED INSTANCE");
+      if (
+        this.socket &&
+        this.socket.readyState === WebSocket.OPEN
+      ) {
+        return;
+      } // Prevent duplicate connections
 
     this.socket = new WebSocket(url);
 
     this.socket.onopen = () => {
-      console.log("⚡ Browser WebSocket Connected Successfully");
+      console.log("⚡ Browser WebSocket Connected Successfully", this);
     };
 
     this.socket.onclose = () => {
@@ -33,14 +39,19 @@ class SocketService {
   }
 
   send(data: any) {
+    console.log("SEND INSTANCE", this);
+    console.log("SOCKET", this.socket);
+    console.log("READY STATE", this.socket?.readyState);
     if (this.socket?.readyState === WebSocket.OPEN) {
+      console.log("ACTUALLY SENDING"); 
       this.socket.send(JSON.stringify(data));
+      console.log("hmmmm"); 
     } else {
       console.warn("⚠️ Cannot send message: Socket is not open yet.");
     }
   }
 
-  onMessage(callback: (data: ChatMessage) => void) {
+  onMessage(callback: (data: StreamingMessage) => void) {
     this.messageCallback = callback; // Safely register callback anytime
   }
 

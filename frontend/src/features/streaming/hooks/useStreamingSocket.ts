@@ -1,19 +1,19 @@
 import { useEffect } from "react";
 import { socketService } from "@/services/websocket/socket";
-import type { ChatMessage } from "./types";
+import type { StreamingMessage } from "./types";
 
 
 
-export const useChatSocket = () => {
+export const useStreamingSocket = () => {
   useEffect(() => {
     socketService.connect("ws://localhost:8000/ws/chat/");
 
-    socketService.onMessage((data: ChatMessage) => {
+    socketService.onMessage((data: StreamingMessage) => {
       console.log("Received:", data);
     });
 
     return () => {
-      socketService.disconnect();
+      // socketService.disconnect();
     };
   }, []);
 
@@ -22,6 +22,7 @@ export const useChatSocket = () => {
       socketService.send({
         message,
       });
+      console.log("chatmessae", message)
     },
   };
 };
