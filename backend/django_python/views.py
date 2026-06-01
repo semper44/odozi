@@ -1,4 +1,5 @@
 import json
+import uuid
 import requests
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
@@ -17,6 +18,10 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.contrib.auth.models import User
+
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 
 
@@ -174,8 +179,8 @@ def receive_ci_results(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-    print("\n--- [INCOMING WEBHOOK SIGNAL] ---")
-    print(f"Content Type: {request.content_type}")
+    request_id = uuid.uuid4().hex[:8]
+    
 
     # Fallback default tracking fields
     run_id = None
@@ -183,12 +188,16 @@ def receive_ci_results(request):
     repo_name = None
     tool_type = "pytest" # Default fallback for the stream chunks
     file_content = ""
+    findings = None
+    save_to_db = False
+
 
     # =========================================================================
     # 🎯 FIX STATE A: PROCESSING PYTHON CHUNKING ENGINE Payloads (JSON or Trace text)
     # =========================================================================
     if request.content_type == 'application/json':
         raw_body_str = request.body.decode('utf-8')
+        print(f"Raw JSON body string length: {raw_body_str}")  # Debugging line to check the raw body content size
         
         try:
             # Try to parse it as clean structured stream JSON
@@ -200,6 +209,10 @@ def receive_ci_results(request):
             
             logs_list = json_data.get('logs', [])
             file_content = "\n".join(logs_list)
+
+            print("")
+            print("json content:", file_content)
+
             
         except json.JSONDecodeError:
             print("⚠️ ALERT: Pytest stream sent raw trace blocks instead of JSON metadata.")
@@ -227,23 +240,78 @@ def receive_ci_results(request):
         
         if uploaded_file:
             file_content = uploaded_file.read().decode('utf-8')
-
+    
+    
     # Double check parameters before hitting Celery
     if not all([run_id, repo_name, repository_owner, tool_type]) or not file_content:
         print(f"❌ REJECTED: Missing attributes. Run: {run_id}, Repo: {repo_name}, Tool: {tool_type}")
         return JsonResponse({'error': 'Missing required orchestration tracking parameters'}, status=400)
 
-    try:
-       
-        print(f"🚀 SUCCESS: Offloading {tool_type.upper()} payload cleanly to Celery background channels...")
-        
-        process_scan_payload_task.delay( # type: ignore
-            run_id, 
-            repository_owner, 
-            repo_name, 
-            tool_type, 
-            file_content
+    try:     
+        print("PAYLOAD LENGTH:", len(file_content))
+        user_id = User.objects.get(username=repository_owner) # Mock user ID for testing; replace with actual user lookup in production
+        channel_layer = get_channel_layer()
+        if channel_layer is not None:
+            async_to_sync(channel_layer.group_send)(
+                f"user_anonymous_sandbox",
+                {
+                    "type": "chat_message",
+                    "message": {
+                        "stream_type": "live_logs",
+                        "tool": tool_type,
+                        "run_id": run_id,
+                        "data": file_content.splitlines() # Safe uniform text lines array
+                    }
+                }
+            )
+
+
+        print(
+            f"\n🔥 WEBHOOK RECEIVED "
+            f"id={request_id} "
+            f"tool type={tool_type} "
+            f"content_type={request.content_type}"
         )
+        print("")
+
+        if request.content_type != 'application/json' and request.content_type != "multipart/form-data":
+            
+            # Use Regex to see if it's an infrastructure/environment issue or code syntax
+            if "UndefinedValueError" in file_content or "KeyError" in file_content:
+                msg = "Runtime infrastructure configuration error: Missing required environment variables."
+                save_to_db = True
+            elif "SyntaxError" in file_content:
+                msg = "Code execution blocked: Severe Python syntax error detected in repository code."
+                save_to_db = True
+            elif "psycopg2.OperationalError" in file_content or "SSL connection" in file_content:
+                msg = "Database handshake failure: Target environment database rejected connection strings."
+                save_to_db = True
+            else:
+                msg = f"Internal execution failure: The tool container terminated unexpectedly during analysis."
+                save_to_db = False
+            
+            # only save to DB if it's a known actionable error, otherwise skip to avoid noise in the database records.
+            if save_to_db:
+                findings = {
+                    "status": "tool_crash",
+                    "variable": "SYSTEM",
+                    "message": msg
+                }
+        # therefore its json or multipart
+        else:
+            if tool_type != "pytest":
+                save_to_db = True
+        
+        if save_to_db:
+            process_scan_payload_task.delay( # type: ignore
+                run_id, 
+                repository_owner, 
+                repo_name, 
+                tool_type, 
+                file_content,
+                save_to_db, #only save findings to DB if it's a known actionable error, otherwise skip to avoid noise in the database records.
+                findings
+            )
 
         return JsonResponse({'status': 'queued', 'message': f'{tool_type} data buffered safely'})
         

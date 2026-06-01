@@ -11,7 +11,7 @@ on:
         description: 'The API target endpoint (Use Ngrok/LocalTunnel for local testing)'
         required: true
         type: string
-        default: 'https://weak-ducks-wish.loca.lt'
+        default: 'https://hungry-brooms-tan.loca.lt'
       custom_script_payload:
         description: 'Compiled OdoziVisitor class code and file walker'
         required: false
@@ -121,11 +121,17 @@ jobs:
           fi
 
           
+          echo "================================================"
+          echo "STARTING PYTEST"
+          echo "RUN_ID=${{ github.run_id }}"
+          echo "TIME=$(date)"
+          echo "================================================"
           # Inline streaming chunk framework
           python -c "
           import sys, urllib.request, json, time, os
           buffer = []
           last_flush = time.time()
+          flush_count = 0
           url = '${{ inputs.backend_url }}/dashboard/results/'
           token = os.environ.get('RUNNER_AUTH_TOKEN', '')
           
@@ -136,7 +142,13 @@ jobs:
           }
           
           def flush():
-              global buffer, last_flush
+              global buffer, last_flush, flush_count
+              flush_count += 1
+              print(
+                  f'FLUSH #{flush_count} '
+                  f'LINES={len(buffer)} '
+                  f'RUN=${{ github.run_id }}'
+              )
               if not buffer: return
               payload = {
                   'run_id': '${{ github.run_id }}', 
@@ -147,19 +159,29 @@ jobs:
               }
               try:
                   req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method='POST')
-                  with urllib.request.urlopen(req, timeout=5) as response: pass
-              except Exception as e: sys.stderr.write(f'Flush failed: {e}\n')
+                  with urllib.request.urlopen(req, timeout=30) as response: print(f"FLUSH SUCCESS #{flush_count} - STATUS={response.status}")
+              except Exception as e: sys.stderr.write(f"FLUSH FAILED #{flush_count}: {e}\n")
               buffer, last_flush = [], time.time()
+          
 
           for line in sys.stdin:
               sys.stdout.write(line)
               buffer.append(line.strip())
-              if len(buffer) >= 20 or (time.time() - last_flush) > 2.0: flush()
+              if len(buffer) >= 5 or (time.time() - last_flush) > 2.0: flush()
           
           if len(buffer) > 0:
               flush()
           " < <($RUN_CMD 2>&1)
           echo "TEST_EXIT_CODE=${PIPESTATUS}" >> $GITHUB_ENV
+          PYTEST_EXIT=${PIPESTATUS[0]}
+
+          echo "================================================"
+          echo "PYTEST FINISHED"
+          echo "EXIT=$PYTEST_EXIT"
+          echo "TIME=$(date)"
+          echo "================================================"
+
+          echo "TEST_EXIT_CODE=$PYTEST_EXIT" >> $GITHUB_ENV
 
       - name: Send Final Pytest Structured Report
         if: always()

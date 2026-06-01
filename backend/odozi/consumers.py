@@ -1,64 +1,79 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.db import database_sync_to_async
-
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        print("🔥 WebSocket connection attempt")
-        # self.room_name = self.scope['url_route']['kwargs'].get('room_name', 'lobby')
-        # self.room_group_name = f'chat_{self.room_name}'
+        print("🔥 WebSocket connection attempt...")
+        
+        # 1. DEFENSIVE PROGRAMMING: Safely handle signed-in vs anonymous user sessions
+        user = self.scope.get('user')
+        
+        if user and user.is_authenticated:
+            user_identifier = str(user.id)
+            print(f"👤 Authenticated user detected with ID: {user_identifier}")
+        else:
+            # Fallback for local testing / Postman requests / anonymous connections
+            user_identifier = "anonymous_sandbox"
+            print("👻 No authenticated user found. Defaulting to anonymous sandbox group.")
 
-        # await self.channel_layer.group_add(
-        #     self.room_group_name,
-        #     self.channel_name
-        # )
+        # Lock down your single group name cleanly across the whole class instance
+        self.user_group = f"user_{user_identifier}"
 
-        self.user_group = f"user_{self.scope['user'].id}"
+        print(f"🔐 Assigning WebSocket to group: {self.user_group}")
 
+        # 2. Add connection channel to the Redis group pipeline
         await self.channel_layer.group_add(
             self.user_group,
             self.channel_name
         )
 
         await self.accept()
-        print("✅ WebSocket connected")
+        print(f"✅ WebSocket connected successfully to group: {self.user_group}")
 
     async def disconnect(self, code):
-        print("❌ WebSocket disconnected")
-        # await self.channel_layer.group_discard(
-        #     self.room_group_name,
-        #     self.channel_name
-        # )
+        print(f"❌ WebSocket disconnected with code: {code}")
+        
+        # Safely discard using the exact matching group variable name
+        await self.channel_layer.group_discard(
+            self.user_group,
+            self.channel_name
+        )
 
     async def receive(self, text_data):
-        print("RECEIVE CALLED")
-        print("RAW:", text_data)
-        data = json.loads(text_data)
-        message = data.get('message', '')
-        print("message", message)
-
-        # await self.channel_layer.group_send(
-        #     self.room_group_name,
-        #     {
-        #         'type': 'chat_message',
-        #         'message': message
-        #     }
-        # )
+        print("📥 INCOMING WEB FRAME RECEIVED")
+        print("RAW STRING PACKET:", text_data)
+        
+        try:
+            data = json.loads(text_data)
+            message = data.get('message', '')
+            print("PARSED MESSAGE TEXT:", message)
+            
+            # (Optional) Echo back to the sender's user group to verify the loopback works
+            await self.channel_layer.group_send(
+                self.user_group,
+                {
+                    "type": "chat_message",
+                    "message": f"Echo loopback: {message}"
+                }
+            )
+        except json.JSONDecodeError:
+            print("🚨 Failed to parse raw string data frame into JSON structures.")
 
     async def chat_message(self, event):
-        message = event['message']
+        """
+        This system handler picks up messages sent to self.user_group 
+        (from either this consumer or your Celery background tasks) 
+        and pushes them down the raw pipe directly to the browser.
+        """
 
+        print(
+            f"📥 WS RECEIVED "
+            f"channel={self.channel_name}"
+        )
+        message = event['message']
+        # print(f"🚀 Outbound routing data to browser pipe layout: {message}")
+
+        # Push to browser
         await self.send(text_data=json.dumps({
             'message': message
         }))
-
-        await self.channel_layer.group_send(
-            "user_123",
-            {
-                "type": "chat_message",
-                "message": "Hello from Celery"
-            }
-        )
-
-    

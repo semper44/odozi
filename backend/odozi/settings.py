@@ -31,7 +31,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "weak-ducks-wish.loca.lt",
+    "hungry-brooms-tan.loca.lt",
 ]
 
 # CORS
@@ -195,6 +195,7 @@ GITHUB_APP_CLIENT_SECRET = config('GITHUB_APP_CLIENT_SECRET')
 TOKEN_ENCRYPTION_KEY = config('TOKEN_ENCRYPTION_KEY')
 ODOZI_APP_ID = config('ODOZI_APP_ID')
 ODOZI_WEBHOOK_SECRET = config('ODOZI_WEBHOOK_SECRET')
+GITHUB_INSTALLATION_ID = config('GITHUB_INSTALLATION_ID')
 
 
 STATIC_URL = 'static/'

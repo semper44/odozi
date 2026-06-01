@@ -862,8 +862,6 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     visitors_code_block = "\n".join(visitor_instances_lines)
 
     # DEBUG
-    print("RULES:", user_requested_rules)
-    print("VISITORS:")
     print(visitors_code_block)
 
     raw_template = f"""
@@ -970,8 +968,14 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
 
 
 @shared_task
-def process_scan_payload_task(run_id, user_id, repository_owner, repo, tool, raw_content_str):
-    print(f"\n⚡ --- [CELERY JOB RECEIVED: {tool.upper()}] ---")
+def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_str, save_to_db, repo_findings):
+    task_debug_id = uuid.uuid4().hex[:8]
+    print(
+    f"\n⚡ CELERY START:{tool.upper()}] "
+    f"id={task_debug_id} "
+    f"tool={tool} "
+    f"run={run_id}"
+)
     
     try:
         findings = []
@@ -991,82 +995,66 @@ def process_scan_payload_task(run_id, user_id, repository_owner, repo, tool, raw
             is_json_format = False
             print(f"⚠️ ALERT: {tool.upper()} payload is raw text (Possible infrastructure crash).")
 
-        # =====================================================================
-        # 🛡️ CASE A: THE PAYLOAD IS A CRASH TRACEBACK (Any Tool)
-        # =====================================================================
-        if not is_json_format:
-            status = 'failed'
-            total_issues = 1
-            
-            # Use Regex to see if it's an infrastructure/environment issue or code syntax
-            if "UndefinedValueError" in raw_content_str or "KeyError" in raw_content_str:
-                msg = "Runtime infrastructure configuration error: Missing required environment variables."
-            elif "SyntaxError" in raw_content_str:
-                msg = "Code execution blocked: Severe Python syntax error detected in repository code."
-            else:
-                msg = f"Internal execution failure: The tool container terminated unexpectedly during analysis."
-
-            findings.append({
-                "status": "tool_crash",
-                "variable": "SYSTEM",
-                "message": msg
-            })
-
+        # CASE A: THE PAYLOAD IS A CRASH TRACEBACK (Any Tool)
+        if save_to_db:
+            findings.append(repo_findings)  # Append any existing findings from the error logs processed from the view
         # =====================================================================
         # 📦 CASE B: THE PAYLOAD IS CLEAN VALID JSON (Normal Behavior)
         # =====================================================================
-        else:
-            if tool == 'bandit':
-                totals = parsed_json.get('metrics', {}).get('_totals', {}) if parsed_json else {}
-                loc = totals.get('loc', 0)
-                high_severity = totals.get('SEVERITY.HIGH', 0)
-                
-                raw_results = parsed_json.get('results', []) if parsed_json else []
-                total_issues = len(raw_results)
-                status = 'failed' if high_severity > 0 else 'passed'
-                
-                for item in raw_results:
-                    findings.append({
-                        'file': item.get('filename'),
-                        'line': item.get('line_number'),
-                        'name': item.get('test_id'),
-                        'message': item.get('issue_text'),
-                        'severity': item.get('issue_severity')
-                    })
 
-            elif tool == 'ruff':
-                # Ruff returns a flat list array of issue dicts when running --output-format json
-                raw_results = parsed_json if isinstance(parsed_json, list) else []
-                total_issues = len(raw_results)
-                status = 'failed' if total_issues > 0 else 'passed'
-                
-                for item in raw_results:
-                    findings.append({
-                        'file': item.get('filename'),
-                        'line': item.get('location', {}).get('row'),
-                        'name': item.get('code'),
-                        'message': item.get('message'),
-                        'severity': 'MEDIUM'
-                    })
+        print(f"DEBUG: Parsed JSON content for {tool}: {save_to_db}")  # Debug print to inspect the structure of the parsed JSON
+        if tool == 'bandit':
+            totals = parsed_json.get('metrics', {}).get('_totals', {}) if parsed_json else {}
+            loc = totals.get('loc', 0)
+            high_severity = totals.get('SEVERITY.HIGH', 0)
+            
+            raw_results = parsed_json.get('results', []) if parsed_json else []
+            total_issues = len(raw_results)
+            status = 'failed' if high_severity > 0 else 'passed'
+            
+            for item in raw_results:
+                findings.append({
+                    'file': item.get('filename'),
+                    'line': item.get('line_number'),
+                    'name': item.get('test_id'),
+                    'message': item.get('issue_text'),
+                    'severity': item.get('issue_severity')
+                })
 
-            elif tool == 'odozi_visitors':
-                raw_findings = parsed_json.get('findings', []) if parsed_json else []
-                total_issues = len(raw_findings)
-                status = 'failed' if total_issues > 0 else 'passed'
-                
-                for item in raw_findings:
-                    findings.append({
-                        'file': './backend/task/views.py',
-                        'line': item.get('line'),
-                        'name': item.get('name'),
-                        'message': item.get('message'),
-                        'severity': 'HIGH' if item.get('rule') == 'missing_authentication' else 'LOW'
-                    })
+        elif tool == 'ruff':
+            # Ruff returns a flat list array of issue dicts when running --output-format json
+            raw_results = parsed_json if isinstance(parsed_json, list) else []
+            total_issues = len(raw_results)
+            status = 'failed' if total_issues > 0 else 'passed'
+            
+            for item in raw_results:
+                findings.append({
+                    'file': item.get('filename'),
+                    'line': item.get('location', {}).get('row'),
+                    'name': item.get('code'),
+                    'message': item.get('message'),
+                    'severity': 'MEDIUM'
+                })
 
-            elif tool == 'pytest':
-                summary = parsed_json.get('summary', {}) if parsed_json else {}
-                total_issues = summary.get('failed', 0)
-                status = 'failed' if total_issues > 0 else 'passed'
+        elif tool == 'odozi_visitors':
+            raw_findings = parsed_json.get('findings', []) if parsed_json else []
+            total_issues = len(raw_findings)
+            status = 'failed' if total_issues > 0 else 'passed'
+            
+            for item in raw_findings:
+                findings.append({
+                    'file': './backend/task/views.py',
+                    'line': item.get('line'),
+                    'name': item.get('name'),
+                    'message': item.get('message'),
+                    'severity': 'HIGH' if item.get('rule') == 'missing_authentication' else 'LOW'
+                })
+
+        elif tool == 'pytest':
+            print("pytest running")
+            summary = parsed_json.get('summary', {}) if parsed_json else {}
+            total_issues = summary.get('failed', 0)
+            status = 'failed' if total_issues > 0 else 'passed'
 
         # =====================================================================
         # 🎯 OPTIMIZED MULTI-TENANT DB SAVE ENGINE (Single DB Trip)
@@ -1074,43 +1062,44 @@ def process_scan_payload_task(run_id, user_id, repository_owner, repo, tool, raw
         workspace = Workspace.objects.get(name = repository_owner)
 
         repo_result, created = RepositoryScan.objects.update_or_create(
-            run_id=run_id,
-            tool=tool,
-            defaults={
-                'repo': repo,
-                'workspace': workspace,
-                'status': status,
-                'total_issues': len(findings) if tool in ['pytest', 'ruff'] and is_json_format else total_issues,
-                'high_severity_count': high_severity,
-                'lines_of_code': loc,
-                'structured_findings': findings,
-                'raw_payload': parsed_json if is_json_format else {"log": raw_content_str}
-            }
-        )
+                run_id=run_id,
+                tool=tool,
+                defaults={
+                    'repo': repo,
+                    'workspace': workspace,
+                    'status': status,
+                    'total_issues': len(findings) if tool in ['pytest', 'ruff'] and is_json_format else total_issues,
+                    'high_severity_count': high_severity,
+                    'lines_of_code': loc,
+                    'structured_findings': findings,
+                    'raw_payload': parsed_json if is_json_format else {"log": raw_content_str}
+                }
+            )
 
-        # Append chunks strictly for Pytest streams
-        if not created and tool == 'pytest' and not is_json_format:
-            current_findings = repo_result.structured_findings or []
-            for item in findings:
-                if item not in current_findings:
-                    current_findings.append(item)
             
-            old_log = repo_result.raw_payload.get("log", "") if isinstance(repo_result.raw_payload, dict) else ""
-            repo_result.structured_findings = current_findings
-            repo_result.total_issues = len(current_findings)
-            repo_result.raw_payload = {"log": f"{old_log}\n{raw_content_str}"}
-            repo_result.save()
-
-        async_to_sync(channel_layer.group_send)(
-            f"user_{user_id}",
-            {
-                "type": "chat_message",
-                "message": findings
-            }
+        # Append chunks strictly for Pytest streams
+        # if not created and tool == 'pytest' and not is_json_format:
+        #     current_findings = repo_result.structured_findings or []
+        #     for item in findings:
+        #         if item not in current_findings:
+        #             current_findings.append(item)
+            
+        #     old_log = repo_result.raw_payload.get("log", "") if isinstance(repo_result.raw_payload, dict) else ""
+        #     repo_result.structured_findings = current_findings
+        #     repo_result.total_issues = len(current_findings)
+        #     repo_result.raw_payload = {"log": f"{old_log}\n{raw_content_str}"}
+        #     repo_result.save()
+        
+        print(
+            f"✅ CELERY DONE "
+            f"id={task_debug_id}"
         )
-
-        print(f"🎉 SUCCESS: Sync Complete. Tool: {repo_result.tool} | Created: {created} | Total Issues Saved: {repo_result.total_issues}")
-
+        print(
+            f"📡 WEBSOCKET SEND "
+            f"tool={tool} "
+            f"run={run_id}"
+        )
+    
     except Exception as e:
         print(f"❌ CRITICAL GENERAL TASK EXCEPTION: {str(e)}")
 
