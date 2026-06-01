@@ -31,7 +31,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "hungry-brooms-tan.loca.lt",
+    "quiet-women-shake.loca.lt",
 ]
 
 # CORS

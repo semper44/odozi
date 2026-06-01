@@ -11,7 +11,7 @@ on:
         description: 'The API target endpoint (Use Ngrok/LocalTunnel for local testing)'
         required: true
         type: string
-        default: 'https://hungry-brooms-tan.loca.lt'
+        default: 'https://quiet-women-shake.loca.lt'
       custom_script_payload:
         description: 'Compiled OdoziVisitor class code and file walker'
         required: false
@@ -71,18 +71,21 @@ jobs:
           echo "🔍 VERIFICATION: Checking variable payload request..."
           echo "Requested from Django DB: $ENV_KEYS_INPUT"
           
+
           while read -r KEY_NAME; do
             if [ -n "$KEY_NAME" ] && [ "$KEY_NAME" != "null" ]; then
               SECRET_VALUE=$(echo "$SECRETS_CONTEXT" | jq -r --arg key "$KEY_NAME" '.[$key]')
               if [ "$SECRET_VALUE" != "null" ] && [ -n "$SECRET_VALUE" ]; then
+                
+                # THE SECURITY HOOK: Tells GitHub to mask this value instantly across all terminal outputs!
+                echo "::add-mask::$SECRET_VALUE"
+                
                 echo "$KEY_NAME=$SECRET_VALUE" >> $GITHUB_ENV
                 export "$KEY_NAME=$SECRET_VALUE"
-                echo "🚀 DYNAMIC INJECTION SUCCESS: Loaded environment variable: $KEY_NAME"
-              else
-                echo "❌ DYNAMIC INJECTION FAILURE: Variable name '$KEY_NAME' is missing from GitHub Secrets vault!"
               fi
             fi
           done <<< "$(echo "$ENV_KEYS_INPUT" | jq -r '.[]')"
+
 
           # =========================================================================
           # 🐍 RUN DYNAMIC PROJECT DISCOVERY & TEST COMMAND
@@ -159,8 +162,8 @@ jobs:
               }
               try:
                   req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method='POST')
-                  with urllib.request.urlopen(req, timeout=30) as response: print(f"FLUSH SUCCESS #{flush_count} - STATUS={response.status}")
-              except Exception as e: sys.stderr.write(f"FLUSH FAILED #{flush_count}: {e}\n")
+                  with urllib.request.urlopen(req, timeout=30) as response: print(f'FLUSH SUCCESS #{flush_count} - STATUS={response.status}')
+              except Exception as e: sys.stderr.write(f'FLUSH FAILED #{flush_count}: {e}\n')
               buffer, last_flush = [], time.time()
           
 
