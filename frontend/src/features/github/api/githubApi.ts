@@ -1,6 +1,6 @@
 export const fetchRepos = async () => {
   const response = await fetch(
-    "http://localhost:8000/api/github/repos/"
+    "http://127.0.0.1:8000/api/github/repos/"
   );
 
   if (!response.ok) {

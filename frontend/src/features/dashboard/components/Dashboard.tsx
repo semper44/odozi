@@ -3,6 +3,7 @@ import { useSelectionStore } from "../../store/selectionStore";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { items as dummyItems } from "@/features/data/dummyData";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
+import LiveTerminal from "@/features/streaming/components/LiveTerminal";
 import { useState } from "react";
 import gradientBg  from "../../../assets/gradient.jpg"
 import { RepoCard } from "./RepoCard";
@@ -13,6 +14,7 @@ export default function Dashboard() {
     const [isAiOpen, setIsAiOpen] = useState(false);
     const [isProcessingRequest, setIsProcessingRequest] = useState(false);
     const [isOn, setIsOn] = useState(false);
+    const [switchBetweenAIPage, setSwitchBetweenAIPage] = useState(false);
     const [prompt, setPrompt] = useState("");
     const { sendMessage } = useStreamingSocket();
     const selected = useSelectionStore((state) => state.selected);
@@ -26,6 +28,7 @@ export default function Dashboard() {
 
     function SolveSendIconTasks(){
         setIsProcessingRequest(true);
+        setIsAiOpen(false);
 
         // sending message to the websocket
         sendMessage({
@@ -36,6 +39,18 @@ export default function Dashboard() {
         // clearing the input prompt
         setPrompt("")
     }
+
+    function ClickBackIconTasks(){
+        if (isProcessingRequest) {
+            setIsProcessingRequest(false);
+            setIsAiOpen(true);
+        }
+        if (isAiOpen) {
+            setIsAiOpen(false);
+            setIsProcessingRequest(false);
+        }
+    }
+
     // if (isLoading) {
     //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
     // }
@@ -118,7 +133,7 @@ export default function Dashboard() {
                         </div>
 
                         {/* <!-- chat support icon --> */}
-                        <div onClick={() => setIsAiOpen(!isAiOpen)} id="ai-chat-support" className="md:w-[100px] w-fit p-4 mt-auto shadow-md rounded-full cursor-pointer grid items-center justify-center ">
+                        <div onClick={() => {setIsAiOpen(!isAiOpen)}} id="ai-chat-support" className="md:w-[100px] w-fit p-4 mt-auto shadow-md rounded-full cursor-pointer grid items-center justify-center ">
                             <div className="w-full flex justify-center">
                                 <Bot className="material-icons-outlined text-[12px]" />
                             </div>
@@ -132,11 +147,9 @@ export default function Dashboard() {
             <div className="flex mt-4 h-[80vh]">
                 {/* ceenter menu */}
                 <div className="h-full w-[72%] flex-grow mt-4 pr-4 pl-2">               
-                    {/* repo menu */}
+                    {/* repo menu */}                 
 
-                   
-
-                    {!isAiOpen && (<div className="p-10">
+                    {(!isAiOpen && !isProcessingRequest) && (<div className="p-10">
                         <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} />
 
                         <div className="space-y-4">
@@ -151,49 +164,53 @@ export default function Dashboard() {
                     </div>)}
 
                     {/* AI menu */}
-                    {isAiOpen && (<div className="AI-menu w-full h-full flex flex-col items-center justify-center gap-4">
+                    {(isAiOpen || isProcessingRequest) && (<div className="AI-menu w-full h-full flex flex-col items-center justify-center gap-4">
                                                 <div className="w-full md:w-[75%] px-3 py-4 h-full">
                             <div className="flex items-center justify-between">
                                 <div className="md:hidden">
                                     <Menu id="expand-history" className="cursor-pointer"/>
                                 </div>
-                                <ChevronLeft onClick={() => {setIsAiOpen(!isAiOpen); setIsProcessingRequest(false) }} className="cursor-pointer"/>
+                                <ChevronLeft onClick={() => ClickBackIconTasks()} className="cursor-pointer"/>
                             </div>
                             {/* ai-chat-placeholder */}
                             <div id="ai-chat-placeholder" className=" h-[100%] w-full justify-center items-center">
-                            <p>Request status: {isProcessingRequest ? "Processing..." : "Idle"}</p>
+                            <p>Request status: {switchBetweenAIPage ? "aipageon..." : "Idle"}</p>
                                 {/* chat panel */}
-                                {!isProcessingRequest ? <div className="w-full h-[80%] flex flex-col items-center">
+                                {(isAiOpen && !isProcessingRequest) && <div className="w-full h-[80%] flex flex-col items-center">
                                     <h1 className="text-black"><span id="gradient-text" className="bg-gradient-to-r from-[#be9ee2] to-white bg-clip-text text-transparent font-bold">Hy Dear</span> This is an AI assited chat</h1>
                                     <img src={gradientBg } alt="Robot AI" className="w-[35%]" style={{ width : "35%"}} />
                                     <p className="text-black pt-3">How can i help?</p>
-                                </div> : <div className="w-full h-[80%]"></div> 
-                                }
-                                
-                                
-                            {/* input */}
-                                <div className="w-[70%] h-[20%] justify-self-center">
-                                    <div className="relative w-[90%] h-[60%]">
-                                        <input
-                                            value={prompt}
-                                            onChange={(e) =>
-                                                {
-                                                    setPrompt(e.target.value);
-                                                    console.log(prompt)
+                                    {/* input */}
+                                    <div className="w-[70%] h-[20%] justify-self-center">
+                                        <div className="relative w-[90%] h-[60%]">
+                                            <input
+                                                value={prompt}
+                                                onChange={(e) =>
+                                                    {
+                                                        setPrompt(e.target.value);
+                                                        console.log(prompt)
 
+                                                    }                                              
+                                                } 
+                                                id="ai-chat" type="text" placeholder="Chat"
+                                                className={`pl-4 rounded-xl border w-full h-full ${isProcessingRequest ? "hidden" : ""}`} style={{borderColor: "black"}} />
+                                            <div onClick={() => 
+                                                SolveSendIconTasks()
                                                 }
-                                                
-                                            } 
-                                            id="ai-chat" type="text" placeholder="Chat"
-                                            className="pl-4 rounded-xl border w-full h-full" style={{borderColor: "black"}} />
-                                        <div onClick={() => 
-                                            SolveSendIconTasks()
-                                            }
-                                            id="send-icon" className="absolute top-[30%] right-[5%] cursor-pointer">
-                                            <SendHorizontal  className={isProcessingRequest ? "hidden" : ""}/>            
+                                                id="send-icon" className="absolute top-[30%] right-[5%] cursor-pointer">
+                                                <SendHorizontal/>            
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
+                                </div>}
+
+                                {/* live terminal component */}
+                                {(isProcessingRequest && !isAiOpen) && (
+                                    <div className="w-full h-[80%]">
+                                        <LiveTerminal />
+                                    </div>
+                                )}
+
                             </div>
                             
                         </div>

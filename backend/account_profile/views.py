@@ -7,11 +7,13 @@ import hmac
 import hashlib
 import time
 import jwt
+import httpx
 import requests
+import secrets
 
 
 from django.shortcuts import get_object_or_404
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
+from django.http import HttpResponseRedirect, JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -22,7 +24,11 @@ from django.contrib.auth.models import User
 from rest_framework import generics
 from .models import UserProfileModel, Workspace, WorkspaceMembership, GitHubRepository
 from odozi.utils.crypto import encrypt_token, decrypt_token
+from odozi.utils.authentication import rotate_github_token
 from agents.tasks import run_agentic_pipeline
+from django.core.cache import cache
+
+from channels.db import database_sync_to_async
 
 
 
@@ -56,6 +62,133 @@ def verify_github_signature(request):
     
     # Use hmac.compare_digest to prevent timing attacks
     return hmac.compare_digest(expected_signature, signature_header)
+
+
+@csrf_exempt
+def refresh_github_token(request):
+    """
+    Exchanges a GitHub refresh token for a new access token.
+    Expects JSON body: {"refresh_token": "r1.xxxx"}
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+    try:
+        data = json.loads(request.body)
+        refresh_token = data.get("refresh_token")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        
+    if not refresh_token:
+        return JsonResponse({"error": "Missing refresh_token"}, status=400)
+
+    # Payload required by GitHub for refreshing user tokens
+    payload = {
+        "client_id": settings.GITHUB_CLIENT_ID,
+        "client_secret": settings.GITHUB_CLIENT_SECRET,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    
+    headers = {"Accept": "application/json"}
+    
+    # Request a fresh pair from GitHub
+    response = requests.post(
+        "https://github.com", 
+        data=payload, 
+        headers=headers
+    )
+    
+    if response.status_code != 200:
+        return JsonResponse({"error": "Failed to communicate with GitHub"}, status=500)
+        
+    github_data = response.json()
+    
+    # Check if GitHub returned an error (e.g., bad client credentials or expired refresh token)
+    if "error" in github_data:
+        return JsonResponse({
+            "error": github_data.get("error"),
+            "description": github_data.get("error_description")
+        }, status=400)
+        
+    # Returns new access_token, expires_in, refresh_token, and refresh_token_expires_in
+    return JsonResponse(github_data)
+
+
+
+
+@csrf_exempt
+def get_websocket_ticket(request):
+    """
+    Exchanges HttpOnly cookies for a short-lived, single-use Redis ticket.
+    Transparently rotates GitHub access tokens if expired.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+        
+    access_token = request.COOKIES.get("github_access_token")
+    refresh_token = request.COOKIES.get("github_refresh_token")
+    print(request.COOKIES, "cookies")  # Debugging line to inspect the cookies being sent with the request
+    print("OKKKK", access_token)
+    print("SOOOO", refresh_token)
+    
+    # 1. Fallback / Expiration Test: Validate token lifespan directly against GitHub
+    is_valid = False
+    if access_token:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        try:
+            with httpx.Client() as client:
+                res = client.get("https://github.com", headers=headers, timeout=3.0)
+                if res.status_code == 200:
+                    is_valid = True
+        except httpx.RequestError:
+            pass
+
+    # 2. Token Refresh Flow: If access token is missing or dead, try rotating via refresh token
+    new_tokens_issued = False
+    if not is_valid:
+        if not refresh_token:
+            return JsonResponse({"error": "Authentication required"}, status=401)
+            
+        token_data = rotate_github_token(refresh_token)
+        if not token_data:
+            return JsonResponse({"error": "Session expired, please re-authenticate"}, status=401)
+            
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token", refresh_token)
+        new_tokens_issued = True
+
+    # 3. Create Ephemeral Token Flash Pass in Redis
+    ticket = secrets.token_urlsafe(32)
+    redis_key = f"ws_ticket:{ticket}"
+    
+    # Cache token for 30 seconds only (Using Django's built-in Redis CACHE backend configuration)
+    cache.set(redis_key, access_token, timeout=30)
+    
+    response = JsonResponse({"ticket": ticket})
+    
+    # 4. If tokens were rotated, attach the fresh updated secure cookies to the response
+    if new_tokens_issued:
+        response.set_cookie(
+            "github_access_token",
+            access_token,
+            httponly=True,
+            secure=True,
+            samesite="Strict",
+            path="/"
+        )
+        response.set_cookie(
+            "github_refresh_token",
+            refresh_token,
+            httponly=True,
+            secure=True,
+            samesite="Strict",
+            path="/"
+        )
+        
+    return response
+
+
 
 
 # ✅ FIX A: Restrict the endpoint securely to POST requests only
@@ -295,16 +428,54 @@ def github_callback_view(request):
         user=user
     )
 
-    profile.encrypted_access_token = encrypt_token(token_data.get("access_token"))
-    profile.encrypted_refresh_token = encrypt_token(token_data.get("refresh_token"))
+    raw_access_token = token_data.get("access_token")
+    raw_refresh_token = token_data.get("refresh_token")
+    profile.encrypted_access_token = encrypt_token(raw_access_token)
+    profile.encrypted_refresh_token = encrypt_token(raw_refresh_token)
     profile.save()
 
     # Log the user into the active Django session layer
     login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+     
+     # Define your React app home server address (Change port to 3000 if not using Vite)
+    react_app_url = "http://localhost:5173/" 
+    
+    # Initialize a redirect response instance targeting the React home path
+    response = HttpResponseRedirect(react_app_url)
+     # Drop the active Access Token into the secure container vault
+    token_str = raw_access_token.decode("utf-8") if isinstance(raw_access_token, bytes) else raw_access_token 
+    print("")
+    print(token_str, "token_str")  # Debugging line to confirm the access token string is being processed correctly
+    if token_str:
+        github_access_token = response.set_cookie(
+            "github_access_token",
+            str(token_str),
+            max_age=28800,       # 8 Hours lifespan matching standard developer shifts
+            httponly=True,       # Bypasses XSS script scanning injections completely
+            secure=False,        # Set to TRUE in production when utilizing HTTPS certificates
+            samesite="Lax",      # Allows cookie attachment on cross-site redirect landing loops
+            path="/"
+        )
+        print("Access token cookie set successfully", github_access_token)  # Debugging line to confirm access token cookie is being set
+    
+    # Drop the long-lived Refresh Token if returned by GitHub configuration
+    refresh_token_str = raw_refresh_token.decode("utf-8") if isinstance(raw_refresh_token, bytes) else raw_refresh_token
+    print(refresh_token_str, "refresh_token_str")  # Debugging line to confirm the refresh token string is being processed correctly
+    if raw_refresh_token:
+        github_refresh_token = response.set_cookie(
+            "github_refresh_token",
+            str(refresh_token_str),
+            max_age=15768000,    # 6 Months extended lifecycle window
+            httponly=True,
+            secure=False,        # Set to TRUE in production
+            samesite="Lax",
+            path="/"
+        )
+        print("Refresh token cookie set successfully", github_refresh_token)  # Debugging line to confirm refresh token cookie is being set
 
     # 6. SUCCESS: Send them back to your local frontend interface landing page
     # When using jQuery/Django Templates:
-    return redirect("/dashboard/")
+    return response
     
     # When using React later, change the line above to redirect to your React app port:
     # return redirect(f"http://localhost:3000/dashboard/?token={access_token}")

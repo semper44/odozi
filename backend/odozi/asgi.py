@@ -12,6 +12,8 @@ import os
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
+
+from odozi.middleware import TicketAuthMiddleware
 from . import routing
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'odozi.settings')
@@ -24,7 +26,7 @@ application = ProtocolTypeRouter({
     "http": django_asgi_app,
     
     # Map WebSocket connections through your auth stack and router
-    "websocket": AuthMiddlewareStack(
+    "websocket": TicketAuthMiddleware(
         URLRouter(
             routing.websocket_urlpatterns
         )

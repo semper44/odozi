@@ -8,16 +8,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # 1. DEFENSIVE PROGRAMMING: Safely handle signed-in vs anonymous user sessions
         user = self.scope.get('user')
         
-        if user and user.is_authenticated:
-            user_identifier = str(user.id)
-            print(f"👤 Authenticated user detected with ID: {user_identifier}")
-        else:
-            # Fallback for local testing / Postman requests / anonymous connections
-            user_identifier = "anonymous_sandbox"
-            print("👻 No authenticated user found. Defaulting to anonymous sandbox group.")
+        # Deny connection if the user isn't authenticated via GitHub
+        if not user.is_authenticated:
+            await self.close(code=4001)  # Custom close code for unauthorized
+            return
+            
+        await self.accept()
 
         # Lock down your single group name cleanly across the whole class instance
-        self.user_group = f"user_{user_identifier}"
+        self.user_group = f"user_{user.pk}"
 
         print(f"🔐 Assigning WebSocket to group: {self.user_group}")
 

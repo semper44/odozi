@@ -31,13 +31,15 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "quiet-women-shake.loca.lt",
+    "fast-results-behave.loca.lt",
 ]
 
 # CORS
-CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", 
+CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http://localhost:5173",
                         "http://127.0.0.1:8000",'http://127.0.0.1',
                         "ws://127.0.0.1:8000", "ws://localhost:8000"]
+
+CORS_ALLOW_CREDENTIALS = True
 # Application definition
 
 INSTALLED_APPS = [

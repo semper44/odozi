@@ -26,28 +26,24 @@ from asgiref.sync import async_to_sync
 
 
 
-# def dashboard_view(request):
-#     print("Dashboard view accessed")  # Debugging line to confirm the view is being hit
-#     return JsonResponse({"message": "Welcome to the Dashboard!"}) 
 
-
-
-@login_required
 def dashboard_view(request):
-    # 1. Fetch this specific user's encrypted profile row
-    try:
-        profile = UserProfileModel.objects.get(user=request.user)
-    except UserProfileModel.DoesNotExist:
-        return JsonResponse({"error": "No GitHub integration profile found for this account"}, status=404)
+    """
+    API endpoint that returns user repositories directly as JSON to the React frontend.
+    Reads identity securely from the incoming HttpOnly cookie state.
+    """
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    # 2. Decrypt the binary token blob back into a plain text string in-memory
-    print("Encrypted token (binary):", profile.encrypted_access_token)  # Debugging line to check the encrypted token
-    access_token = decrypt_token(profile.encrypted_access_token)
-    
-    if not access_token:
-        return JsonResponse({"error": "Access token is empty or corrupted"}, status=400)
+    # 1. Resolve token from incoming cookies (No longer relying strictly on request.user session)
+    access_token_cookie = request.COOKIES.get("github_access_token")
+    if not access_token_cookie:
+        return JsonResponse({"error": "Unauthorized: Active session cookie missing"}, status=401)
 
-    # 3. Request your repositories directly from GitHub's data server
+    # Convert bytes to string safely if needed
+    access_token = access_token_cookie.decode("utf-8") if isinstance(access_token_cookie, bytes) else access_token_cookie
+
+    # 2. Request your repositories directly from GitHub's data server
     repos_url = "https://api.github.com/user/repos"
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -55,48 +51,30 @@ def dashboard_view(request):
         "X-GitHub-Api-Version": "2022-11-28"
     }
     
-    # Fetch your repositories (per_page=100 gets up to 100 projects at once)
-    response = requests.get(
-    repos_url,
-    headers=headers,
-    params={
-        "per_page": 100,
-        "sort": "updated"
-    }
-)
-    # print("hereeeeee", response)
-    # print("")
-    # print("")
-    # print("hereeeeee", response.json())
-    if response.status_code != 200:
-        return JsonResponse({"error": "Failed to fetch repositories from GitHub", "details": response.json()}, status=response.status_code)
-        
-    repositories_data = response.json()
+    try:
+        response = requests.get(repos_url, headers=headers, params={"per_page": 100, "sort": "updated"}, timeout=5.0)
+        if response.status_code != 200:
+            return JsonResponse({"error": "Failed to fetch data from GitHub API"}, status=response.status_code)
+            
+        repositories_data = response.json()
+    except requests.RequestException:
+        return JsonResponse({"error": "GitHub connectivity failure"}, status=503)
 
-    # 4. Clean the data to map exactly what your frontend UI needs
+    # 3. Clean the repository mapping format for the UI
     cleaned_repos = []
     for repo in repositories_data:
         cleaned_repos.append({
             "id": repo.get("id"),
-            "owner": repo.get("login"),
-            "collaborators_url": repo.get("collaborators_url"),
-            "branches_url": repo.get("branches_url"),
-            "contributors_url": repo.get("contributors_url"),
             "name": repo.get("name"),
-            "full_name": repo.get("full_name"), # e.g. "semper44/odozi"
+            "full_name": repo.get("full_name"),
             "is_private": repo.get("private"),
-            # "html_url": repo.get("html_url"),
-            # "clone_url": repo.get("clone_url")
         })
 
-    # For testing right now, return it as JSON to your browser screen!
-    # It will cleanly display a list of all your 14 projects.
+    # 4. Return pure JSON data directly back to React
     return JsonResponse({
-        "username": request.user.username,
         "total_repos_found": len(cleaned_repos),
         "repositories": cleaned_repos
     })
-
 
 
 class CreateUserSelectedRepos(APIView):
@@ -250,6 +228,17 @@ def receive_ci_results(request):
     try:     
         print("PAYLOAD LENGTH:", len(file_content))
         user_id = User.objects.get(username=repository_owner) # Mock user ID for testing; replace with actual user lookup in production
+        
+        styled_logs = []
+        styled_logs.append(f"")
+        styled_logs.append(f"┌──────────────────────────────────────────────────────────┐")
+        styled_logs.append(f"  ► SYSTEM INGESTION NOTICE: PIPELINE CORE ACTIVE            ")
+        styled_logs.append(f"  ► EXECUTING SCAN VECTOR  : [ {tool_type.upper()} ]         ")
+        styled_logs.append(f"└──────────────────────────────────────────────────────────┘")
+        styled_logs.append(f"")
+        
+        # Append actual terminal lines
+        styled_logs.extend(file_content.splitlines())
         channel_layer = get_channel_layer()
         if channel_layer is not None:
             async_to_sync(channel_layer.group_send)(
@@ -260,7 +249,7 @@ def receive_ci_results(request):
                         "stream_type": "live_logs",
                         "tool": tool_type,
                         "run_id": run_id,
-                        "data": file_content.splitlines() # Safe uniform text lines array
+                        "data": styled_logs # Safe uniform text lines array
                     }
                 }
             )

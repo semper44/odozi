@@ -913,7 +913,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     # =========================================================================
     # STEP 2: DISPATCH TO LIVE GITHUB API (Uncomment when ready to go live)
     # =========================================================================
-    selected_tools = ["pytest", "ruff", "bandit", "odozi_visitors"]
+    selected_tools = ["ruff", "bandit", "odozi_visitors"]
      # 1. Look up the repository full slug name in your DB
     # repo_slug = f"{repo_owner}/{repo_name}"
 
