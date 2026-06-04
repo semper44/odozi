@@ -3,6 +3,7 @@ import React from "react";
 interface GitHubLoginOrRegisterProps {
   className?: string;
 }
+const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
 export const GitHubLoginOrRegister: React.FC<GitHubLoginOrRegisterProps> = ({ className }) => {
   
@@ -13,7 +14,7 @@ export const GitHubLoginOrRegister: React.FC<GitHubLoginOrRegisterProps> = ({ cl
     const clientId = "Iv23liUEbKH7D09scRIZ";
     
     // 2. The callback route handled by your Django backend
-    const redirectUri = "http://127.0.0.1:8000/account/api/auth/github/callback/";
+    const redirectUri = `${backendUrl}/account/api/auth/github/callback/`;
     
     // 3. Expanded access parameters required to manage workflows and parse logs
     const scope = "repo workflow user:email";

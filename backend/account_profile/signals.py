@@ -22,7 +22,7 @@ def create_default_user_workspace(sender, instance, created, **kwargs):
         
         # 2. Automatically link the creator as an 'admin'
         WorkspaceMembership.objects.create(
-            user=instance,
+            members=instance,
             workspace=workspace,
             role='admin',
             is_active=True

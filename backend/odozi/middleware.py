@@ -1,37 +1,70 @@
 # middleware.py
+from typing import Any, Dict
 from urllib.parse import parse_qs
-from django.core.cache import cache
 from django.contrib.auth.models import AnonymousUser
 from channels.middleware import BaseMiddleware
-from odozi.utils.authentication import get_user_from_github_token
+from rest_framework_simplejwt.tokens import AccessToken
+from django.contrib.auth import get_user_model
+from channels.db import database_sync_to_async
+from odozi.utils.crypto import decrypt_token
 
-class TicketAuthMiddleware(BaseMiddleware):
-    async def __call__(self, scope, receive, send):
-        query_string = scope.get("query_string", b"").decode("utf-8")
-        query_params = parse_qs(query_string)
+User = get_user_model()
+
+@database_sync_to_async
+def get_user_from_db(user_id: Any) -> Any:
+    try:
+        user = User.objects.get(id=user_id)
+        print(f"🔍 [WS-AUTH] Database lookup successful for User ID {user_id}: {user.username}")
+        return user
+    except User.DoesNotExist:
+        print(f"❌ [WS-AUTH] Database lookup failed. No user found matching ID: {user_id}")
+        return AnonymousUser()
+
+class CookieJwtAuthMiddleware(BaseMiddleware):
+    async def __call__(self, scope: Dict[str, Any], receive: Any, send: Any) -> Any:
+        print("\n--- 📡 NEW WEBSOCKET HANDSHAKE INCOMING ---")
         
-        # Extract the transient ticket parameter
-        ticket_list = query_params.get("ticket", [None])
-        ticket = ticket_list[0]
+        # 1. Parse the incoming cookies header string
+        headers = dict(scope.get("headers", []))
+        cookie_header = headers.get(b"cookie", b"").decode("utf-8")
         
-        if not ticket:
-            scope["user"] = AnonymousUser()
-            return await super().__call__(scope, receive, send)
-            
-        redis_key = f"ws_ticket:{ticket}"
+        print(f"⚙️ [WS-AUTH] Raw Cookie Header content: '{cookie_header}'")
         
-        # In-memory fast path lookup via Redis
-        github_token = cache.get(redis_key)
+        # Parse cookies safely into a usable dictionary
+        cookies = {}
+        for cookie in cookie_header.split(";"):
+            if "=" in cookie:
+                k, v = cookie.strip().split("=", 1)
+                cookies[k] = v
+
+        # 2. Extract your secure token cookie name
+        # ⚠️ MAKE SURE THIS MATCHES EXACTLY WITH WHAT YOU SET IN YOUR SET_COOKIE FUNCTION!
+        encrypted_jwt = cookies.get("jwt_access_token") 
         
-        if github_token:
-            # INSTANT DESTRUCTION / BURN RULE
-            cache.delete(redis_key)
-            
-            # Authenticate against GitHub and map user instance
-            user = await get_user_from_github_token(github_token)
-            scope["user"] = user if user else AnonymousUser()
+        if encrypted_jwt:
+            print(f"📦 [WS-AUTH] Found 'my_jwt_access_token' cookie payload in request headers.")
+            try:
+                # 3. Try to decrypt the token
+                print("🔑 [WS-AUTH] Attempting cryptographic decryption...")
+                token_string = encrypted_jwt.decode("utf-8") if isinstance(encrypted_jwt, bytes) else encrypted_jwt
+                
+                # 4. Try to parse token and verify cryptographic signature locally
+                print("🛡️ [WS-AUTH] Decrypted successfully. Parsing signature via SimpleJWT AccessToken...")
+                parsed_jwt = AccessToken(token_string)  # type: ignore
+                
+                user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
+                print(f"📋 [WS-AUTH] Token claims validated. Claims map contains User ID: {user_id}")
+                
+                # 5. Look up user inside database
+                scope["user"] = await get_user_from_db(user_id) # type: ignore
+                print(f"✅ [WS-AUTH] Handshake authorized. Scope user set to: {scope['user']}")
+                
+            except Exception as e:
+                print(f"💥 [WS-AUTH] CRITICAL REJECTION: Parsing/Decryption exploded! Error: {str(e)}")
+                scope["user"] = AnonymousUser() # type: ignore
         else:
-            # Reused, manipulated, or expired ticket instantly rejected
-            scope["user"] = AnonymousUser()
-            
-        return await super().__call__(scope, receive, send)
+            print("⚠️ [WS-AUTH] REJECTION: 'my_jwt_access_token' cookie was entirely missing from WebSocket handshake headers.")
+            scope["user"] = AnonymousUser() # type: ignore
+
+        print("--- 📡 FORWARDING TO CONSUMER ROUTER ---")
+        return await self.inner(scope, receive, send) # type: ignore

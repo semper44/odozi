@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import datetime
 from pathlib import Path
 import os
 from decouple import config
@@ -31,15 +32,33 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "fast-results-behave.loca.lt",
+    "odd-brooms-doubt.loca.lt",
+    "short-aliens-sniff.loca.lt"
 ]
 
 # CORS
 CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http://localhost:5173",
-                        "http://127.0.0.1:8000",'http://127.0.0.1',
-                        "ws://127.0.0.1:8000", "ws://localhost:8000"]
+                        "http://127.0.0.1:8000",'http://127.0.0.1',"http://127.0.0.1:5173",
+                        "ws://127.0.0.1:8000", "ws://localhost:8000", "https://odd-brooms-doubt.loca.lt", "https://short-aliens-sniff.loca.lt"]
 
 CORS_ALLOW_CREDENTIALS = True
+
+# 4. CRITICAL: Allow cookies to travel across different domains/ports
+# Changing this to 'None' breaks the barrier and allows cross-site cookie drops
+SESSION_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SAMESITE = "None"
+
+# 5. WARNING: Browsers WILL REJECT SameSite="None" cookies unless they are Secure (HTTPS).
+# However, browsers make a special exception for 'localhost' and '127.0.0.1' over HTTP.
+# To be completely safe during local testing, set these to False.
+
+# SESSION_COOKIE_SECURE = False
+# CSRF_COOKIE_SECURE = False
+
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -57,6 +76,7 @@ INSTALLED_APPS = [
 
     # 3rd party
     'rest_framework',
+    'rest_framework_simplejwt',
     'django.contrib.sites',
     'rest_framework.authtoken',
     'allauth',
@@ -67,16 +87,17 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.github',
     'corsheaders',
     'channels',
+    'django_user_agents',
 
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 
@@ -226,7 +247,29 @@ else:
 
 
 yaml_file_path = os.path.join(BASE_DIR, 'agents', 'orchestrator.yaml')
-print(yaml_file_path)
+
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    
+    # Cookie configurations for the refresh token
+    'AUTH_COOKIE': 'refresh_token',
+    'AUTH_COOKIE_HTTPONLY': True,
+    'AUTH_COOKIE_SECURE': True,       # True for HTTPS/Production/Loca.lt
+    'AUTH_COOKIE_SAMESITE': 'Lax',     # Use 'None' if completely cross-domain
+
+    'TOKEN_REFRESH_SERIALIZER': 'account_profile.serializers.MyCustomTokenRefreshSerializer'
+}
+
 
 ASGI_APPLICATION = 'odozi.asgi.application'
 CHANNEL_LAYERS = {

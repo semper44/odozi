@@ -10,8 +10,11 @@ class UserProfileModel(models.Model):
     # 2. ENCRYPTED FIELD: Tokens are saved as binary blobs, completely unreadable to hackers
     encrypted_access_token = models.BinaryField(blank=True, null=True)
     encrypted_refresh_token = models.BinaryField(blank=True, null=True)
-    
+    encrypted_jwt_access_token = models.BinaryField(blank=True, null=True)
+    encrypted_jwt_refresh_token = models.BinaryField(blank=True, null=True)
+    browser_family = models.CharField(max_length=500, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    expires_at_iso = models.CharField(max_length=500, blank=True, null=True)
 
     def __str__(self):
         return f"{self.user.username}"

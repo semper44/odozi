@@ -1,15 +1,19 @@
 from urllib import response
+import uuid
 
 from agents.orchestrator import start_agentic_workflow
 import re
 import json
 import hmac
-import hashlib
 import time
 import jwt
 import httpx
+import hashlib
 import requests
 import secrets
+import datetime
+from django.utils import timezone
+import urllib.parse
 
 
 from django.shortcuts import get_object_or_404
@@ -21,14 +25,19 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect
 from django.contrib.auth import login
 from django.contrib.auth.models import User
+from django.core.cache import cache
+
 from rest_framework import generics
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from odozi.utils.auth import get_browser_family, get_client_ip
 from .models import UserProfileModel, Workspace, WorkspaceMembership, GitHubRepository
 from odozi.utils.crypto import encrypt_token, decrypt_token
 from odozi.utils.authentication import rotate_github_token
 from agents.tasks import run_agentic_pipeline
-from django.core.cache import cache
 
 from channels.db import database_sync_to_async
+
 
 
 
@@ -64,131 +73,88 @@ def verify_github_signature(request):
     return hmac.compare_digest(expected_signature, signature_header)
 
 
+
 @csrf_exempt
-def refresh_github_token(request):
-    """
-    Exchanges a GitHub refresh token for a new access token.
-    Expects JSON body: {"refresh_token": "r1.xxxx"}
-    """
+def github_refresh_view(request):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-        
-    try:
-        data = json.loads(request.body)
-        refresh_token = data.get("refresh_token")
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-        
-    if not refresh_token:
-        return JsonResponse({"error": "Missing refresh_token"}, status=400)
 
-    # Payload required by GitHub for refreshing user tokens
+    try:
+        body = json.loads(request.body)
+        refresh_token = body.get("refresh_token")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Malformed JSON payload"}, status=400)
+
+    if not refresh_token:
+        return JsonResponse({"error": "Missing refresh token parameters"}, status=400)
+
+    # Payload format required by GitHub OAuth specification rules
     payload = {
         "client_id": settings.GITHUB_CLIENT_ID,
-        "client_secret": settings.GITHUB_CLIENT_SECRET,
+        "client_secret": settings.GITHUB_APP_CLIENT_SECRET,
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
     }
-    
     headers = {"Accept": "application/json"}
-    
-    # Request a fresh pair from GitHub
-    response = requests.post(
-        "https://github.com", 
-        data=payload, 
-        headers=headers
-    )
-    
-    if response.status_code != 200:
-        return JsonResponse({"error": "Failed to communicate with GitHub"}, status=500)
+
+    try:
+        # Non-blocking async/sync network call out to GitHub's token engine
+        with httpx.Client() as client:
+            res = client.post("https://github.com", data=payload, headers=headers, timeout=5.0)
         
-    github_data = response.json()
-    
-    # Check if GitHub returned an error (e.g., bad client credentials or expired refresh token)
-    if "error" in github_data:
+        if res.status_code != 200:
+            return JsonResponse({"error": "GitHub authorization endpoint rejected request"}, status=401)
+
+        token_data = res.json()
+        if "error" in token_data:
+            return JsonResponse({"error": token_data.get("error_description")}, status=400)
+
+        # Extract brand new plain-text token values issued by GitHub
+        new_access = token_data.get("access_token")
+        new_refresh = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in", 28800) # Defaults to 8 hours (28800 seconds)
+
+        # Securely archive the updated tokens inside your PostgreSQL instance
+        if request.user.is_authenticated:
+            profile, _ = UserProfileModel.objects.get_or_create(user=request.user)
+            profile.encrypted_access_token = encrypt_token(new_access)
+            profile.encrypted_refresh_token = encrypt_token(new_refresh)
+            profile.save()
+
         return JsonResponse({
-            "error": github_data.get("error"),
-            "description": github_data.get("error_description")
-        }, status=400)
-        
-    # Returns new access_token, expires_in, refresh_token, and refresh_token_expires_in
-    return JsonResponse(github_data)
+            "accessToken": new_access,
+            "refreshToken": new_refresh,
+            "expiresIn": expires_in
+        })
+
+    except httpx.RequestError:
+        return JsonResponse({"error": "External connection timeout to GitHub gateway"}, status=503)
 
 
-
-
-@csrf_exempt
-def get_websocket_ticket(request):
+@login_required
+def recover_github_tokens(request):
     """
-    Exchanges HttpOnly cookies for a short-lived, single-use Redis ticket.
-    Transparently rotates GitHub access tokens if expired.
+    HTTP GET endpoint allowing a reloaded React tab to recover 
+    its GitHub tokens using the active Django session.
     """
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-        
-    access_token = request.COOKIES.get("github_access_token")
-    refresh_token = request.COOKIES.get("github_refresh_token")
-    print(request.COOKIES, "cookies")  # Debugging line to inspect the cookies being sent with the request
-    print("OKKKK", access_token)
-    print("SOOOO", refresh_token)
-    
-    # 1. Fallback / Expiration Test: Validate token lifespan directly against GitHub
-    is_valid = False
-    if access_token:
-        headers = {"Authorization": f"Bearer {access_token}"}
-        try:
-            with httpx.Client() as client:
-                res = client.get("https://github.com", headers=headers, timeout=3.0)
-                if res.status_code == 200:
-                    is_valid = True
-        except httpx.RequestError:
-            pass
+    try:
+        profile = User.objects.get(user=request.user)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "Profile integration missing"}, status=404)
 
-    # 2. Token Refresh Flow: If access token is missing or dead, try rotating via refresh token
-    new_tokens_issued = False
-    if not is_valid:
-        if not refresh_token:
-            return JsonResponse({"error": "Authentication required"}, status=401)
-            
-        token_data = rotate_github_token(refresh_token)
-        if not token_data:
-            return JsonResponse({"error": "Session expired, please re-authenticate"}, status=401)
-            
-        access_token = token_data.get("access_token")
-        refresh_token = token_data.get("refresh_token", refresh_token)
-        new_tokens_issued = True
+    # Decrypt database binary blobs back into standard text strings
+    access_token = decrypt_token(profile.encrypted_access_token)
+    refresh_token = decrypt_token(profile.encrypted_refresh_token)
 
-    # 3. Create Ephemeral Token Flash Pass in Redis
-    ticket = secrets.token_urlsafe(32)
-    redis_key = f"ws_ticket:{ticket}"
-    
-    # Cache token for 30 seconds only (Using Django's built-in Redis CACHE backend configuration)
-    cache.set(redis_key, access_token, timeout=30)
-    
-    response = JsonResponse({"ticket": ticket})
-    
-    # 4. If tokens were rotated, attach the fresh updated secure cookies to the response
-    if new_tokens_issued:
-        response.set_cookie(
-            "github_access_token",
-            access_token,
-            httponly=True,
-            secure=True,
-            samesite="Strict",
-            path="/"
-        )
-        response.set_cookie(
-            "github_refresh_token",
-            refresh_token,
-            httponly=True,
-            secure=True,
-            samesite="Strict",
-            path="/"
-        )
-        
-    return response
+    # Convert bytes to string wrappers safely if necessary
+    if isinstance(access_token, bytes): access_token = access_token.decode('utf-8')
+    if isinstance(refresh_token, bytes): refresh_token = refresh_token.decode('utf-8')
 
-
+    return JsonResponse({
+        "accessToken": access_token,
+        "refreshToken": refresh_token or "",
+        "username": request.user.username
+    })
 
 
 # ✅ FIX A: Restrict the endpoint securely to POST requests only
@@ -355,14 +321,14 @@ def github_callback_view(request):
     print("token_data", token_data)  # Debugging line to inspect the response from GitHub's token endpoint
 
     # Extract the token string
-    access_token = token_data.get("access_token")
-    if not access_token:
+    github_access_token = token_data.get("access_token")
+    if not github_access_token:
         return JsonResponse({"error": "Failed to exchange code for access token", "details": token_data}, status=400)
 
     # 3. Use the fresh token to fetch the user's basic profile details
     user_url = "https://api.github.com/user"
     user_headers = {
-        "Authorization": f"Bearer {access_token}",
+        "Authorization": f"Bearer {github_access_token}",
         "Accept": "application/vnd.github.v3+json"
     }
     user_profile = requests.get(user_url, headers=user_headers).json()
@@ -371,12 +337,12 @@ def github_callback_view(request):
     github_email = user_profile.get("email")
     print("user_profile", user_profile)  # Debugging line to inspect the user profile data returned by GitHub
 
-    user_repos_url = f"https://api.github.com/users/{github_username}/repos"
-    user_headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    user_repos = requests.get(user_repos_url, headers=user_headers).json()
+    # user_repos_url = f"https://api.github.com/users/{github_username}/repos"
+    # user_headers = {
+    #     "Authorization": f"Bearer {github_access_token}",
+    #     "Accept": "application/vnd.github.v3+json"
+    # }
+    # user_repos = requests.get(user_repos_url, headers=user_headers).json()
     # print("user_repos", user_repos)  # Debugging line to inspect the user repos data returned by GitHub
 
     # 4. Fallback if user's email is private (GitHub returns empty email if hidden)
@@ -424,63 +390,115 @@ def github_callback_view(request):
             "email": github_email or ""
         }
     )
+    refresh = RefreshToken.for_user(user)
+    access = refresh.access_token
+    access['username'] = str(github_username)
+    access['id'] = user.pk
+    my_jwt_access_token = str(access)
+    my_jwt_refresh_token = str(refresh)
+
+
     profile, _ = UserProfileModel.objects.get_or_create(
         user=user
     )
 
     raw_access_token = token_data.get("access_token")
     raw_refresh_token = token_data.get("refresh_token")
+    expires_in_seconds = int(token_data.get("expires_in", 28800)) # 8 Hours default
+
+     # 2. CAPTURE DUAL-LOCK FINGERPRINT MATRIX Parameters
+    browser_family = get_browser_family(request)
+
+    expiration_time = timezone.now() + datetime.timedelta(seconds=expires_in_seconds)
+    expires_at_iso = expiration_time.isoformat() # Looks like: "2026-06-02T23:57:00.000Z"
+
+    
+    clean_access = raw_access_token.decode("utf-8") if isinstance(raw_access_token, bytes) else raw_access_token
+    clean_refresh = raw_refresh_token.decode("utf-8") if isinstance(raw_refresh_token, bytes) else raw_refresh_token
+
+    # 1. GENERATE THE SHORT-LIVED 60-SECOND TRANSIT TICKET
+    ticket_id = str(uuid.uuid4())
+    redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
+    
     profile.encrypted_access_token = encrypt_token(raw_access_token)
     profile.encrypted_refresh_token = encrypt_token(raw_refresh_token)
+    profile.encrypted_jwt_access_token = encrypt_token(my_jwt_access_token)
+    profile.encrypted_jwt_refresh_token = encrypt_token(my_jwt_refresh_token)
+    profile.browser_family = browser_family
+    profile.expires_at_iso = expires_at_iso
     profile.save()
-
-    # Log the user into the active Django session layer
+    
+     # Log the user into the active Django session layer
     login(request, user, backend='django.contrib.auth.backends.ModelBackend')
-     
-     # Define your React app home server address (Change port to 3000 if not using Vite)
-    react_app_url = "http://localhost:5173/" 
+
+    print("Tokens encrypted and saved to database successfully.", encrypt_token(my_jwt_access_token))
+    # 3. SEAL DATA PACKAGE INSIDE REDIS FOR EXACTLY 60 SECONDS
+    if clean_access and clean_refresh:
+        ticket_payload = {
+            "jwt_access_token": encrypt_token(my_jwt_access_token),
+            "github_access_token": encrypt_token(raw_access_token),
+            "browser_family": browser_family,
+            "expires_at": expires_at_iso
+        }
+        cache.set(f"redis_auth_{redis_ticket_key}", ticket_payload, timeout=60)
+
+        print("PPPPPPPPPP")
+    else:
+        return JsonResponse({"error": "Key Token missing"}, status=500)
     
-    # Initialize a redirect response instance targeting the React home path
+    details_cache_key = f"user:repos:{user.pk}"
+
+    # This deletes the entire key from Redis RAM instantly
+    cache.delete(details_cache_key)
+    # 5. SECURE FRAGMENT REDIRECT
+    # We use a URL Hash Fragment '#' so network routing nodes/logs can NEVER read it
+    react_app_url = "http://localhost:5173/"
+
     response = HttpResponseRedirect(react_app_url)
-     # Drop the active Access Token into the secure container vault
-    token_str = raw_access_token.decode("utf-8") if isinstance(raw_access_token, bytes) else raw_access_token 
-    print("")
-    print(token_str, "token_str")  # Debugging line to confirm the access token string is being processed correctly
-    if token_str:
-        github_access_token = response.set_cookie(
-            "github_access_token",
-            str(token_str),
-            max_age=28800,       # 8 Hours lifespan matching standard developer shifts
-            httponly=True,       # Bypasses XSS script scanning injections completely
-            secure=False,        # Set to TRUE in production when utilizing HTTPS certificates
-            samesite="Lax",      # Allows cookie attachment on cross-site redirect landing loops
-            path="/"
-        )
-        print("Access token cookie set successfully", github_access_token)  # Debugging line to confirm access token cookie is being set
-    
-    # Drop the long-lived Refresh Token if returned by GitHub configuration
-    refresh_token_str = raw_refresh_token.decode("utf-8") if isinstance(raw_refresh_token, bytes) else raw_refresh_token
-    print(refresh_token_str, "refresh_token_str")  # Debugging line to confirm the refresh token string is being processed correctly
-    if raw_refresh_token:
-        github_refresh_token = response.set_cookie(
-            "github_refresh_token",
-            str(refresh_token_str),
-            max_age=15768000,    # 6 Months extended lifecycle window
-            httponly=True,
-            secure=False,        # Set to TRUE in production
-            samesite="Lax",
-            path="/"
-        )
-        print("Refresh token cookie set successfully", github_refresh_token)  # Debugging line to confirm refresh token cookie is being set
 
-    # 6. SUCCESS: Send them back to your local frontend interface landing page
-    # When using jQuery/Django Templates:
+    response.set_cookie(
+        "ticket_id",
+        str(ticket_id),  # Placeholder token value for testing
+        max_age=28800,       
+        httponly=True,       
+        secure=True,         # <--- FORCE TO TRUE! Browser drops SameSite="None" if Secure is False over HTTPS
+        samesite="None",     # <--- Keep this on None for cross-origin flights
+        path="/"
+    )
+    # react_app_url = f"https://spicy-flowers-scream.loca.lt/"
+    
     return response
-    
-    # When using React later, change the line above to redirect to your React app port:
-    # return redirect(f"http://localhost:3000/dashboard/?token={access_token}")
 
 
+
+@csrf_exempt
+def github_ticket(request):
+    # This endpoint is used by the frontend websocket bootstrapper to
+    # retrieve the short-lived ticket identifier stored in an HttpOnly cookie.
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    ticket_id = request.COOKIES.get('ticket_id')
+    if not ticket_id:
+        return JsonResponse({'error': 'Missing ticket cookie'}, status=401)
+
+    redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
+    cache_key = f"redis_auth_{redis_ticket_key}"
+    served_key = f"redis_auth_served_{redis_ticket_key}"
+
+    payload = cache.get(cache_key)
+    if not payload:
+        return JsonResponse({'error': 'Ticket not found or expired'}, status=403)
+
+    # Prevent serving the same ticket repeatedly
+    if cache.get(served_key):
+        return JsonResponse({'error': 'Ticket already served'}, status=409)
+
+    # Mark as served for the lifetime of the ticket to avoid duplicate frontend retries
+    cache.set(served_key, True, timeout=60)
+
+    # Return the raw ticket string the websocket service expects
+    return JsonResponse({'ticket': ticket_id})
 
 
 

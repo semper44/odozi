@@ -7,5 +7,8 @@ export const useRepos = () => {
     queryKey: ["repos"],
 
     queryFn: fetchRepos,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 };

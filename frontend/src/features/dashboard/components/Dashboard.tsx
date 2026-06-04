@@ -1,7 +1,6 @@
 import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft } from "lucide-react";
 import { useSelectionStore } from "../../store/selectionStore";
 import { useRepos } from "@/features/github/hooks/useRepos";
-import { items as dummyItems } from "@/features/data/dummyData";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
 import { useState } from "react";
@@ -24,7 +23,16 @@ export default function Dashboard() {
         isLoading,
         error,
     } = useRepos();
+    const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
+    const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
 
+    if (isAuthError){
+        console.log("Please log in with GitHub again to securely synchronize your workspace")
+    }
+    if (serverDownError){
+        console.log("Server is down. Please try again later.")
+    }
+    console.log(error, "h1osana",data)
 
     function SolveSendIconTasks(){
         setIsProcessingRequest(true);
@@ -51,13 +59,13 @@ export default function Dashboard() {
         }
     }
 
-    // if (isLoading) {
-    //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
-    // }
+    if (isLoading) {
+        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
+    }
 
-    // if (error) {
-    //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
-    // }
+    if (error) {
+        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
+    }
 
 
     return (<div>
@@ -153,7 +161,7 @@ export default function Dashboard() {
                         <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} />
 
                         <div className="space-y-4">
-                            {dummyItems.map((repo) => (
+                            {data.repositories.map((repo) => (
                             <RepoCard
                                 key={repo.id}
                                 id={repo.id}

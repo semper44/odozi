@@ -1,10 +1,15 @@
 import json
 import uuid
+
 import requests
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
+from django.core.cache import cache
+from django.contrib.auth.models import User
+from django.conf import settings
+
 
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace
@@ -18,7 +23,7 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.contrib.auth.models import User
+from rest_framework_simplejwt.tokens import AccessToken
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -27,54 +32,184 @@ from asgiref.sync import async_to_sync
 
 
 
+# account_profile/views.py
+import json
+import secrets
+import requests
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from odozi.utils.auth import get_client_ip, get_browser_family, invalidate_user_session
+
+
+# @csrf_exempt
+# def dashboard_view(request):
+#     github_access_token = request.session.get('github_access_token')
+#     github_token = request.COOKIES.get("github_access_token")
+#     print("")
+#     print("sesssion", github_access_token, "brooo", github_token)
+#     print("")
+#     return JsonResponse({"github_access_token": github_access_token})
+
+
+
+@csrf_exempt
 def dashboard_view(request):
     """
-    API endpoint that returns user repositories directly as JSON to the React frontend.
-    Reads identity securely from the incoming HttpOnly cookie state.
+    Consolidated Dashboard Gateway: Validates initialization transit tickets OR active sessions,
+    implements a high-performance Cache-Aside Redis data pipeline, and securely manages 
+    HttpOnly browser tokens.
     """
-    if request.method != "GET":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed. Must use POST for security verification."}, status=405)
 
-    # 1. Resolve token from incoming cookies (No longer relying strictly on request.user session)
-    access_token_cookie = request.COOKIES.get("github_access_token")
-    if not access_token_cookie:
-        return JsonResponse({"error": "Unauthorized: Active session cookie missing"}, status=401)
+    # 1. RETRIEVE INCOMING IDENTIFICATION CONTAINERS
+    ticket_id = request.COOKIES.get("ticket_id")
+    stored_jwt_access_token = request.COOKIES.get("jwt_access_token")
+    browser_family = get_browser_family(request)
 
-    # Convert bytes to string safely if needed
-    access_token = access_token_cookie.decode("utf-8") if isinstance(access_token_cookie, bytes) else access_token_cookie
+    token_string = None
+    username = None
+    user_id = None
+    github_access_token = None
 
-    # 2. Request your repositories directly from GitHub's data server
-    repos_url = "https://api.github.com/user/repos"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
-    }
-    
-    try:
-        response = requests.get(repos_url, headers=headers, params={"per_page": 100, "sort": "updated"}, timeout=5.0)
-        if response.status_code != 200:
-            return JsonResponse({"error": "Failed to fetch data from GitHub API"}, status=response.status_code)
+    # Base tracking template string for Redis keys
+    redis_ticket_key = f"redis_auth_ws_transit_ticket:{ticket_id}" if ticket_id else None
+
+    # FIRST LOGIN HANDSHAKE (Transit Ticket Present) 
+    if ticket_id:
+        print(ticket_id)
+        raw_payload = cache.get(redis_ticket_key) if redis_ticket_key else None
+        print(f"📡 [DASHBOARD] Transit execution path. Redis Payload resolved: {raw_payload}")
+
+        if not raw_payload:
+            return JsonResponse({"error": "Transit ticket expired or already consumed."}, status=403)
+
+        # Dual-lock fingerprint validation check
+        if browser_family != raw_payload.get("browser_family"):
+            cache.delete(redis_ticket_key)
+            return JsonResponse({"error": "Fingerprint validation failed."}, status=403)
+
+        # Destructure and decrypt your signed application JWT access token string
+        try:
+            jwt_encrypted_access = raw_payload["jwt_access_token"]
+            jwt_decrypted_bytes = decrypt_token(jwt_encrypted_access)
+            token_string = jwt_decrypted_bytes.decode("utf-8") if isinstance(jwt_decrypted_bytes, bytes) else jwt_decrypted_bytes
+
+            # Parse claims map variables locally
+            parsed_jwt = AccessToken(token_string) # type: ignore
+            username = parsed_jwt.get("username")
+            user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
+
+            # Extract the raw GitHub developer token string
+            github_encrypted_access = raw_payload["github_access_token"]
+            github_decrypted_bytes = decrypt_token(github_encrypted_access)
+            github_access_token = github_decrypted_bytes.decode("utf-8") if isinstance(github_decrypted_bytes, bytes) else github_decrypted_bytes
+
+            # 🔥 INSTANT BURN RULE: Destroy transit ticket from RAM immediately
+            cache.delete(redis_ticket_key)
+
+        except Exception as e:
+            if redis_ticket_key:
+                cache.delete(redis_ticket_key)
+            return JsonResponse({"error": f"Cryptographic parsing failed: {str(e)}"}, status=401)
+
+    # --- PATH B: SUBSEQUENT PAGE REFRESHES (HttpOnly Cookie Token Present) ---
+    elif stored_jwt_access_token:
+        print("🍪 [DASHBOARD] Recycled cookie execution path. Authenticating via token string payload...")
+        try:
+            # If your cookie stores raw unencrypted text, read directly; if encrypted, run decrypt_token()
+            token_string = stored_jwt_access_token
             
-        repositories_data = response.json()
-    except requests.RequestException:
-        return JsonResponse({"error": "GitHub connectivity failure"}, status=503)
+            print("22222",token_string)
+            parsed_jwt = AccessToken(token_string) # type: ignore
+            print("UPANDA",parsed_jwt)
+            username = parsed_jwt.get("username")
+            user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
+            print(f"✅ [DASHBOARD] Token authentication successful. User context resolved: {username} (ID: {user_id})")
+            
+        except Exception as e:
+            print(f"💥 [DASHBOARD AUTH FAILURE] SimpleJWT threw an exception: {str(e)}")
+            return JsonResponse({"error": f"Session verification expired or invalid: {str(e)}"}, status=401)
 
-    # 3. Clean the repository mapping format for the UI
-    cleaned_repos = []
-    for repo in repositories_data:
-        cleaned_repos.append({
-            "id": repo.get("id"),
-            "name": repo.get("name"),
-            "full_name": repo.get("full_name"),
-            "is_private": repo.get("private"),
-        })
+    else:
+        print("")
+        print("NOTING")
+        return JsonResponse({"error": "Anonymous context rejected. Missing valid authentication elements."}, status=403)
 
-    # 4. Return pure JSON data directly back to React
-    return JsonResponse({
-        "total_repos_found": len(cleaned_repos),
-        "repositories": cleaned_repos
-    })
+    if not username or not user_id:
+        return JsonResponse({"error": "Failed to map token identities securely."}, status=401)
+
+
+    details_cache_key = f"user:repos:{user_id}"
+    base_details_cache_key = cache.get(details_cache_key)
+
+    if base_details_cache_key:
+        cached_repos = base_details_cache_key["cleaned_repos"]
+        github_access_token = base_details_cache_key["github_access_token"]
+        print(f"⚡ [CACHE HIT] Serving repositories for '{username}' instantly from Redis RAM.")
+        # Handle string parsing dependencies if using raw serialization
+        cleaned_repos = json.loads(cached_repos) if isinstance(cached_repos, str) else cached_repos
+    else:
+        print(f"🌐 [CACHE MISS] Querying fresh data arrays from GitHub REST API for user '{username}'...")
+        repos_url = f"https://api.github.com/users/{username}/repos"
+        headers = {
+            "Authorization": f"Bearer {github_access_token}",
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Django-Application-Gateway" # GitHub drops headers lacking identifiers
+        }
+
+        try:
+            github_res = requests.get(repos_url, headers=headers, params={"per_page": 100, "sort": "updated"}, timeout=5.0)
+            print(f"📊 [GITHUB API] External status responded: {github_res.status_code}")
+            repositories_data = github_res.json() if github_res.status_code == 200 else []
+        except requests.RequestException as e:
+            print(f"❌ [GITHUB API] Error occurred while fetching repositories: {e}")
+            repositories_data = []
+
+        # Parse data defensively mapping dict properties safely
+        cleaned_repos = [{
+            "id": r.get("id"),
+            "name": r.get("name"),
+            "full_name": r.get("full_name")
+        } for r in repositories_data if isinstance(r, dict)]
+
+        user_details = {
+            "cleaned_repos":cleaned_repos,
+            "github_access_token":github_access_token
+        }
+
+        # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
+        cache.set(details_cache_key, user_details, timeout=3600)
+        print(f"💾 [REDIS] Successfully cached repository state array for user '{username}'.")
+
+
+    response = JsonResponse({
+        "repositories": cleaned_repos,
+        "my_jwt_access_token": token_string,
+        "username": username,
+        "user_id": user_id
+    }, status=200)
+
+    response.delete_cookie(
+        key="ticket_id",
+        path="/",
+        samesite="None",
+    )
+
+    # Renew the long-lived secure HttpOnly session storage identifier
+    response.set_cookie(
+        key="jwt_access_token",
+        value=str(token_string),
+        max_age=28800, # 8 Hours matching standard working cycles
+        httponly=True,
+        secure=True,     # Forces HTTPS requirement blocks
+        samesite="None", # Permits local cross-origin development handshakes
+        path="/"
+    )
+
+    print(f"🚀 [DASHBOARD] Clean execution complete. Returning data payload for: {username}")
+    return response
+
 
 
 class CreateUserSelectedRepos(APIView):

@@ -3,7 +3,6 @@ import type { StreamingMessage } from "./types";
 
 interface SocketConfig {
   baseUrl: string;
-  fetchTicket: () => Promise<string | null>;
 }
 
 class SocketService {
@@ -31,19 +30,13 @@ class SocketService {
 
     this.isIntentionalDisconnect = false;
     
-    // Acquire a clean single-use validation ticket from the backend pre-flight
-    const ticket = await this.config.fetchTicket();
-    if (!ticket) {
-      console.warn("🔒 Failed to acquire a connection ticket. Scheduling retry...");
-      this.scheduleReconnect();
-      return;
-    }
-
-    const authenticatedUrl = `${this.config.baseUrl}?ticket=${ticket}`;
-    this.socket = new WebSocket(authenticatedUrl);
+    // ✅ FIX: Clean, generic WebSocket path deployment. 
+    // The browser automatically packages your HttpOnly auth cookies into this connection flight!
+    const cleanUrl = this.config.baseUrl;
+    this.socket = new WebSocket(cleanUrl);
 
     this.socket.onopen = () => {
-      console.log("⚡ Browser WebSocket Channel Established via Redis Ticket");
+      console.log("⚡ Browser WebSocket Channel Established via Secure HttpOnly Cookie");
       this.currentDelay = 1000; // Reset exponential sequence backoff upon clean entry
     };
 
@@ -51,7 +44,7 @@ class SocketService {
       this.socket = null;
       
       if (event.code === 4001) {
-        console.error("🚨 Connection rejected: Ticket signature or login session invalid.");
+        console.error("🚨 Connection rejected: Login session invalid or unauthenticated.");
         // Stop retrying if the user session is completely dead
         return;
       }
@@ -67,9 +60,13 @@ class SocketService {
     };
 
     this.socket.onmessage = (event) => {
-      const parsed = JSON.parse(event.data);
-      if (this.messageCallback) {
-        this.messageCallback(parsed);
+      try {
+        const parsed = JSON.parse(event.data);
+        if (this.messageCallback) {
+          this.messageCallback(parsed);
+        }
+      } catch (err) {
+        console.error("⚠️ Failed parsing incoming WebSocket JSON data frame payload:", err);
       }
     };
   }
@@ -104,8 +101,10 @@ class SocketService {
       clearTimeout(this.reconnectTimeoutId);
       this.reconnectTimeoutId = null;
     }
-    this.socket?.close();
-    this.socket = null;
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
     this.messageCallback = null;
   }
 }

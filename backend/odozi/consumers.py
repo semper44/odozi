@@ -2,41 +2,41 @@ import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 class ChatConsumer(AsyncWebsocketConsumer):
+
     async def connect(self):
-        print("🔥 WebSocket connection attempt...")
+        print("\n--- 🎪 CONSUMER CONNECT PHASE STARTED ---")
+        self.user = self.scope.get("user")
         
-        # 1. DEFENSIVE PROGRAMMING: Safely handle signed-in vs anonymous user sessions
-        user = self.scope.get('user')
-        
-        # Deny connection if the user isn't authenticated via GitHub
-        if not user.is_authenticated:
-            await self.close(code=4001)  # Custom close code for unauthorized
+        print(f"👥 [CONSUMER] Incoming scope user resolved to: {self.user} (Type: {type(self.user)})")
+
+        # Check if the user object is anonymous or completely unassigned
+        if not self.user or self.user.is_anonymous:
+            print("🛑 [CONSUMER] REJECTING HANDSHAKE: User context is anonymous or None. Booting connection.")
+            await self.close(code=4001)
             return
-            
+
+        # Authorized user - assign to their secure private room
+        print(f"🟢 [CONSUMER] Access Approved for {self.user.username}. Provisioning private memory channels...")
+        self.room_name = f"user_room_{self.user.id}"
+        self.user_group = f"group_{self.room_name}"
+
+        print(f"📐 [CONSUMER] Binding connection to Group Layer ID: {self.user_group}")
+        await self.channel_layer.group_add(self.user_group, self.channel_name)
+        
         await self.accept()
+        print("🚀 [CONSUMER] WebSocket Connection ACCEPTED cleanly by server engine.")
 
-        # Lock down your single group name cleanly across the whole class instance
-        self.user_group = f"user_{user.pk}"
-
-        print(f"🔐 Assigning WebSocket to group: {self.user_group}")
-
-        # 2. Add connection channel to the Redis group pipeline
-        await self.channel_layer.group_add(
-            self.user_group,
-            self.channel_name
-        )
-
-        await self.accept()
-        print(f"✅ WebSocket connected successfully to group: {self.user_group}")
 
     async def disconnect(self, code):
         print(f"❌ WebSocket disconnected with code: {code}")
         
         # Safely discard using the exact matching group variable name
-        await self.channel_layer.group_discard(
-            self.user_group,
-            self.channel_name
-        )
+        if hasattr(self, 'user_group') and self.user_group:
+            await self.channel_layer.group_discard(
+                self.user_group,
+                self.channel_name
+            )
+
 
     async def receive(self, text_data):
         print("📥 INCOMING WEB FRAME RECEIVED")
@@ -58,6 +58,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except json.JSONDecodeError:
             print("🚨 Failed to parse raw string data frame into JSON structures.")
 
+
     async def chat_message(self, event):
         """
         This system handler picks up messages sent to self.user_group 
@@ -76,3 +77,5 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'message': message
         }))
+
+
