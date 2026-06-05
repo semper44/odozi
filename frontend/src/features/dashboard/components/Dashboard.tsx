@@ -3,7 +3,7 @@ import { useSelectionStore } from "../../store/selectionStore";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import gradientBg  from "../../../assets/gradient.jpg"
 import { RepoCard } from "./RepoCard";
 import { SelectionToolbar } from "./SelectionToolbar";
@@ -25,6 +25,14 @@ export default function Dashboard() {
     } = useRepos();
     const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
     const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
+    // useMemo ensures this index is only recalculated if data actually changes.
+    const selectedRepoIdsSet = useMemo(() => {
+        if (!data || !data.repo_selection) return new Set();
+        
+        // Match the exact ID key property output by your serializer (e.g., 'id' or 'repo_id')
+        return new Set(data.repo_selection.map(item => item.id || item.repo_id));
+    }, [data]);
+
 
     if (isAuthError){
         console.log("Please log in with GitHub again to securely synchronize your workspace")

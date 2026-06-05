@@ -173,18 +173,36 @@ def dashboard_view(request):
             "full_name": r.get("full_name")
         } for r in repositories_data if isinstance(r, dict)]
 
-        user_details = {
-            "cleaned_repos":cleaned_repos,
-            "github_access_token":github_access_token
-        }
+    try:
+        db_user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "Database sync user mismatch"}, status=401)
 
-        # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
-        cache.set(details_cache_key, user_details, timeout=3600)
-        print(f"💾 [REDIS] Successfully cached repository state array for user '{username}'.")
+    repo_selection_queryset  = GitHubRepository.objects.filter(
+        workspace__members__members=db_user,
+        workspace__members__is_active=True,  
+        is_active=True                      
+    ).select_related('workspace')  
+
+
+    serialized_repo_selection = list(repo_selection_queryset.values(
+        'repo_id', 'workspace__name'
+    ))
+    
+    user_details = {
+        "cleaned_repos":cleaned_repos,
+        "github_access_token":github_access_token,
+        "repo_selection":serialized_repo_selection
+    }
+
+    # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
+    cache.set(details_cache_key, user_details, timeout=3600)
+    print(f"💾 [REDIS] Successfully cached repository state array for user '{username}'.")
 
 
     response = JsonResponse({
         "repositories": cleaned_repos,
+        "repo_selection":serialized_repo_selection,
         "my_jwt_access_token": token_string,
         "username": username,
         "user_id": user_id

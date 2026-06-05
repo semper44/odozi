@@ -4,10 +4,8 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 class ChatConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
-        print("\n--- 🎪 CONSUMER CONNECT PHASE STARTED ---")
         self.user = self.scope.get("user")
         
-        print(f"👥 [CONSUMER] Incoming scope user resolved to: {self.user} (Type: {type(self.user)})")
 
         # Check if the user object is anonymous or completely unassigned
         if not self.user or self.user.is_anonymous:
@@ -20,11 +18,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.room_name = f"user_room_{self.user.id}"
         self.user_group = f"group_{self.room_name}"
 
-        print(f"📐 [CONSUMER] Binding connection to Group Layer ID: {self.user_group}")
         await self.channel_layer.group_add(self.user_group, self.channel_name)
         
         await self.accept()
-        print("🚀 [CONSUMER] WebSocket Connection ACCEPTED cleanly by server engine.")
 
 
     async def disconnect(self, code):

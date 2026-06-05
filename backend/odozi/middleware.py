@@ -22,13 +22,11 @@ def get_user_from_db(user_id: Any) -> Any:
 
 class CookieJwtAuthMiddleware(BaseMiddleware):
     async def __call__(self, scope: Dict[str, Any], receive: Any, send: Any) -> Any:
-        print("\n--- 📡 NEW WEBSOCKET HANDSHAKE INCOMING ---")
         
         # 1. Parse the incoming cookies header string
         headers = dict(scope.get("headers", []))
         cookie_header = headers.get(b"cookie", b"").decode("utf-8")
         
-        print(f"⚙️ [WS-AUTH] Raw Cookie Header content: '{cookie_header}'")
         
         # Parse cookies safely into a usable dictionary
         cookies = {}
@@ -42,22 +40,17 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
         encrypted_jwt = cookies.get("jwt_access_token") 
         
         if encrypted_jwt:
-            print(f"📦 [WS-AUTH] Found 'my_jwt_access_token' cookie payload in request headers.")
             try:
                 # 3. Try to decrypt the token
-                print("🔑 [WS-AUTH] Attempting cryptographic decryption...")
                 token_string = encrypted_jwt.decode("utf-8") if isinstance(encrypted_jwt, bytes) else encrypted_jwt
                 
                 # 4. Try to parse token and verify cryptographic signature locally
-                print("🛡️ [WS-AUTH] Decrypted successfully. Parsing signature via SimpleJWT AccessToken...")
                 parsed_jwt = AccessToken(token_string)  # type: ignore
                 
                 user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
-                print(f"📋 [WS-AUTH] Token claims validated. Claims map contains User ID: {user_id}")
                 
                 # 5. Look up user inside database
                 scope["user"] = await get_user_from_db(user_id) # type: ignore
-                print(f"✅ [WS-AUTH] Handshake authorized. Scope user set to: {scope['user']}")
                 
             except Exception as e:
                 print(f"💥 [WS-AUTH] CRITICAL REJECTION: Parsing/Decryption exploded! Error: {str(e)}")

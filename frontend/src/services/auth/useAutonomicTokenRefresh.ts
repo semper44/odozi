@@ -32,7 +32,7 @@ export const useAutonomicTokenRefresh = () => {
       if (!currentRefresh) return;
 
       try {
-        const response = await fetch(`${backendUrl}/account/api/auth/github/refresh/`, {
+        const response = await fetch(`${backendUrl}/account/api/auth/token/refresh/`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refresh_token: currentRefresh })
