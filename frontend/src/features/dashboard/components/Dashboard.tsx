@@ -1,21 +1,28 @@
 import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft } from "lucide-react";
+import gradientBg  from "../../../assets/gradient.jpg"
+import LiveTerminal from "@/features/streaming/components/LiveTerminal";
 import { useSelectionStore } from "../../store/selectionStore";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
-import LiveTerminal from "@/features/streaming/components/LiveTerminal";
 import { useMemo, useState } from "react";
-import gradientBg  from "../../../assets/gradient.jpg"
-import { RepoCard } from "./RepoCard";
+import { RepoCard } from "./ui/RepoCard";
 import { SelectionToolbar } from "./SelectionToolbar";
+import { WorkspaceDropdown } from "./ui/WorkspaceCard";
+import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh.ts"; 
+
+
 
 
 export default function Dashboard() {
+    useAutonomicTokenRefresh();
     const [isAiOpen, setIsAiOpen] = useState(false);
     const [isProcessingRequest, setIsProcessingRequest] = useState(false);
     const [isOn, setIsOn] = useState(false);
     const [prompt, setPrompt] = useState("");
     const { sendMessage } = useStreamingSocket();
     const [searchQuery, setSearchQuery] = useState('');
+    const [selectedWorkspace, setSelectedWorkspace] = useState(""); // "" means "All Workspaces"
+
     const selected = useSelectionStore((state) => state.selected);
     console.log(selected, "selected repos in dashboard")
     
@@ -24,19 +31,30 @@ export default function Dashboard() {
         isLoading,
         error,
     } = useRepos();
+    console.log( "alagbara", data?.expires_at)
+    localStorage.setItem("gh_token_expires_at", data?.expires_at);
      // Normalize data to avoid null errors
-    const repos = data?.repositories || [];
+    // 🚀 DUAL-FILTER CONSOLIDATION ENGINE
+    const filteredRepositories = useMemo(() => {
+        if (!data?.repositories) return [];
 
-    // Filter the list based on the search query
-    const filteredRepos = repos.filter((repo) =>
-        repo.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || repo.workspace.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    const filteredWorkspaces = repos.filter((repo) =>
-        repo.full_name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    console.log("filteredRepos.length === 0 &&", filteredRepos.length)
+        return data.repositories.filter((repo: any) => {
+        // Filter Step A: Match Workspace selection boundaries
+        if (selectedWorkspace && repo.workspaceName !== selectedWorkspace) {
+            return false;
+        }
+
+        // Filter Step B: Match Search Input Query strings
+        const cleanQuery = searchQuery.toLowerCase().trim();
+        if (!cleanQuery) return true;
+        
+        return repo.full_name?.toLowerCase().includes(cleanQuery);
+        });
+    }, [data, searchQuery, selectedWorkspace]);
+
+    console.log("filteredRepositories.length === 0 &&", filteredRepositories.length)
     // Active when there is a search query AND exactly one match is found
-    const isSingleMatch = searchQuery.trim() !== '' && filteredRepos.length === 1;
+    const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
 
     const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
     const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
@@ -159,13 +177,12 @@ export default function Dashboard() {
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 id="input-search" 
                                 type="text" 
-                                placeholder="Search projects, Tasks, etc..."
+                                placeholder="Search Repos & Workspace"
                                 className="pl-4 rounded-xl h-[25px] w-full shadow-lg" />
-                            <div id="search-icon">
+                            <div id="search-icon" className="absolute top-[25%] right-3">
                                 <Search className="w-4 h-4 text-gray-500" />
                             </div>
 
-                            {/* <i class="material-icons-outlined cursor-pointer absolute text-black right-2 top-1">search_outlined</i> */}
                         </div>
 
                         {/* <!-- chat support icon --> */}
@@ -182,31 +199,33 @@ export default function Dashboard() {
             {/* parent of right nd center bar */}
             <div className="flex mt-4 h-[80vh]">
                 {/* ceenter menu */}
-                <div className="h-full w-[72%] flex-grow mt-4 pr-4 pl-2">               
+                <div className="h-full w-[72%] flex-grow pr-4 pl-2">               
                     {/* repo menu */}                 
-
-                    {(!isAiOpen && !isProcessingRequest) && (<div className="p-10">
-                        <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} filteredRepos={filteredRepos} />
+                    
+                    {(!isAiOpen && !isProcessingRequest) && (<div className="px-10 py-3">
+                        <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} filteredRepos={filteredRepositories} />
 
                        {/* repo List */}
                         <div className="space-y-4">
-                            {filteredRepos.map((repo) => {
+                            {filteredRepositories.map((repo) => {
                             // It is "ticked" if all are shown (no single match) OR if it is the single match
-                            const isActive = !isSingleMatch || filteredRepos[0].id === repo.id;
+                            const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
 
                             return (
                                 <RepoCard
                                     key={repo.id}
                                     id={String(repo.id)}
                                     name={repo.full_name}
+                                    image={repo.avatar_url}
                                     isActive={isActive} // Pass the tick/active state to your card
+                                    workspaceName={repo.workspaceName}
                                 />
                             );
                             })}
 
                             {/* Fallback for empty results */}
-                            {filteredRepos.length === 0 && (
-                            <p className="text-gray-500 text-sm flex justify-center mt-4">No repositories found.</p>
+                            {filteredRepositories.length === 0 && (
+                            <p className="text-gray-500 text-sm flex justify-center mt-4">No Workspace or Repositories found.</p>
                             )}
                         </div>
                     </div>)}
@@ -266,46 +285,25 @@ export default function Dashboard() {
                 </div>
 
                 {/* right bar */}
-                <div className="w-[25%] h-full pl-4 hidden lg:block">
+                <div className="w-[25%] h-full pt-3 items-end pl-4 hidden lg:flex flex-col">
                     
                     {/* Search Input Field */}
                     <div className="space-y-4">
-                        <input
-                            type="text"
-                            placeholder="Select a workspace"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-
                         {/* workspace List */}
                         <div className="space-y-4">
-                            <div 
-                                className={`
-                                    flex items-center cursor-pointer gap-3 px-5 py-2.5 rounded-xl font-medium text-sm
-                                    border-2 tracking-wide shadow-sm transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed`}>
-                            ALL
-                            </div>
-                            {filteredWorkspaces.map((repo) => {
-                            
-                            return (
-                                <RepoCard
-                                key={repo.id}
-                                id={repo.id}
-                                name={repo.full_name}
-                                />
-                            );
-                            })}
-
-                            {/* Fallback for empty results */}
-                            {filteredRepos.length === 0 && (
-                            <p className="text-gray-500 text-sm">No repositories found.</p>
-                            )}
+                            <WorkspaceDropdown
+                                workspaces={data?.uniqueWorkspaces || []}
+                                selectedWorkspace={selectedWorkspace}
+                                onSelectWorkspace={setSelectedWorkspace}
+                            />
                         </div>
                     </div>
-                    
-                    end
-                    
+
+                    <button
+                    >
+                        create repo
+                    </button>
+
                 </div>  
     </div>
         </div>

@@ -27,6 +27,7 @@ export const Checkbox = ({
         disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
       }`}
     >
+       <p>All Workspaces</p>
       {/* Outer Wrapper Box Container */}
       <div
         className={`
@@ -39,6 +40,7 @@ export const Checkbox = ({
           }
         `}
       >
+       
         {/* Animated Inner Checkmark Icon Anchor */}
         <Check
           className={`

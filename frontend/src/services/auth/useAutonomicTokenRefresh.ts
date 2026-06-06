@@ -3,61 +3,59 @@ import { useEffect } from "react";
 import { tokenStore } from "@/services/auth/tokenStore";
 
 export const useAutonomicTokenRefresh = () => {
+  const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
+
   useEffect(() => {
-    // 1. Check for tokens in the incoming redirect URL query parameters on boot
-    // const urlParams = new URLSearchParams(window.location.search);
-    // const access = urlParams.get("access_token");
-    // const refresh = urlParams.get("refresh_token");
-    // const expiresAt = urlParams.get("expires_at");
-    const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
-
-
-    // if (access && expiresAt) {
-    //   tokenStore.setTokens(access, refresh || "", expiresAt);
-    //   // Clean up the address bar completely so tokens are hidden from sight
-    //   window.history.replaceState({}, document.title, window.location.pathname);
-    // }
-
-    // 2. Core Scraper Task: Processes data completely in the background
     const performBackgroundLifespanScrape = async () => {
-      // Condition Evaluation: Checks localized time numbers offline. 
-      // If 7 hours haven't passed, execution terminates here (Zero Overhead)
+      // 1. Check if the token needs refreshing
       if (!tokenStore.isNearingExpiration()) {
         console.log("💤 Background check: Token lifecycle healthy. Going back to sleep.");
         return;
       }
 
-      console.warn("🔄 Token has passed the 7-hour active threshold. Spinning up flight rotation...");
-      const currentRefresh = tokenStore.getRefreshToken();
-      if (!currentRefresh) return;
+      console.warn("🔄 Token has passed its active boundary threshold. Spinning up flight rotation...");
 
       try {
         const response = await fetch(`${backendUrl}/account/api/auth/token/refresh/`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // 1. Leave the body empty! Django reads it directly from the cookie
           body: JSON.stringify({}), 
-          // 2. CRITICAL: Forwards your secure HttpOnly cookies across origins automatically
-          credentials: "include" 
+          credentials: "include" // Automatically transmits your HttpOnly refresh_token cookie
         });
 
         if (response.ok) {
           const data = await response.json();
-          // Update RAM references and write the fresh 8-hour timestamp limit to disk
-          tokenStore.setTokens(data.accessToken, data.refreshToken, data.expiresAt);
-          console.log("✅ Proactive GitHub token rotation executed successfully in memory.");
+          console.log("📥 Raw refresh data payload received from Django:", data);
+
+          // ✅ FIX: SimpleJWT outputs 'access' and 'refresh'. 
+          // Match your calculated timestamp strategy to whatever key handles your absolute expiration date string
+          const freshAccess = data.access;
+          const freshRefresh = data.refresh || "";
+          
+          // Fallback timestamp generation if your refresh view doesn't explicitly return an 'expiresAt' field
+          const futureTimestamp = data.expires_at || new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+          if (freshAccess) {
+            tokenStore.setTokens(freshAccess, freshRefresh, futureTimestamp);
+            console.log("✅ Proactive local token rotation executed successfully in memory store.");
+          } else {
+            console.error("⚠️ Response ok, but 'access' token string was missing from data map payload.");
+          }
+        } else {
+          console.error(`❌ Refresh flight aborted by Django backend server. Status: ${response.status}`);
         }
       } catch (err) {
         console.error("🚨 Background proactive rotation flight failed:", err);
       }
     };
 
-    // Run the scrape flight once immediately on mounting the dashboard layout
+    // Run the check once immediately on mounting the layout view
     performBackgroundLifespanScrape();
 
-    // Execute the passive timestamp calculation check every 30 minutes (1,800,000 ms)
-    const intervalId = setInterval(performBackgroundLifespanScrape, 1800000);
+    // ✅ FIX: Reduced from 30 minutes (1,800,000ms) down to 2 minutes (120,000ms) for high-speed testing loops
+    const testIntervalMs = 120000; 
+    const intervalId = setInterval(performBackgroundLifespanScrape, testIntervalMs);
 
-    return () => clearInterval(intervalId); // Clear background timers clean on unmount
-  }, []);
+    return () => clearInterval(intervalId); // Clean up active timers cleanly on component unmount
+  }, [backendUrl]);
 };

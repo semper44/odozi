@@ -466,6 +466,15 @@ def github_callback_view(request):
         samesite="None",     # <--- Keep this on None for cross-origin flights
         path="/"
     )
+    response.set_cookie(
+        "expires_at",
+        str(expires_at_iso),  # Placeholder token value for testing
+        max_age=28800,       
+        httponly=True,       
+        secure=True,         # <--- FORCE TO TRUE! Browser drops SameSite="None" if Secure is False over HTTPS
+        samesite="None",     # <--- Keep this on None for cross-origin flights
+        path="/"
+    )
     # react_app_url = f"https://spicy-flowers-scream.loca.lt/"
     
     return response

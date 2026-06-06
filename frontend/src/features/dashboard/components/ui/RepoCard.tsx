@@ -1,10 +1,10 @@
 import { useSelectionStore } from "@/features/store/selectionStore";
 
-
 interface Props {
   id: string;
   name: string;
   image: string;
+  workspaceName: string;
   isActive:  boolean
 }
 
@@ -12,6 +12,7 @@ export const RepoCard = ({
   id,
   name,
   image,
+  workspaceName,
   isActive,
 
 }: Props) => {
@@ -54,6 +55,9 @@ export const RepoCard = ({
         <div className="min-w-0">
             <p className="font-medium text-gray-900 truncate text-sm sm:text-base">
                 {name}
+            </p>
+            <p className="text-gray-500 text-xs">
+                {workspaceName}
             </p>
         </div>
     </div>

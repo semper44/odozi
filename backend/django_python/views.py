@@ -73,6 +73,7 @@ def dashboard_view(request):
     username = None
     user_id = None
     github_access_token = None
+    expires_at = None
 
     # Base tracking template string for Redis keys
     redis_ticket_key = f"redis_auth_ws_transit_ticket:{ticket_id}" if ticket_id else None
@@ -111,6 +112,8 @@ def dashboard_view(request):
             jwt_decrypted_bytes = decrypt_token(jwt_encrypted_refresh)
             token_refresh_string = jwt_decrypted_bytes.decode("utf-8") if isinstance(jwt_decrypted_bytes, bytes) else jwt_decrypted_bytes
 
+            expires_at = raw_payload["expires_at"]
+
             # 🔥 INSTANT BURN RULE: Destroy transit ticket from RAM immediately
             cache.delete(redis_ticket_key)
             print(444)
@@ -135,6 +138,8 @@ def dashboard_view(request):
             username = parsed_jwt.get("username")
             user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
             print(f"✅ [DASHBOARD] Token authentication successful. User context resolved: {username} (ID: {user_id})")
+
+            expires_at = request.COOKIES.get("expires_at")
             
         except Exception as e:
             print(f"💥 [DASHBOARD AUTH FAILURE] SimpleJWT threw an exception: {str(e)}")
@@ -215,7 +220,8 @@ def dashboard_view(request):
         "my_jwt_access_token": token_string,
         "my_jwt_access_refresh": token_refresh_string,
         "username": username,
-        "user_id": user_id
+        "user_id": user_id,
+        "expires_at":expires_at
     }, status=200)
 
     response.delete_cookie(
