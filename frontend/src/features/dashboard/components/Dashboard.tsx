@@ -13,16 +13,31 @@ export default function Dashboard() {
     const [isAiOpen, setIsAiOpen] = useState(false);
     const [isProcessingRequest, setIsProcessingRequest] = useState(false);
     const [isOn, setIsOn] = useState(false);
-    const [switchBetweenAIPage, setSwitchBetweenAIPage] = useState(false);
     const [prompt, setPrompt] = useState("");
     const { sendMessage } = useStreamingSocket();
+    const [searchQuery, setSearchQuery] = useState('');
     const selected = useSelectionStore((state) => state.selected);
+    console.log(selected, "selected repos in dashboard")
     
     const {
         data,
         isLoading,
         error,
     } = useRepos();
+     // Normalize data to avoid null errors
+    const repos = data?.repositories || [];
+
+    // Filter the list based on the search query
+    const filteredRepos = repos.filter((repo) =>
+        repo.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || repo.workspace.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    const filteredWorkspaces = repos.filter((repo) =>
+        repo.full_name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    console.log("filteredRepos.length === 0 &&", filteredRepos.length)
+    // Active when there is a search query AND exactly one match is found
+    const isSingleMatch = searchQuery.trim() !== '' && filteredRepos.length === 1;
+
     const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
     const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
     // useMemo ensures this index is only recalculated if data actually changes.
@@ -139,7 +154,12 @@ export default function Dashboard() {
                     <div className="flex justify-between items-center flex-grow">
                         {/* <!-- input box --> */}
                         <div className="w-[60%] xl:w-[72%] relative">
-                            <input id="input-search" type="text" placeholder="Search projects, Tasks, etc..."
+                            <input 
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                id="input-search" 
+                                type="text" 
+                                placeholder="Search projects, Tasks, etc..."
                                 className="pl-4 rounded-xl h-[25px] w-full shadow-lg" />
                             <div id="search-icon">
                                 <Search className="w-4 h-4 text-gray-500" />
@@ -166,16 +186,28 @@ export default function Dashboard() {
                     {/* repo menu */}                 
 
                     {(!isAiOpen && !isProcessingRequest) && (<div className="p-10">
-                        <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} />
+                        <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} filteredRepos={filteredRepos} />
 
+                       {/* repo List */}
                         <div className="space-y-4">
-                            {data.repositories.map((repo) => (
-                            <RepoCard
-                                key={repo.id}
-                                id={repo.id}
-                                name={repo.full_name}
-                            />
-                            ))}
+                            {filteredRepos.map((repo) => {
+                            // It is "ticked" if all are shown (no single match) OR if it is the single match
+                            const isActive = !isSingleMatch || filteredRepos[0].id === repo.id;
+
+                            return (
+                                <RepoCard
+                                    key={repo.id}
+                                    id={String(repo.id)}
+                                    name={repo.full_name}
+                                    isActive={isActive} // Pass the tick/active state to your card
+                                />
+                            );
+                            })}
+
+                            {/* Fallback for empty results */}
+                            {filteredRepos.length === 0 && (
+                            <p className="text-gray-500 text-sm flex justify-center mt-4">No repositories found.</p>
+                            )}
                         </div>
                     </div>)}
 
@@ -190,7 +222,7 @@ export default function Dashboard() {
                             </div>
                             {/* ai-chat-placeholder */}
                             <div id="ai-chat-placeholder" className=" h-[100%] w-full justify-center items-center">
-                            <p>Request status: {switchBetweenAIPage ? "aipageon..." : "Idle"}</p>
+                            <p>Request status: {isAiOpen ? "aipageon..." : "Idle"}</p>
                                 {/* chat panel */}
                                 {(isAiOpen && !isProcessingRequest) && <div className="w-full h-[80%] flex flex-col items-center">
                                     <h1 className="text-black"><span id="gradient-text" className="bg-gradient-to-r from-[#be9ee2] to-white bg-clip-text text-transparent font-bold">Hy Dear</span> This is an AI assited chat</h1>
@@ -235,7 +267,45 @@ export default function Dashboard() {
 
                 {/* right bar */}
                 <div className="w-[25%] h-full pl-4 hidden lg:block">
-                    right bar placeholder
+                    
+                    {/* Search Input Field */}
+                    <div className="space-y-4">
+                        <input
+                            type="text"
+                            placeholder="Select a workspace"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+
+                        {/* workspace List */}
+                        <div className="space-y-4">
+                            <div 
+                                className={`
+                                    flex items-center cursor-pointer gap-3 px-5 py-2.5 rounded-xl font-medium text-sm
+                                    border-2 tracking-wide shadow-sm transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed`}>
+                            ALL
+                            </div>
+                            {filteredWorkspaces.map((repo) => {
+                            
+                            return (
+                                <RepoCard
+                                key={repo.id}
+                                id={repo.id}
+                                name={repo.full_name}
+                                />
+                            );
+                            })}
+
+                            {/* Fallback for empty results */}
+                            {filteredRepos.length === 0 && (
+                            <p className="text-gray-500 text-sm">No repositories found.</p>
+                            )}
+                        </div>
+                    </div>
+                    
+                    end
+                    
                 </div>  
     </div>
         </div>

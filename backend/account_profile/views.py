@@ -433,9 +433,10 @@ def github_callback_view(request):
 
     print("Tokens encrypted and saved to database successfully.", encrypt_token(my_jwt_access_token))
     # 3. SEAL DATA PACKAGE INSIDE REDIS FOR EXACTLY 60 SECONDS
-    if clean_access and clean_refresh:
+    if my_jwt_refresh_token and my_jwt_access_token and raw_access_token:
         ticket_payload = {
             "jwt_access_token": encrypt_token(my_jwt_access_token),
+            "jwt_refresh_token": encrypt_token(my_jwt_refresh_token),
             "github_access_token": encrypt_token(raw_access_token),
             "browser_family": browser_family,
             "expires_at": expires_at_iso

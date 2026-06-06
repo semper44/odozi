@@ -14,6 +14,7 @@ from django.conf import settings
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace
 from .models import UserProfileModel
+from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.security import verify_signature
 from odozi.utils.github_auth_decorator import require_github_auth
@@ -68,6 +69,7 @@ def dashboard_view(request):
     browser_family = get_browser_family(request)
 
     token_string = None
+    token_refresh_string = None
     username = None
     user_id = None
     github_access_token = None
@@ -94,21 +96,27 @@ def dashboard_view(request):
             jwt_encrypted_access = raw_payload["jwt_access_token"]
             jwt_decrypted_bytes = decrypt_token(jwt_encrypted_access)
             token_string = jwt_decrypted_bytes.decode("utf-8") if isinstance(jwt_decrypted_bytes, bytes) else jwt_decrypted_bytes
-
+            print(1111)
             # Parse claims map variables locally
             parsed_jwt = AccessToken(token_string) # type: ignore
             username = parsed_jwt.get("username")
             user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
-
+            print(2222)
             # Extract the raw GitHub developer token string
             github_encrypted_access = raw_payload["github_access_token"]
             github_decrypted_bytes = decrypt_token(github_encrypted_access)
             github_access_token = github_decrypted_bytes.decode("utf-8") if isinstance(github_decrypted_bytes, bytes) else github_decrypted_bytes
+            print(3333)
+            jwt_encrypted_refresh = raw_payload["jwt_refresh_token"]
+            jwt_decrypted_bytes = decrypt_token(jwt_encrypted_refresh)
+            token_refresh_string = jwt_decrypted_bytes.decode("utf-8") if isinstance(jwt_decrypted_bytes, bytes) else jwt_decrypted_bytes
 
             # 🔥 INSTANT BURN RULE: Destroy transit ticket from RAM immediately
             cache.delete(redis_ticket_key)
+            print(444)
 
         except Exception as e:
+            print(f"💥 [DASHBOARD AUTH FAILURE] Decryption or parsing error: {str(e)}")
             if redis_ticket_key:
                 cache.delete(redis_ticket_key)
             return JsonResponse({"error": f"Cryptographic parsing failed: {str(e)}"}, status=401)
@@ -119,7 +127,8 @@ def dashboard_view(request):
         try:
             # If your cookie stores raw unencrypted text, read directly; if encrypted, run decrypt_token()
             token_string = stored_jwt_access_token
-            
+            token_refresh_string = request.COOKIES.get("jwt_refresh_token")
+
             print("22222",token_string)
             parsed_jwt = AccessToken(token_string) # type: ignore
             print("UPANDA",parsed_jwt)
@@ -188,7 +197,7 @@ def dashboard_view(request):
     serialized_repo_selection = list(repo_selection_queryset.values(
         'repo_id', 'workspace__name'
     ))
-    
+
     user_details = {
         "cleaned_repos":cleaned_repos,
         "github_access_token":github_access_token,
@@ -204,6 +213,7 @@ def dashboard_view(request):
         "repositories": cleaned_repos,
         "repo_selection":serialized_repo_selection,
         "my_jwt_access_token": token_string,
+        "my_jwt_access_refresh": token_refresh_string,
         "username": username,
         "user_id": user_id
     }, status=200)
@@ -224,6 +234,15 @@ def dashboard_view(request):
         samesite="None", # Permits local cross-origin development handshakes
         path="/"
     )
+    response.set_cookie(
+        key="jwt_refresh_token",
+        value=str(token_refresh_string),
+        max_age=28800, # 8 Hours matching standard working cycles
+        httponly=True,
+        secure=True,     # Forces HTTPS requirement blocks
+        samesite="None", # Permits local cross-origin development handshakes
+        path="/"
+    )
 
     print(f"🚀 [DASHBOARD] Clean execution complete. Returning data payload for: {username}")
     return response
@@ -231,6 +250,7 @@ def dashboard_view(request):
 
 
 class CreateUserSelectedRepos(APIView):
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
@@ -301,6 +321,40 @@ class CreateUserSelectedRepos(APIView):
             }, 
             status=status.HTTP_201_CREATED
         )
+
+
+
+
+class DeleteUserSelectedRepos(APIView):
+    """
+    DRF Class-Based View gateway to securely execute database deletion
+    queries with strict multi-tenant workspace ownership checks.
+    """
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated] 
+
+    def post(self, request, *args, **kwargs):
+                # B. PARSE INPUT PAYLOAD 
+        # Support both: {"repo_ids": [123]} (single) or {"repo_ids": [123, 456, 789]} (bulk)
+        target_repo_ids = request.data.get("repo_ids")
+        
+        # Fallback safeguard in case your frontend accidentally sends a single integer instead of an array list
+        if isinstance(target_repo_ids, int):
+            target_repo_ids = [target_repo_ids]
+
+        if not target_repo_ids or not isinstance(target_repo_ids, list):
+            return Response({"error": "Missing or malformed 'repo_ids' array list parameter."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # C. 🔒 HIGH-SPEED SECURE BULK DELETION (SINGLE SQL INNER JOIN OPERATION)
+        # Using __in translates to a high-speed SQL 'WHERE repo_id IN (123, 456)' query
+        deleted_count, _ = GitHubRepository.objects.filter(
+            repo_id__in=target_repo_ids,             # 👈 CHANGED: Handles lists of any size instantly!
+            workspace__members__members_id=request.user.pk,  # Strict tenant multi-ownership protection guard
+            workspace__members__is_active=True       
+        ).delete()
+
+        if deleted_count == 0:
+            return Response({"error": "No matching repositories found or access denied."}, status=404)
 
 
 

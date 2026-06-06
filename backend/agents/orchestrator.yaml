@@ -290,3 +290,33 @@ jobs:
             -F "tool=odozi_visitors" \
             -F "file=@odozi_report.json"
 
+  cleanup:
+    needs:
+      - run-pytest
+      - run-ruff
+      - run-bandit
+      - run-odozi
+
+    if: always()
+
+    permissions:
+      contents: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: |
+          rm .github/workflows/odozi-temp.yml
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git add .
+          git commit -m "Remove temporary workflow" || true
+          git push
+    
+  

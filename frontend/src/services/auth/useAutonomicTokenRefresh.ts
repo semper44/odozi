@@ -5,18 +5,18 @@ import { tokenStore } from "@/services/auth/tokenStore";
 export const useAutonomicTokenRefresh = () => {
   useEffect(() => {
     // 1. Check for tokens in the incoming redirect URL query parameters on boot
-    const urlParams = new URLSearchParams(window.location.search);
-    const access = urlParams.get("access_token");
-    const refresh = urlParams.get("refresh_token");
-    const expiresAt = urlParams.get("expires_at");
+    // const urlParams = new URLSearchParams(window.location.search);
+    // const access = urlParams.get("access_token");
+    // const refresh = urlParams.get("refresh_token");
+    // const expiresAt = urlParams.get("expires_at");
     const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
 
-    if (access && expiresAt) {
-      tokenStore.setTokens(access, refresh || "", expiresAt);
-      // Clean up the address bar completely so tokens are hidden from sight
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    // if (access && expiresAt) {
+    //   tokenStore.setTokens(access, refresh || "", expiresAt);
+    //   // Clean up the address bar completely so tokens are hidden from sight
+    //   window.history.replaceState({}, document.title, window.location.pathname);
+    // }
 
     // 2. Core Scraper Task: Processes data completely in the background
     const performBackgroundLifespanScrape = async () => {
@@ -35,7 +35,10 @@ export const useAutonomicTokenRefresh = () => {
         const response = await fetch(`${backendUrl}/account/api/auth/token/refresh/`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: currentRefresh })
+          // 1. Leave the body empty! Django reads it directly from the cookie
+          body: JSON.stringify({}), 
+          // 2. CRITICAL: Forwards your secure HttpOnly cookies across origins automatically
+          credentials: "include" 
         });
 
         if (response.ok) {

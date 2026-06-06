@@ -5,12 +5,15 @@ interface Props {
   id: string;
   name: string;
   image: string;
+  isActive:  boolean
 }
 
 export const RepoCard = ({
   id,
   name,
   image,
+  isActive,
+
 }: Props) => {
   const selected = useSelectionStore(
     (state) => state.selected
