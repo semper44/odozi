@@ -14,10 +14,10 @@ User = get_user_model()
 def get_user_from_db(user_id: Any) -> Any:
     try:
         user = User.objects.get(id=user_id)
-        print(f"🔍 [WS-AUTH] Database lookup successful for User ID {user_id}: {user.username}")
+        # print(f"🔍 [WS-AUTH] Database lookup successful for User ID {user_id}: {user.username}")
         return user
     except User.DoesNotExist:
-        print(f"❌ [WS-AUTH] Database lookup failed. No user found matching ID: {user_id}")
+        # print(f"❌ [WS-AUTH] Database lookup failed. No user found matching ID: {user_id}")
         return AnonymousUser()
 
 class CookieJwtAuthMiddleware(BaseMiddleware):
@@ -53,11 +53,11 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
                 scope["user"] = await get_user_from_db(user_id) # type: ignore
                 
             except Exception as e:
-                print(f"💥 [WS-AUTH] CRITICAL REJECTION: Parsing/Decryption exploded! Error: {str(e)}")
+                # print(f"💥 [WS-AUTH] CRITICAL REJECTION: Parsing/Decryption exploded! Error: {str(e)}")
                 scope["user"] = AnonymousUser() # type: ignore
         else:
-            print("⚠️ [WS-AUTH] REJECTION: 'my_jwt_access_token' cookie was entirely missing from WebSocket handshake headers.")
+            # print("⚠️ [WS-AUTH] REJECTION: 'my_jwt_access_token' cookie was entirely missing from WebSocket handshake headers.")
             scope["user"] = AnonymousUser() # type: ignore
 
-        print("--- 📡 FORWARDING TO CONSUMER ROUTER ---")
+        # print("--- 📡 FORWARDING TO CONSUMER ROUTER ---")
         return await self.inner(scope, receive, send) # type: ignore

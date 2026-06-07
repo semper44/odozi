@@ -33,6 +33,16 @@ export default function Dashboard() {
     } = useRepos();
     console.log( "alagbara", data?.expires_at)
     localStorage.setItem("gh_token_expires_at", data?.expires_at);
+    const get_time_obj = localStorage.getItem("jwt_token_expires_at");
+    if (!get_time_obj && !get_time_obj["token"]) {
+        const manualExpiryTimeMs = Date.now() + 90000;
+        localStorage.setItem("jwt_token_expires_at", JSON.stringify({ token: String(manualExpiryTimeMs), dont_touch: true }));
+        console.log("ran_tokennnnn")
+    } else {
+        console.log("Existing JWT expiry timestamp found in localStorage:", get_time_obj);
+    }
+    console.log("🔒 Tokens captured in RAM. Timestamp cached to localStorage.", localStorage.getItem("gh_token_expires_at"));
+
      // Normalize data to avoid null errors
     // 🚀 DUAL-FILTER CONSOLIDATION ENGINE
     const filteredRepositories = useMemo(() => {

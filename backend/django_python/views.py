@@ -1,7 +1,8 @@
 import json
 import uuid
-
+import secrets
 import requests
+
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
@@ -10,7 +11,6 @@ from django.core.cache import cache
 from django.contrib.auth.models import User
 from django.conf import settings
 
-
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace
 from .models import UserProfileModel
@@ -18,6 +18,7 @@ from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.security import verify_signature
 from odozi.utils.github_auth_decorator import require_github_auth
+from odozi.utils.auth import get_client_ip, get_browser_family, invalidate_user_session
 from .serializer import GitHubRepositorySerializer, UserProfileSerializer
 
 from rest_framework import generics, status
@@ -33,25 +34,6 @@ from asgiref.sync import async_to_sync
 
 
 
-# account_profile/views.py
-import json
-import secrets
-import requests
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from odozi.utils.auth import get_client_ip, get_browser_family, invalidate_user_session
-
-
-# @csrf_exempt
-# def dashboard_view(request):
-#     github_access_token = request.session.get('github_access_token')
-#     github_token = request.COOKIES.get("github_access_token")
-#     print("")
-#     print("sesssion", github_access_token, "brooo", github_token)
-#     print("")
-#     return JsonResponse({"github_access_token": github_access_token})
-
-
 
 @csrf_exempt
 def dashboard_view(request):
@@ -60,6 +42,7 @@ def dashboard_view(request):
     implements a high-performance Cache-Aside Redis data pipeline, and securely manages 
     HttpOnly browser tokens.
     """
+    print("wahsahala")
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed. Must use POST for security verification."}, status=405)
 
@@ -74,24 +57,31 @@ def dashboard_view(request):
     user_id = None
     github_access_token = None
     expires_at = None
-
-    # Base tracking template string for Redis keys
-    redis_ticket_key = f"redis_auth_ws_transit_ticket:{ticket_id}" if ticket_id else None
+    github_res_status = None
+    print("VALUE:", stored_jwt_access_token)
+    print("TYPE:", type(stored_jwt_access_token))
+    print("REPR:", repr(stored_jwt_access_token))
 
     # FIRST LOGIN HANDSHAKE (Transit Ticket Present) 
     if ticket_id:
         print(ticket_id)
-        raw_payload = cache.get(redis_ticket_key) if redis_ticket_key else None
-        print(f"📡 [DASHBOARD] Transit execution path. Redis Payload resolved: {raw_payload}")
 
+        # Base tracking template string for Redis keys
+        redis_ticket_key = f"redis_auth_ws_transit_ticket:{ticket_id}" if ticket_id else None
+        raw_payload = cache.get(redis_ticket_key) if redis_ticket_key else None
+        
+        print(f"📡 [DASHBOARD] Transit execution path. Redis Payload resolved")
+        
         if not raw_payload:
             return JsonResponse({"error": "Transit ticket expired or already consumed."}, status=403)
 
+        print("passed payload check")
+        
         # Dual-lock fingerprint validation check
         if browser_family != raw_payload.get("browser_family"):
             cache.delete(redis_ticket_key)
             return JsonResponse({"error": "Fingerprint validation failed."}, status=403)
-
+        print("passed fingerprint check")
         # Destructure and decrypt your signed application JWT access token string
         try:
             jwt_encrypted_access = raw_payload["jwt_access_token"]
@@ -125,25 +115,32 @@ def dashboard_view(request):
             return JsonResponse({"error": f"Cryptographic parsing failed: {str(e)}"}, status=401)
 
     # --- PATH B: SUBSEQUENT PAGE REFRESHES (HttpOnly Cookie Token Present) ---
-    elif stored_jwt_access_token:
+    
+    elif stored_jwt_access_token and stored_jwt_access_token != None and stored_jwt_access_token != "None":
         print("🍪 [DASHBOARD] Recycled cookie execution path. Authenticating via token string payload...")
+        print(stored_jwt_access_token)
+        print(stored_jwt_access_token != None)
+        print(stored_jwt_access_token != "None")
         try:
             # If your cookie stores raw unencrypted text, read directly; if encrypted, run decrypt_token()
-            token_string = stored_jwt_access_token
+            github_access_token = stored_jwt_access_token.decode("utf-8") if isinstance(stored_jwt_access_token, bytes) else stored_jwt_access_token
             token_refresh_string = request.COOKIES.get("jwt_refresh_token")
 
-            print("22222",token_string)
-            parsed_jwt = AccessToken(token_string) # type: ignore
+            print("22222",stored_jwt_access_token)
+            parsed_jwt = AccessToken(stored_jwt_access_token) # type: ignore
             print("UPANDA",parsed_jwt)
             username = parsed_jwt.get("username")
+            # token_string = parsed_jwt.get("my_jwt_access_token")
+            token_string = stored_jwt_access_token
             user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
-            print(f"✅ [DASHBOARD] Token authentication successful. User context resolved: {username} (ID: {user_id})")
+            print(f"✅ [DASHBOARD] Token authentication successful. User context resolved: {username}||{token_string}")
 
             expires_at = request.COOKIES.get("expires_at")
             
         except Exception as e:
             print(f"💥 [DASHBOARD AUTH FAILURE] SimpleJWT threw an exception: {str(e)}")
             return JsonResponse({"error": f"Session verification expired or invalid: {str(e)}"}, status=401)
+
 
     else:
         print("")
@@ -155,14 +152,13 @@ def dashboard_view(request):
 
 
     details_cache_key = f"user:repos:{user_id}"
-    base_details_cache_key = cache.get(details_cache_key)
+    cached_repos = cache.get(details_cache_key)
 
-    if base_details_cache_key:
-        cached_repos = base_details_cache_key["cleaned_repos"]
-        github_access_token = base_details_cache_key["github_access_token"]
+    if cached_repos:
         print(f"⚡ [CACHE HIT] Serving repositories for '{username}' instantly from Redis RAM.")
         # Handle string parsing dependencies if using raw serialization
-        cleaned_repos = json.loads(cached_repos) if isinstance(cached_repos, str) else cached_repos
+        # cleaned_repos = json.loads(cached_repos) if isinstance(cached_repos, str) else cached_repos
+        response = JsonResponse(cached_repos, status=200)
     else:
         print(f"🌐 [CACHE MISS] Querying fresh data arrays from GitHub REST API for user '{username}'...")
         repos_url = f"https://api.github.com/users/{username}/repos"
@@ -176,9 +172,11 @@ def dashboard_view(request):
             github_res = requests.get(repos_url, headers=headers, params={"per_page": 100, "sort": "updated"}, timeout=5.0)
             print(f"📊 [GITHUB API] External status responded: {github_res.status_code}")
             repositories_data = github_res.json() if github_res.status_code == 200 else []
+            github_res_status = github_res.status_code
         except requests.RequestException as e:
             print(f"❌ [GITHUB API] Error occurred while fetching repositories: {e}")
             repositories_data = []
+
 
         # Parse data defensively mapping dict properties safely
         cleaned_repos = [{
@@ -187,42 +185,49 @@ def dashboard_view(request):
             "full_name": r.get("full_name")
         } for r in repositories_data if isinstance(r, dict)]
 
-    try:
-        db_user = User.objects.get(pk=user_id)
-    except User.DoesNotExist:
-        return JsonResponse({"error": "Database sync user mismatch"}, status=401)
+        try:
+            db_user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return JsonResponse({"error": "Database sync user mismatch"}, status=401)
 
-    repo_selection_queryset  = GitHubRepository.objects.filter(
-        workspace__members__members=db_user,
-        workspace__members__is_active=True,  
-        is_active=True                      
-    ).select_related('workspace')  
-
-
-    serialized_repo_selection = list(repo_selection_queryset.values(
-        'repo_id', 'workspace__name'
-    ))
-
-    user_details = {
-        "cleaned_repos":cleaned_repos,
-        "github_access_token":github_access_token,
-        "repo_selection":serialized_repo_selection
-    }
-
-    # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
-    cache.set(details_cache_key, user_details, timeout=3600)
-    print(f"💾 [REDIS] Successfully cached repository state array for user '{username}'.")
+        repo_selection_queryset  = GitHubRepository.objects.filter(
+            workspace__members__members=db_user,
+            workspace__members__is_active=True,  
+            is_active=True                      
+        ).select_related('workspace')  
 
 
-    response = JsonResponse({
-        "repositories": cleaned_repos,
-        "repo_selection":serialized_repo_selection,
-        "my_jwt_access_token": token_string,
-        "my_jwt_access_refresh": token_refresh_string,
-        "username": username,
-        "user_id": user_id,
-        "expires_at":expires_at
-    }, status=200)
+        serialized_repo_selection = list(repo_selection_queryset.values(
+            'repo_id', 'workspace__name'
+        ))
+
+        user_details = {
+            "repositories": cleaned_repos,
+            "repo_selection":serialized_repo_selection,
+            "my_jwt_access_token": token_string,
+            "my_jwt_access_refresh": token_refresh_string,
+            "github_access_token": github_access_token,
+            "username": username,
+            "user_id": user_id,
+            "expires_at":expires_at
+        }
+
+        # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
+        if github_res_status == 200:
+            cache.set(details_cache_key, user_details, timeout=3600)
+            print(f"💾 [REDIS] Successfully cached repository state array for user '{username}'.")
+
+
+        response = JsonResponse({
+            "repositories": cleaned_repos,
+            "repo_selection":serialized_repo_selection,
+            "my_jwt_access_token": token_string,
+            "my_jwt_access_refresh": token_refresh_string,
+            "username": username,
+            "user_id": user_id,
+            "expires_at":expires_at
+        }, status=200)
+
 
     response.delete_cookie(
         key="ticket_id",
@@ -523,6 +528,74 @@ def receive_ci_results(request):
     except Exception as e:
         print(f"❌ VIEW ERROR: {str(e)}")
         return JsonResponse({'error': str(e)}, status=500)
+
+
+
+class AITestSummaryView(APIView):
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):        
+        test_summary = request.data.get("test_summary")
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        # prompt = f"""
+        #     Task: "{task_title}"
+        #     Deadline: "{deadline}"
+
+        #     Return JSON only:
+        #     {{
+        #     "summary": "short summary",
+        #     "improved": "clear actionable task",
+        #     "subtasks": ["step 1", "step 2", "step 3"]
+        #     }}
+
+        #     RULES:
+        #     - MAX 3 subtasks
+        #     - No explanations
+        #     - No extra text
+        #     - Be short and direct
+        #     """
+        # for attempt in range(3):
+        #     try:
+        #         response = client.models.generate_content(
+        #             model='gemini-2.5-flash', 
+        #             contents=prompt
+        #         )
+        #         raw = response.text
+        #         clean = raw.replace("```json", "").replace("```", "").strip()
+        #         data = json.loads(clean)
+        #         print(response.text, data, "heyyy")
+
+        #         return Response({"data": data})
+        #     except errors.ClientError as e:
+        #         # Handle quota / rate limit
+        #         if "RESOURCE_EXHAUSTED" in str(e):
+        #             return Response(
+        #                 {"error": "AI limit reached. Please wait a moment."},
+        #                 status=429
+        #             )
+
+        #         return Response(
+        #             {"error": "AI client error", "details": str(e)},
+        #             status=500
+        #         )
+
+        #     except json.JSONDecodeError:
+        #         return Response(
+        #             {"error": "Invalid AI response format"},
+        #             status=500
+        #         )
+
+        #     except Exception as e:
+        #         if attempt < 2:
+        #             time.sleep(2)
+        #             continue
+
+        #         return Response(
+        #             {"error": "Unexpected error", "details": str(e)},
+        #             status=500
+        #         )
 
 
 

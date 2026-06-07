@@ -9,12 +9,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         # Check if the user object is anonymous or completely unassigned
         if not self.user or self.user.is_anonymous:
-            print("🛑 [CONSUMER] REJECTING HANDSHAKE: User context is anonymous or None. Booting connection.")
+            # print("🛑 [CONSUMER] REJECTING HANDSHAKE: User context is anonymous or None. Booting connection.")
             await self.close(code=4001)
             return
 
         # Authorized user - assign to their secure private room
-        print(f"🟢 [CONSUMER] Access Approved for {self.user.username}. Provisioning private memory channels...")
+        # print(f"🟢 [CONSUMER] Access Approved for {self.user.username}. Provisioning private memory channels...")
         self.room_name = f"user_room_{self.user.id}"
         self.user_group = f"group_{self.room_name}"
 
@@ -24,7 +24,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
 
     async def disconnect(self, code):
-        print(f"❌ WebSocket disconnected with code: {code}")
+        # print(f"❌ WebSocket disconnected with code: {code}")
         
         # Safely discard using the exact matching group variable name
         if hasattr(self, 'user_group') and self.user_group:

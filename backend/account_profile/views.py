@@ -413,9 +413,6 @@ def github_callback_view(request):
     expires_at_iso = expiration_time.isoformat() # Looks like: "2026-06-02T23:57:00.000Z"
 
     
-    clean_access = raw_access_token.decode("utf-8") if isinstance(raw_access_token, bytes) else raw_access_token
-    clean_refresh = raw_refresh_token.decode("utf-8") if isinstance(raw_refresh_token, bytes) else raw_refresh_token
-
     # 1. GENERATE THE SHORT-LIVED 60-SECOND TRANSIT TICKET
     ticket_id = str(uuid.uuid4())
     redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
