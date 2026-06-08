@@ -8,8 +8,8 @@ export const useAutonomicTokenRefresh = () => {
   useEffect(() => {
     const performBackgroundLifespanScrape = async () => {
       // 1. Check if the token needs refreshing
-      console.log("checking token lifespan in background...", !tokenStore.isNearingExpiration())
-      if (!tokenStore.isNearingExpiration()) {
+      console.log("checking token lifespan in background...", !tokenStore.isNearingExpiration(), tokenStore.isNearingExpiration());
+      if (tokenStore.isNearingExpiration() === false) {
         console.log("💤 Background check: Token lifecycle healthy. Going back to sleep.");
         return;
       }

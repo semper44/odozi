@@ -1,14 +1,17 @@
-import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft } from "lucide-react";
+import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, Plus } from "lucide-react";
 import gradientBg  from "../../../assets/gradient.jpg"
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
 import { useSelectionStore } from "../../store/selectionStore";
+import { items } from "../../data/dummyData";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import { useMemo, useState } from "react";
 import { RepoCard } from "./ui/RepoCard";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { WorkspaceDropdown } from "./ui/WorkspaceCard";
-import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh.ts"; 
+import { WorkspaceModal } from "./ui/CreateWorkspaceModal";
+import { useCreateReposMutation } from "@/features/odozi/hooks/useRepoMutations";
+import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh"; 
 
 
 
@@ -24,6 +27,8 @@ export default function Dashboard() {
     const [selectedWorkspace, setSelectedWorkspace] = useState(""); // "" means "All Workspaces"
 
     const selected = useSelectionStore((state) => state.selected);
+    const useCreateRepos = useCreateReposMutation();
+    const [isModalOpen, setIsModalOpen] = useState(false)
     console.log(selected, "selected repos in dashboard")
     
     const {
@@ -62,27 +67,65 @@ export default function Dashboard() {
         });
     }, [data, searchQuery, selectedWorkspace]);
 
+    
+      // Zustand Store variables
+    const selectedIdsSet = useSelectionStore((state) => state.selected);
+    const clearSelection = useSelectionStore((state) => state.clearSelection);
+    const handleConnectRepositories = async () => {
+        if (selectedIdsSet.size === 0 || !data?.repositories) return;
+
+        // Use the user_id context from Django or default to 1 for your testing workspace
+        const targetWorkspaceId = data.user_id || 1;
+
+        // Filter your main React-Query cache to extract objects matching your selection Set keys
+        const payloadRepositories = data.repositories
+        .filter((repo: any) => selectedIdsSet.has(String(repo.id)))
+        .map((repo: any) => {
+            // Safely split "owner/repo-name" string into separate payload parameters
+            const nameParts = repo.full_name.split("/");
+            const extractedOwner = nameParts[0] || "UnknownOwner";
+            const extractedName = nameParts[1] || repo.name;
+
+            return {
+                github_id: Number(repo.id),
+                repo_name: extractedName,
+                repo_owner: extractedOwner,
+                repo_full_name: repo.full_name
+            };
+        });
+
+        console.log("📤 Sending derived payload array down to Django:", payloadRepositories);
+
+        // Fire the network payload transaction flight task
+        useCreateRepos.mutate(
+        { workspaceId: targetWorkspaceId, repos: payloadRepositories },
+        {
+            onSuccess: () => {
+            clearSelection(); // Wipe checkboxes clean upon successful insert
+            // switchOn(false);   // Reset toolbar
+            alert("🚀 Selected pipelines connected securely to your workspace database!");
+            },
+            onError: (error: any) => {
+            alert(`❌ Failed connecting pipelines: ${error.message}`);
+            }
+        }
+        );
+  };
+
     console.log("filteredRepositories.length === 0 &&", filteredRepositories.length)
     // Active when there is a search query AND exactly one match is found
     const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
 
     const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
     const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
-    // useMemo ensures this index is only recalculated if data actually changes.
-    const selectedRepoIdsSet = useMemo(() => {
-        if (!data || !data.repo_selection) return new Set();
-        
-        // Match the exact ID key property output by your serializer (e.g., 'id' or 'repo_id')
-        return new Set(data.repo_selection.map(item => item.id || item.repo_id));
-    }, [data]);
 
 
-    if (isAuthError){
-        console.log("Please log in with GitHub again to securely synchronize your workspace")
-    }
-    if (serverDownError){
-        console.log("Server is down. Please try again later.")
-    }
+    // if (isAuthError){
+    //     console.log("Please log in with GitHub again to securely synchronize your workspace")
+    // }
+    // if (serverDownError){
+    //     console.log("Server is down. Please try again later.")
+    // }
     console.log(error, "h1osana",data)
 
     function SolveSendIconTasks(){
@@ -110,13 +153,13 @@ export default function Dashboard() {
         }
     }
 
-    if (isLoading) {
-        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
-    }
+    // if (isLoading) {
+    //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
+    // }
 
-    if (error) {
-        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
-    }
+    // if (error) {
+    //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
+    // }
 
 
     return (<div>
@@ -217,7 +260,7 @@ export default function Dashboard() {
 
                        {/* repo List */}
                         <div className="space-y-4">
-                            {filteredRepositories.map((repo) => {
+                            {items.map((repo) => {
                             // It is "ticked" if all are shown (no single match) OR if it is the single match
                             const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
 
@@ -226,9 +269,9 @@ export default function Dashboard() {
                                     key={repo.id}
                                     id={String(repo.id)}
                                     name={repo.full_name}
-                                    image={repo.avatar_url}
+                                    image={"repo.avatar_url"}
                                     isActive={isActive} // Pass the tick/active state to your card
-                                    workspaceName={repo.workspaceName}
+                                    workspaceName={"repo.workspaceName"}
                                 />
                             );
                             })}
@@ -296,9 +339,18 @@ export default function Dashboard() {
 
                 {/* right bar */}
                 <div className="w-[25%] h-full pt-3 items-end pl-4 hidden lg:flex flex-col">
+
+                    {/* Include your absolute rendering portal layer down at the bottom of the node string tree */}
+                    <WorkspaceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
                     
                     {/* Search Input Field */}
-                    <div className="space-y-4">
+                    <div className="w-full space-y-4 flex items-center">
+                        <button 
+                            onClick={() => setIsModalOpen(true)}
+                            className="p-1 mt-2 bg-green-500 hover:bg-green-700 text-white rounded-full shadow-sm transition-colors cursor-pointer mr-4"
+                            >
+                            <Plus className="w-5 h-5" />
+                        </button>
                         {/* workspace List */}
                         <div className="space-y-4">
                             <WorkspaceDropdown

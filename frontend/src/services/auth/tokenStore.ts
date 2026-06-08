@@ -54,7 +54,8 @@ class TokenStore {
     
     // 1 Hour in milliseconds = 3,600,000 ms
     // If less than 1 hour remains (meaning user has been active for ~7 hours), return true
-    return timeLeft > 0 && timeLeft <= 100000;
+    // return timeLeft > 0 && timeLeft <= 100000;
+    return true;
   }
 }
 

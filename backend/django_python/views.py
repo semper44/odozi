@@ -12,7 +12,7 @@ from django.contrib.auth.models import User
 from django.conf import settings
 
 from agents.tasks import process_scan_payload_task
-from account_profile.models import GitHubRepository, Workspace
+from account_profile.models import GitHubRepository, Workspace, WorkspaceMembership
 from .models import UserProfileModel
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
@@ -58,9 +58,7 @@ def dashboard_view(request):
     github_access_token = None
     expires_at = None
     github_res_status = None
-    print("VALUE:", stored_jwt_access_token)
-    print("TYPE:", type(stored_jwt_access_token))
-    print("REPR:", repr(stored_jwt_access_token))
+
 
     # FIRST LOGIN HANDSHAKE (Transit Ticket Present) 
     if ticket_id:
@@ -367,6 +365,45 @@ class DeleteUserSelectedRepos(APIView):
         if deleted_count == 0:
             return Response({"error": "No matching repositories found or access denied."}, status=404)
 
+
+
+class CreateWorkspaceView(APIView):
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        # 1. Resolve request user identity from hidden secure HttpOnly token container cookie
+        stored_jwt_access_token = request.COOKIES.get("jwt_access_token")
+        if not stored_jwt_access_token:
+            return Response({"error": "Unauthorized session context."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            parsed_jwt = AccessToken(stored_jwt_access_token) # type: ignore
+            user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
+            db_user = User.objects.get(id=user_id)
+        except Exception:
+            return Response({"error": "Expired or corrupt credential signature."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # 2. Extract and validate incoming string dictionary text parameter variables
+        workspace_name = request.data.get("name")
+        if not workspace_name or not str(workspace_name).strip():
+            return Response({"error": "Workspace parameter 'name' is completely required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. Create the database record and auto-provision Admin membership bounds instantly
+        workspace, created = Workspace.objects.get_or_create(
+            name=workspace_name.strip(),
+            owner=db_user,
+            defaults={"github_account_name": db_user.username}
+        )
+
+        if created:
+            WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=db_user)
+
+        return Response({
+            "status": "success",
+            "workspace_id": workspace.id,
+            "name": workspace.name
+        }, status=status.HTTP_201_CREATED)
 
 
 @csrf_exempt
