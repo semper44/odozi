@@ -5,25 +5,27 @@ interface GitHubRepoPayload {
   repo_full_name: string;
 }
 
-export const createSelectedRepos = async (workspaceId: string | number, repositories: GitHubRepoPayload[]) => {
+export const createSelectedRepos = async (payload: {
+  workspaceId: number | null;
+  newWorkspaceName: string | null;
+  repositories: any[];
+}) => {
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
-  const response = await fetch(`${backendUrl}/api/repos/create/`, { // Ensure path matches your urls.py
+  const response = await fetch(`${backendUrl}/api/repos/create/`, {
     method: "POST",
-    credentials: "include", // 👈 CRITICAL: Transmits HttpOnly authentication cookies
-    headers: {
-      "Content-Type": "application/json",
-    },
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      workspace_id: workspaceId,
-      repositories: repositories, // Array of dictionary payloads matching serializer schemas
+      workspace_id: payload.workspaceId,
+      new_workspace_name: payload.newWorkspaceName,
+      repositories: payload.repositories,
     }),
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `Bulk connection failed with status: ${response.status}`);
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || "Failed executing pipeline creation mapping.");
   }
-
   return response.json();
 };

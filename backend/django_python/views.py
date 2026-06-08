@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.cache import cache
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.db import transaction
 
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace, WorkspaceMembership
@@ -263,74 +264,101 @@ class CreateUserSelectedRepos(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
-        # 1. Capture payload data array and workspace tracking context headers
-        repo_list = request.data.get('repositories', []) # Expects an array list of dicts
-        workspace_id = request.data.get('workspace_id')
+        repo_list = request.data.get('repositories', [])
+        workspace_id = request.data.get('workspace_id') # Can be an integer ID or None
+        new_workspace_name = request.data.get('new_workspace_name') # Can be a string name or None
 
         if not repo_list or not isinstance(repo_list, list):
             return Response(
-                {"error": "Malformed payload structure. 'repositories' must be a non-empty array list."}, 
+                {"error": "Malformed payload structure. 'repositories' must be a non-empty list."}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            # 2. Securely isolate the target workspace profile layout context
-            workspace = Workspace.objects.get(id=workspace_id, owner=request.user)
-        except Workspace.DoesNotExist:
-            return Response(
-                {"error": f"Workspace context matching ID '{workspace_id}' not found or unauthorized."}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
+            # Wrap everything inside an atomic transaction block so if anything fails, 
+            # no half-created workspaces or repositories leak into your SQL tables
+            with transaction.atomic():
+                
+                # --- PATH B: CREATE A NEW WORKSPACE ON THE FLY ---
+                if new_workspace_name and str(new_workspace_name).strip():
+                    # Recover installation_id defensively from your user profile model mapping
+                    try:
+                        profile = UserProfileModel.objects.get(user=request.user)
+                        # Fallback placeholder if installation_id hasn't been set yet
+                        installation_id = getattr(profile, "installation_id", "dynamic_fallback") 
+                    except UserProfileModel.DoesNotExist:
+                        installation_id = "dynamic_fallback"
 
-        # 3. Mass validate the entire payload matrix using our serializer mapping wrapper
-        serializer = GitHubRepositorySerializer(data=repo_list, many=True)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                    workspace, created = Workspace.objects.get_or_create(
+                        name=new_workspace_name.strip(),
+                        owner=request.user,
+                        defaults={
+                            "github_account_name": request.user.username,
+                            "installation_id": installation_id
+                        }
+                    )
+                    if created:
+                        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
+                
+                # --- PATH A: ATTACH TO EXISTING WORKSPACE ---
+                elif workspace_id:
+                    try:
+                        # Securely verify that the requesting user owns or belongs to this workspace
+                        workspace = Workspace.objects.get(id=workspace_id, owner=request.user)
+                    except Workspace.DoesNotExist:
+                        return Response(
+                            {"error": f"Workspace matching ID '{workspace_id}' not found or unauthorized."}, 
+                            status=status.HTTP_404_NOT_FOUND
+                        )
+                else:
+                    return Response(
+                        {"error": "Must provide either an existing 'workspace_id' or a 'new_workspace_name'."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
-        # 4. 🏎️ THE ULTIMATE PERFORMANCE STEP: In-Memory Instance Compiling
-        # We build the raw Python model objects in local worker memory WITHOUT touching the database yet.
-        validated_data_list = serializer.validated_data
-        
-        # Pull existing saved IDs to prevent duplicate database integrity crashes
-        incoming_ids = [item['github_id'] for item in validated_data_list]
-        existing_ids = set(GitHubRepository.objects.filter(
-            github_id__in=incoming_ids
-        ).values_list('github_id', flat=True))
+                # --- VALIDATE & MASS BULK INSERT REPOSITORIES ---
+                serializer = GitHubRepositorySerializer(data=repo_list, many=True)
+                if not serializer.is_valid():
+                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        new_repo_instances = []
-        for data in validated_data_list:
-            # Skip records that are already connected to keep the database stable
-            if data['github_id'] in existing_ids:
-                continue
+                validated_data_list = serializer.validated_data
+                
+                incoming_ids = [item['github_id'] for item in validated_data_list]
+                existing_ids = set(GitHubRepository.objects.filter(
+                    github_id__in=incoming_ids
+                ).values_list('github_id', flat=True))
 
-            new_repo_instances.append(
-                GitHubRepository(
-                    workspace=workspace,
-                    github_id=data['github_id'],
-                    repo_name=data['repo_name'],
-                    repo_owner=data['repo_owner'],
-                    repo_full_name=data['repo_full_name'],
-                    # Optional metadata fields:
-                    # collaborators_url=data.get('collaborators_url'),
-                    # branches_url=data.get('branches_url'),
-                    # contributors_url=data.get('contributors_url')
-                )
-            )
+                new_repo_instances = []
+                for data in validated_data_list:
+                    if data['github_id'] in existing_ids:
+                        continue
 
-        # 5. Execute ONE single pinpoint atomic INSERT database trip request statement
-        if new_repo_instances:
-            GitHubRepository.objects.bulk_create(new_repo_instances)
-            print(f"🎉 BULK INSERT SUCCESS: Saved {len(new_repo_instances)} new repositories.")
+                    new_repo_instances.append(
+                        GitHubRepository(
+                            workspace=workspace,
+                            repo_id=data['github_id'], # Ensure your model fields map properly
+                            repo_name=data['repo_name'],
+                            repo_owner=data['repo_owner'],
+                            repo_full_name=data['repo_full_name']
+                        )
+                    )
 
-        return Response(
-            {
-                "status": "success",
-                "message": f"Successfully processed {len(repo_list)} repository records. Connected {len(new_repo_instances)} new pipelines.",
-                "saved_count": len(new_repo_instances)
-            }, 
-            status=status.HTTP_201_CREATED
-        )
+                if new_repo_instances:
+                    GitHubRepository.objects.bulk_create(new_repo_instances)
 
+                # Evict user's repository state array from Redis cache so dashboard re-syncs instantly
+                cache.delete(f"user:repos:{request.user.id}")
+
+                return Response({
+                    "status": "success",
+                    "message": f"Successfully processed {len(repo_list)} repositories.",
+                    "workspace_id": workspace.id,
+                    "workspace_name": workspace.name,
+                    "saved_count": len(new_repo_instances)
+                }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": f"Transaction failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 

@@ -29,7 +29,7 @@ export const SelectionToolbar = ({
   );
 
 //   Derive state for deselecting
-  const allSelected = selected.size === dummyRepos.length;
+//   const allSelected = selected.size === dummyRepos.length;
   
 //    # ✅ CRITICAL SHIFT: Determine if all VISIBLE repos are currently selected
   const allVisibleSelected = filteredRepos?.length > 0 && 

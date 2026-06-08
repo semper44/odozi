@@ -10,16 +10,15 @@ export interface GitHubRepoPayload {
   repo_full_name: string;
 }
 
-// 1. Hook wrapper handling high-speed bulk database creations
+// Inside useRepoMutations.ts:
+
 export const useCreateReposMutation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ workspaceId, repos }: { workspaceId: string | number; repos: GitHubRepoPayload[] }) => 
-      createSelectedRepos(workspaceId, repos),
-    onSuccess: (data) => {
-      console.log(`🎉 Connected ${data.saved_count} new repository pipelines!`);
-      // Invalidate the 'repos' cache key to force a fresh data sync
+    // Map object directly
+    mutationFn: createSelectedRepos, 
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
   });

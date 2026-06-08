@@ -1,4 +1,6 @@
 import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, Plus } from "lucide-react";
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import gradientBg  from "../../../assets/gradient.jpg"
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
 import { useSelectionStore } from "../../store/selectionStore";
@@ -53,7 +55,7 @@ export default function Dashboard() {
     const filteredRepositories = useMemo(() => {
         if (!data?.repositories) return [];
 
-        return data.repositories.filter((repo: any) => {
+        return items.filter((repo: any) => {
         // Filter Step A: Match Workspace selection boundaries
         if (selectedWorkspace && repo.workspaceName !== selectedWorkspace) {
             return false;
@@ -70,48 +72,61 @@ export default function Dashboard() {
     
       // Zustand Store variables
     const selectedIdsSet = useSelectionStore((state) => state.selected);
+    const toggleSelect = useSelectionStore((state) => state.toggleSelect);
     const clearSelection = useSelectionStore((state) => state.clearSelection);
-    const handleConnectRepositories = async () => {
-        if (selectedIdsSet.size === 0 || !data?.repositories) return;
+    
+    const handleCreateWorkspace = (modalPayload: { workspaceName: string }) => {
+        console.log("manage")
+        // if (selectedIdsSet.size === 0 || !data?.repositories) return;
+        console.log("baby")
 
-        // Use the user_id context from Django or default to 1 for your testing workspace
-        const targetWorkspaceId = data.user_id || 1;
-
-        // Filter your main React-Query cache to extract objects matching your selection Set keys
-        const payloadRepositories = data.repositories
-        .filter((repo: any) => selectedIdsSet.has(String(repo.id)))
-        .map((repo: any) => {
-            // Safely split "owner/repo-name" string into separate payload parameters
+        // Filter our cached collection matching the active Zustand Set configurations
+        const serializedRepos = items
+            .filter((repo: any) => selectedIdsSet.has(String(repo.id)))
+            .map((repo: any) => {
             const nameParts = repo.full_name.split("/");
-            const extractedOwner = nameParts[0] || "UnknownOwner";
-            const extractedName = nameParts[1] || repo.name;
-
             return {
                 github_id: Number(repo.id),
-                repo_name: extractedName,
-                repo_owner: extractedOwner,
+                repo_name: nameParts[1] || repo.name,
+                repo_owner: nameParts[0] || "Unknown",
                 repo_full_name: repo.full_name
             };
-        });
+            });
 
-        console.log("📤 Sending derived payload array down to Django:", payloadRepositories);
-
-        // Fire the network payload transaction flight task
-        useCreateRepos.mutate(
-        { workspaceId: targetWorkspaceId, repos: payloadRepositories },
-        {
+        useCreateRepos.mutate({
+            workspaceId: null, // Signals backend view path B to trigger a brand-new workspace insert
+            newWorkspaceName: modalPayload.workspaceName,
+            repositories: serializedRepos
+        }, {
             onSuccess: () => {
-            clearSelection(); // Wipe checkboxes clean upon successful insert
-            // switchOn(false);   // Reset toolbar
-            alert("🚀 Selected pipelines connected securely to your workspace database!");
+            clearSelection();
+            setIsModalOpen(false);
+            toast.success("Workspace created with selected repositories!", {
+                position: "top-right",
+                autoClose: 2000,
+                theme: "dark",
+                style: {
+                    background: "linear-gradient(to right, #00b09b, #96c93d)",
+                    color: "#fff"          
+                }
+                });
+            
             },
-            onError: (error: any) => {
-            alert(`❌ Failed connecting pipelines: ${error.message}`);
+            onError: (err: any) => {
+                toast(`❌ Error compiling pipelines: ${err.message}`, {
+                    autoClose: 3000,         // Closes after 3 seconds
+                    position: "top-right",   // Combines your gravity ("top") and position ("right")
+                    pauseOnFocusLoss: true,  // Equivalent to stopOnFocus: true
+                    
+                    // Custom styling to inject your linear gradient background
+                    style: {
+                        background: "linear-gradient(to right, #00b09b, #96c93d)",
+                        color: "#fff"          // Ensures your text is readable over the gradient
+                    }
+                    });
             }
-        }
-        );
-  };
-
+        });
+    };
     console.log("filteredRepositories.length === 0 &&", filteredRepositories.length)
     // Active when there is a search query AND exactly one match is found
     const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
@@ -341,7 +356,15 @@ export default function Dashboard() {
                 <div className="w-[25%] h-full pt-3 items-end pl-4 hidden lg:flex flex-col">
 
                     {/* Include your absolute rendering portal layer down at the bottom of the node string tree */}
-                    <WorkspaceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+                    <WorkspaceModal
+                        isOpen={isModalOpen}
+                        onClose={() => setIsModalOpen(false)}
+                        allRepositories={items || []} // ✅ Feed the entire collection into the modal!
+                        selectedIds={selectedIdsSet}               // ✅ Pass the store selection tracker reference
+                        onToggleSelect={toggleSelect}               // ✅ Pass the action selection click modifier handler
+                        onSubmit={handleCreateWorkspace}
+                        isPending={useCreateRepos.isPending}
+                    />
                     
                     {/* Search Input Field */}
                     <div className="w-full space-y-4 flex items-center">
