@@ -14,6 +14,7 @@ import { WorkspaceDropdown } from "./ui/WorkspaceCard";
 import { WorkspaceModal } from "./ui/CreateWorkspaceModal";
 import { useCreateReposMutation } from "@/features/odozi/hooks/useRepoMutations";
 import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh"; 
+// import { EnvVariableCard } from "./ui/ENV vars/EnvVariableCard";
 
 
 
@@ -23,6 +24,8 @@ export default function Dashboard() {
     const [isAiOpen, setIsAiOpen] = useState(false);
     const [isProcessingRequest, setIsProcessingRequest] = useState(false);
     const [isOn, setIsOn] = useState(false);
+    const [envShowModal, setEnvShowModal] = useState(false);
+    const [showLlmModal, setShowLlmModal] = useState(false);
     const [prompt, setPrompt] = useState("");
     const { sendMessage } = useStreamingSocket();
     const [searchQuery, setSearchQuery] = useState('');
@@ -353,7 +356,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* right bar */}
-                <div className="w-[25%] h-full pt-3 items-end pl-4 hidden lg:flex flex-col">
+                <div className="w-[25%] h-full pt-3 items-center gap-4 pl-4 hidden lg:flex flex-col justify-start">
 
                     {/* Include your absolute rendering portal layer down at the bottom of the node string tree */}
                     <WorkspaceModal
@@ -366,7 +369,6 @@ export default function Dashboard() {
                         isPending={useCreateRepos.isPending}
                     />
                     
-                    {/* Search Input Field */}
                     <div className="w-full space-y-4 flex items-center">
                         <button 
                             onClick={() => setIsModalOpen(true)}
@@ -383,6 +385,22 @@ export default function Dashboard() {
                             />
                         </div>
                     </div>
+                    {/* create env variables */}
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
+                        onClick={() => setEnvShowModal(!envShowModal)}
+                    >
+                        <span className="text-sm font-semibold text-gray-700">
+                        Create env vars
+                        </span>
+                    </div>  
+                    {/* select LLM */}
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
+                        onClick={() => setShowLlmModal(!showLlmModal)}
+                    >
+                        <span className="text-sm font-semibold text-gray-700">
+                        Select LLM
+                        </span>
+                    </div>  
 
                     <button
                     >

@@ -11,8 +11,9 @@ export const createSelectedRepos = async (payload: {
   repositories: any[];
 }) => {
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
+  console.log("sea", `${backendUrl}/dasboard/api/workspaces/repos/create/`)
 
-  const response = await fetch(`${backendUrl}/api/repos/create/`, {
+  const response = await fetch(`${backendUrl}/dashboard/api/workspaces/repos/create/`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

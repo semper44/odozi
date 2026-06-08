@@ -10,6 +10,7 @@ class UserProfileModel(models.Model):
     # 2. ENCRYPTED FIELD: Tokens are saved as binary blobs, completely unreadable to hackers
     encrypted_access_token = models.BinaryField(blank=True, null=True)
     encrypted_refresh_token = models.BinaryField(blank=True, null=True)
+    installation_id = models.BigIntegerField(unique=True, db_index=True)    
     encrypted_jwt_access_token = models.BinaryField(blank=True, null=True)
     encrypted_jwt_refresh_token = models.BinaryField(blank=True, null=True)
     browser_family = models.CharField(max_length=500, blank=True, null=True)
@@ -28,11 +29,9 @@ class Workspace(models.Model):
     )
     # user = models.ForeignKey(UserProfileModel, on_delete=models.CASCADE, related_name="github_integration")
     # 1. This is just a standard ID number, safe to keep as plain text
-    installation_id = models.BigIntegerField(unique=True, db_index=True)    
     # Store the name of the company or organization space cleanly
     # e.g., "semper44", "company-a-org", "company-b-org"
-    github_account_name = models.CharField(max_length=150)
-    
+    github_account_name = models.CharField(max_length=150)   
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

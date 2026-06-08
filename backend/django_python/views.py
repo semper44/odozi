@@ -260,75 +260,73 @@ def dashboard_view(request):
 
 
 class CreateUserSelectedRepos(APIView):
-    authentication_classes = [HttpOnlyCookieJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    # authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         repo_list = request.data.get('repositories', [])
+        user = User.objects.get(pk = 1)
+        print("repos", repo_list)
         workspace_id = request.data.get('workspace_id') # Can be an integer ID or None
         new_workspace_name = request.data.get('new_workspace_name') # Can be a string name or None
-
+        print("ewo", new_workspace_name)
         if not repo_list or not isinstance(repo_list, list):
+            print("1 error")
             return Response(
                 {"error": "Malformed payload structure. 'repositories' must be a non-empty list."}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            # Wrap everything inside an atomic transaction block so if anything fails, 
-            # no half-created workspaces or repositories leak into your SQL tables
-            with transaction.atomic():
-                
+            with transaction.atomic():              
                 # --- PATH B: CREATE A NEW WORKSPACE ON THE FLY ---
+                print(1111)
                 if new_workspace_name and str(new_workspace_name).strip():
                     # Recover installation_id defensively from your user profile model mapping
                     try:
-                        profile = UserProfileModel.objects.get(user=request.user)
+                        
+                        profile = UserProfileModel.objects.get(user=user)
+                        print(profile.installation_id)
                         # Fallback placeholder if installation_id hasn't been set yet
-                        installation_id = getattr(profile, "installation_id", "dynamic_fallback") 
+                        installation_id = getattr(profile, "installation_id", "3463363364") 
+                        print(222)
                     except UserProfileModel.DoesNotExist:
                         installation_id = "dynamic_fallback"
 
+                    print("johhrr", new_workspace_name.strip(), user, "ppp")
                     workspace, created = Workspace.objects.get_or_create(
                         name=new_workspace_name.strip(),
-                        owner=request.user,
+                        owner=user,
                         defaults={
-                            "github_account_name": request.user.username,
-                            "installation_id": installation_id
+                            "github_account_name": user.username,
                         }
                     )
+                    print("yoowaaa", created)
                     if created:
-                        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
-                
-                # --- PATH A: ATTACH TO EXISTING WORKSPACE ---
-                elif workspace_id:
-                    try:
-                        # Securely verify that the requesting user owns or belongs to this workspace
-                        workspace = Workspace.objects.get(id=workspace_id, owner=request.user)
-                    except Workspace.DoesNotExist:
-                        return Response(
-                            {"error": f"Workspace matching ID '{workspace_id}' not found or unauthorized."}, 
-                            status=status.HTTP_404_NOT_FOUND
-                        )
+                        print("created")
+                        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=user)
                 else:
+                    print("errorr")
                     return Response(
                         {"error": "Must provide either an existing 'workspace_id' or a 'new_workspace_name'."},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
                 # --- VALIDATE & MASS BULK INSERT REPOSITORIES ---
+                print(555)
                 serializer = GitHubRepositorySerializer(data=repo_list, many=True)
                 if not serializer.is_valid():
                     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
                 validated_data_list = serializer.validated_data
-                
+                print(444)
                 incoming_ids = [item['github_id'] for item in validated_data_list]
                 existing_ids = set(GitHubRepository.objects.filter(
                     github_id__in=incoming_ids
                 ).values_list('github_id', flat=True))
 
                 new_repo_instances = []
+                print(5555)
                 for data in validated_data_list:
                     if data['github_id'] in existing_ids:
                         continue

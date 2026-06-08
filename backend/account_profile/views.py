@@ -392,22 +392,20 @@ def github_callback_view(request):
     if not github_username:
         return JsonResponse({"error": "Could not extract user details from profile"}, status=400)
 
-    if installation_id:
-        workspace, created = Workspace.objects.get_or_create(
-            name = github_username,
-                # Django searches the DB using these lookup fields:
-            
-            # If not found, Django creates it using lookup fields + these defaults:
-            defaults={
-                "installation_id": installation_id,
-                "owner": request.user,
-                "github_account_name": github_username,
-            }
-        )
-        print("wahala", request.user)
-        # workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
-        if created:
-            W_Membership= WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
+    workspace, created = Workspace.objects.get_or_create(
+        name = github_username,
+            # Django searches the DB using these lookup fields:
+        
+        # If not found, Django creates it using lookup fields + these defaults:
+        defaults={
+            "owner": request.user,
+            "github_account_name": github_username,
+        }
+    )
+    print("wahala", request.user)
+    # workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
+    if created:
+        W_Membership= WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
 
     # 5. DB MANAGEMENT: Locate or create the user record in Django
 
@@ -426,7 +424,8 @@ def github_callback_view(request):
 
 
     profile, _ = UserProfileModel.objects.get_or_create(
-        user=user
+        user=user,
+        installation_id = installation_id
     )
 
     raw_access_token = token_data.get("access_token")

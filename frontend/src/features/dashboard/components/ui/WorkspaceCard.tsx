@@ -1,5 +1,5 @@
 // WorkspaceDropdown.tsx
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { ChevronDown, Search } from "lucide-react";
 
 interface DropdownProps {
