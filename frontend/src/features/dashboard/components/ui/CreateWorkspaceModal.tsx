@@ -1,6 +1,6 @@
 // WorkspaceModal.tsx
 import React, { useState, useMemo } from "react";
-import { X, Search, Loader2, FolderPlus, Check, Square } from "lucide-react";
+import { X, Search, Loader2, FolderPlus, Check } from "lucide-react";
 
 interface RepositoryItem {
   id: number;
@@ -143,7 +143,7 @@ export const WorkspaceModal = ({
                     {/* Right item side showing action icons */}
                     <div className="flex-shrink-0 ml-4">
                       {isChecked ? (
-                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-1 rounded-md border border-red-100 hover:bg-red-100 transition-colors">
+                        <div className="flex items-center  gap-1.5 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-1 rounded-md border border-red-100 hover:bg-red-100 transition-colors">
                           <X className="w-3 h-3" />
                           <span>Cancel</span>
                         </div>
@@ -166,7 +166,7 @@ export const WorkspaceModal = ({
 
           {/* Action Submission Buttons block */}
           <div className="flex items-center gap-3 justify-end pt-3 border-t border-gray-100">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">
+            <button type="button" onClick={onClose} className="px-4 py-2.5 cursor-pointer rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">
               Cancel
             </button>
             

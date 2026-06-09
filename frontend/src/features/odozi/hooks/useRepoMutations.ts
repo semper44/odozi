@@ -1,6 +1,5 @@
-// @/features/repositories/hooks/useRepoMutations.ts
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createSelectedRepos } from "../apis/createrepotest"; // Adjust relative path
+import { createSelectedRepos } from "../apis/createrepotest"; 
 
 // Explicit type contract describing your database mapping structure
 export interface GitHubRepoPayload {
@@ -40,31 +39,31 @@ export const useDeleteReposMutation = () => {
 
 
 // Append inside useRepoMutations.ts:
-export const createWorkspaceApi = async (name: string) => {
-  const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
+// export const createWorkspaceApi = async (name: string) => {
+//   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
-  const response = await fetch(`${backendUrl}/api/workspaces/create/`, {
-    method: "POST",
-    credentials: "include", // Essential for HttpOnly cookies parsing
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
+//   const response = await fetch(`${backendUrl}/api/workspaces/create/`, {
+//     method: "POST",
+//     credentials: "include", // Essential for HttpOnly cookies parsing
+//     headers: { "Content-Type": "application/json" },
+//     body: JSON.stringify({ name }),
+//   });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || "Failed creating database workspace row.");
-  }
-  return response.json();
-};
+//   if (!response.ok) {
+//     const err = await response.json().catch(() => ({}));
+//     throw new Error(err.error || "Failed creating database workspace row.");
+//   }
+//   return response.json();
+// };
 
-export const useCreateWorkspaceMutation = () => {
-  const queryClient = useQueryClient();
+// export const useCreateWorkspaceMutation = () => {
+//   const queryClient = useQueryClient();
 
-  return useMutation({
-    mutationFn: (name: string) => createWorkspaceApi(name),
-    onSuccess: () => {
-      // Invalidate your main repo cache to instantly refresh dropdown components with the new workspace ID options
-      queryClient.invalidateQueries({ queryKey: ["repos"] });
-    },
-  });
-};
+//   return useMutation({
+//     mutationFn: (name: string) => createWorkspaceApi(name),
+//     onSuccess: () => {
+//       // Invalidate your main repo cache to instantly refresh dropdown components with the new workspace ID options
+//       queryClient.invalidateQueries({ queryKey: ["repos"] });
+//     },
+//   });
+// };

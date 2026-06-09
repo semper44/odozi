@@ -1,10 +1,3 @@
-interface GitHubRepoPayload {
-  github_id: number;
-  repo_name: string;
-  repo_owner: string;
-  repo_full_name: string;
-}
-
 export const createSelectedRepos = async (payload: {
   workspaceId: number | null;
   newWorkspaceName: string | null;

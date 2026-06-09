@@ -14,7 +14,7 @@ from django.db import transaction
 
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace, WorkspaceMembership
-from .models import UserProfileModel
+from .models import UserProfileModel, RepoEnvKey
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.security import verify_signature
@@ -259,15 +259,15 @@ def dashboard_view(request):
 
 
 
-class CreateUserSelectedRepos(APIView):
-    # authentication_classes = [HttpOnlyCookieJWTAuthentication]
-    # permission_classes = [IsAuthenticated]
+class CreateWorkspaceView(APIView):
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         repo_list = request.data.get('repositories', [])
-        user = User.objects.get(pk = 1)
+        user = request.user
+        # user = User.objects.get(pk = 1)
         print("repos", repo_list)
-        workspace_id = request.data.get('workspace_id') # Can be an integer ID or None
         new_workspace_name = request.data.get('new_workspace_name') # Can be a string name or None
         print("ewo", new_workspace_name)
         if not repo_list or not isinstance(repo_list, list):
@@ -301,7 +301,8 @@ class CreateUserSelectedRepos(APIView):
                             "github_account_name": user.username,
                         }
                     )
-                    print("yoowaaa", created)
+                    print("yoowaaa", created, workspace.name)
+
                     if created:
                         print("created")
                         WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=user)
@@ -316,25 +317,27 @@ class CreateUserSelectedRepos(APIView):
                 print(555)
                 serializer = GitHubRepositorySerializer(data=repo_list, many=True)
                 if not serializer.is_valid():
+                    print(serializer.errors)
                     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
                 validated_data_list = serializer.validated_data
-                print(444)
-                incoming_ids = [item['github_id'] for item in validated_data_list]
+                print(444, validated_data_list)
+                incoming_ids = [item['repo_id'] for item in validated_data_list]
+                print(6666, incoming_ids)
                 existing_ids = set(GitHubRepository.objects.filter(
-                    github_id__in=incoming_ids
-                ).values_list('github_id', flat=True))
+                    repo_id__in=incoming_ids
+                ).values_list('repo_id', flat=True))
 
                 new_repo_instances = []
-                print(5555)
+                print(5555, existing_ids)
                 for data in validated_data_list:
-                    if data['github_id'] in existing_ids:
+                    if data['repo_id'] in existing_ids:
                         continue
 
                     new_repo_instances.append(
                         GitHubRepository(
                             workspace=workspace,
-                            repo_id=data['github_id'], # Ensure your model fields map properly
+                            repo_id=data['repo_id'], # Ensure your model fields map properly
                             repo_name=data['repo_name'],
                             repo_owner=data['repo_owner'],
                             repo_full_name=data['repo_full_name']
@@ -393,43 +396,62 @@ class DeleteUserSelectedRepos(APIView):
 
 
 
-class CreateWorkspaceView(APIView):
-    authentication_classes = [HttpOnlyCookieJWTAuthentication]
-    permission_classes = [IsAuthenticated]
-
+class CreateRepoEnvKeys(APIView):
+    """
+    Accepts an array of string variable names and maps bulk creations safely
+    under unique constraints against target repository components.
+    """
     def post(self, request, *args, **kwargs):
-        # 1. Resolve request user identity from hidden secure HttpOnly token container cookie
-        stored_jwt_access_token = request.COOKIES.get("jwt_access_token")
-        if not stored_jwt_access_token:
-            return Response({"error": "Unauthorized session context."}, status=status.HTTP_401_UNAUTHORIZED)
+        repo_id = request.data.get('repo_id')
+        key_names = request.data.get('key_names', [])
+
+        # 1. Base Payload Structure Validation Checks
+        if not repo_id:
+            return Response({"error": "Missing 'repo_id' parameters."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not key_names or not isinstance(key_names, list):
+            return Response({"error": "'key_names' must be a non-empty list validation array."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            parsed_jwt = AccessToken(stored_jwt_access_token) # type: ignore
-            user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
-            db_user = User.objects.get(id=user_id)
-        except Exception:
-            return Response({"error": "Expired or corrupt credential signature."}, status=status.HTTP_401_UNAUTHORIZED)
+            repo = GitHubRepository.objects.get(pk=repo_id)
+        except GitHubRepository.DoesNotExist:
+            return Response({"error": f"Target GitHubRepository with id {repo_id} does not exist."}, status=status.HTTP_404_NOT_FOUND)
 
-        # 2. Extract and validate incoming string dictionary text parameter variables
-        workspace_name = request.data.get("name")
-        if not workspace_name or not str(workspace_name).strip():
-            return Response({"error": "Workspace parameter 'name' is completely required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                # 2. De-duplicate raw frontend lists defensively inside python runtime memory layout
+                cleaned_keys = list(set([str(name).strip().toUpperCase() for name in key_names if str(name).strip()]))
 
-        # 3. Create the database record and auto-provision Admin membership bounds instantly
-        workspace, created = Workspace.objects.get_or_create(
-            name=workspace_name.strip(),
-            owner=db_user,
-            defaults={"github_account_name": db_user.username}
-        )
+                # 3. Pull records matching incoming items to prevent DB IntegrityErrors
+                existing_keys = set(
+                    RepoEnvKey.objects.filter(
+                        repo=repo, 
+                        key_name__in=cleaned_keys
+                    ).values_list('key_name', flat=True)
+                )
 
-        if created:
-            WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=db_user)
+                # 4. Filter structures down dynamically to process only brand-new entries
+                new_instances = []
+                for name in cleaned_keys:
+                    if name in existing_keys:
+                        continue
+                    new_instances.append(
+                        RepoEnvKey(repo=repo, key_name=name)
+                    )
 
-        return Response({
-            "status": "success",
-            "workspace_id": workspace.id,
-            "name": workspace.name
-        }, status=status.HTTP_201_CREATED)
+                # 5. Bulk commit execution blocks safely
+                if new_instances:
+                    RepoEnvKey.objects.bulk_create(new_instances)
+
+                return Response({
+                    "status": "success",
+                    "message": f"Successfully processed keys. Created {len(new_instances)} new entries.",
+                    "skipped_count": len(cleaned_keys) - len(new_instances)
+                }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": f"Transaction mapping failure: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
 @csrf_exempt

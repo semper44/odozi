@@ -16,3 +16,4 @@ class GitHubRepositorySerializer(serializers.ModelSerializer):
     class Meta:
         model = GitHubRepository
         fields = '__all__'
+        read_only_fields = ['workspace']

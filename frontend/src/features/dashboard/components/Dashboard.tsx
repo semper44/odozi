@@ -13,7 +13,9 @@ import { SelectionToolbar } from "./SelectionToolbar";
 import { WorkspaceDropdown } from "./ui/WorkspaceCard";
 import { WorkspaceModal } from "./ui/CreateWorkspaceModal";
 import { useCreateReposMutation } from "@/features/odozi/hooks/useRepoMutations";
-import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh"; 
+import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh";
+import { EnvVarModal } from "./ui/ENV vars/EnvVarModal"; 
+import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
 // import { EnvVariableCard } from "./ui/ENV vars/EnvVariableCard";
 
 
@@ -89,7 +91,7 @@ export default function Dashboard() {
             .map((repo: any) => {
             const nameParts = repo.full_name.split("/");
             return {
-                github_id: Number(repo.id),
+                repo_id: Number(repo.id),
                 repo_name: nameParts[1] || repo.name,
                 repo_owner: nameParts[0] || "Unknown",
                 repo_full_name: repo.full_name
@@ -392,7 +394,8 @@ export default function Dashboard() {
                         <span className="text-sm font-semibold text-gray-700">
                         Create env vars
                         </span>
-                    </div>  
+                    </div>
+                    {envShowModal &&<EnvVarModal isOpen={envShowModal} onClose={() => setEnvShowModal(false)} />} 
                     {/* select LLM */}
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
                         onClick={() => setShowLlmModal(!showLlmModal)}
@@ -400,7 +403,8 @@ export default function Dashboard() {
                         <span className="text-sm font-semibold text-gray-700">
                         Select LLM
                         </span>
-                    </div>  
+                    </div> 
+                    {showLlmModal &&<LLMConfigModal isOpen={showLlmModal} onClose={() => setShowLlmModal(false)}/> }
 
                     <button
                     >
