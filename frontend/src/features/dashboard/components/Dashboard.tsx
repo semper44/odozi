@@ -1,5 +1,6 @@
+import { useMemo, useState } from "react";
 import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, Plus } from "lucide-react";
-import { ToastContainer, toast } from 'react-toastify';
+import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import gradientBg  from "../../../assets/gradient.jpg"
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
@@ -7,12 +8,11 @@ import { useSelectionStore } from "../../store/selectionStore";
 import { items } from "../../data/dummyData";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
-import { useMemo, useState } from "react";
 import { RepoCard } from "./ui/RepoCard";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { WorkspaceDropdown } from "./ui/WorkspaceCard";
 import { WorkspaceModal } from "./ui/CreateWorkspaceModal";
-import { useCreateReposMutation } from "@/features/odozi/hooks/useRepoMutations";
+import { useCreateReposMutation, useCreateEnvKeysMutation } from "@/features/odozi/hooks/useRepoMutations";
 import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh";
 import { EnvVarModal } from "./ui/ENV vars/EnvVarModal"; 
 import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
@@ -35,6 +35,7 @@ export default function Dashboard() {
 
     const selected = useSelectionStore((state) => state.selected);
     const useCreateRepos = useCreateReposMutation();
+    const useCreateEnv = useCreateEnvKeysMutation();
     const [isModalOpen, setIsModalOpen] = useState(false)
     console.log(selected, "selected repos in dashboard")
     
@@ -132,7 +133,44 @@ export default function Dashboard() {
             }
         });
     };
-    console.log("filteredRepositories.length === 0 &&", filteredRepositories.length)
+
+
+const createEnvVar = (keyList: string[], workspace:string) => {
+  // Use 'items' or 'allRepositories' depending on your state name
+  const serializedRepos = items
+    .filter((repo: any) => selectedIdsSet.has(String(repo.id)))
+    .map((repo: any) => {
+      const nameParts = repo.full_name.split("/");
+      return {
+        repo_id: Number(repo.id),
+        repo_name: nameParts[1] || repo.name,
+        repo_owner: nameParts[0] || "Unknown",
+        repo_full_name: repo.full_name
+      };
+    });
+
+    console.log("eze yo yo",{
+    workspace: workspace, 
+    repositories: serializedRepos,
+    key_names: keyList,
+    selected:selected 
+  })
+  // Fire everything to your dynamic Django view!
+  useCreateEnv.mutate({
+    workspace: workspace, 
+    repositories: serializedRepos,
+    key_names: keyList,
+    selected:Array.from(selected) 
+  }, {
+    onSuccess: () => {
+    //   clearSelection();
+      setEnvShowModal(false);
+    },
+  });
+};
+
+
+    console.log(selected,"filteredRep", selectedWorkspace)
     // Active when there is a search query AND exactly one match is found
     const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
 
@@ -215,17 +253,8 @@ export default function Dashboard() {
                         Team</p>
                     <p
                         className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
-                        File</p>
-                    <p
-                        className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
-                        Calendar</p>
+                        History</p>
                 </div>
-
-                {/* <!-- insights --> */}
-                <div className="insights mt-8 ml-4 ">
-                    <p className="mt-4 mb-4 text-black">Insights</p>
-                </div>
-
             </div>
             
         </div>
@@ -381,7 +410,7 @@ export default function Dashboard() {
                         {/* workspace List */}
                         <div className="space-y-4">
                             <WorkspaceDropdown
-                                workspaces={data?.uniqueWorkspaces || []}
+                                workspaces={data?.uniqueWorkspaces || ["olive corp"]}
                                 selectedWorkspace={selectedWorkspace}
                                 onSelectWorkspace={setSelectedWorkspace}
                             />
@@ -395,7 +424,15 @@ export default function Dashboard() {
                         Create env vars
                         </span>
                     </div>
-                    {envShowModal &&<EnvVarModal isOpen={envShowModal} onClose={() => setEnvShowModal(false)} />} 
+                    {envShowModal &&<EnvVarModal 
+                    isOpen={envShowModal} 
+                    onClose={() => setEnvShowModal(false)} 
+                    selected={selected}
+                    workspace = {selectedWorkspace} 
+                    onSubmit={createEnvVar}
+                    isPending={useCreateEnv.isPending}
+                    
+                    />} 
                     {/* select LLM */}
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
                         onClick={() => setShowLlmModal(!showLlmModal)}

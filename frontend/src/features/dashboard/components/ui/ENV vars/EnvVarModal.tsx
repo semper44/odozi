@@ -1,26 +1,39 @@
-import { useState } from 'react';
+import { useState } from "react";
 import { toast } from 'react-toastify';
 import { Plus } from "lucide-react";
-
 
 interface EnvVarModalProps {
   isOpen: boolean;
   onClose: () => void;
+  selected: Set<string>; 
+  workspace: string
+  onSubmit: (keyList: string[]) => void; // 👈 FIXED: Now accepts the string array
+  isPending: boolean;
 }
 
-export function EnvVarModal({ isOpen, onClose }: EnvVarModalProps) {
+export function EnvVarModal({ 
+  isOpen, 
+  onClose, 
+  selected,
+  workspace,
+  onSubmit,
+  isPending,
+}: EnvVarModalProps) {
   const [currentKey, setCurrentKey] = useState('');
   const [keyList, setKeyList] = useState<string[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
   const handleAddKey = () => {
-    const trimmed = currentKey.trim().toUpperCase(); // Enforce uppercase convention
+    const trimmed = currentKey.trim().toUpperCase();
     if (!trimmed) return;
     
     if (keyList.includes(trimmed)) {
       toast.warn("This environment variable key has already been added.");
+      return;
+    }
+    if (selected.size < 1 && workspace === "") {
+      toast.warn("Please close the modal and select the Repo for this Env vars");
       return;
     }
 
@@ -32,41 +45,31 @@ export function EnvVarModal({ isOpen, onClose }: EnvVarModalProps) {
     setKeyList(keyList.filter((_, idx) => idx !== indexToRemove));
   };
 
-  const handleBulkSubmit = async () => {
+  const handleBulkSubmit = () => {
     if (keyList.length === 0) {
       toast.error("Please add at least one environment variable key.");
       return;
     }
 
-    setIsSubmitting(true);
-    try {
-      const response = await fetch('/api/repos/env-keys/create/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key_names: keyList,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to save environment variables.');
-      }
-
-      toast.success(data.message || "Environment keys saved successfully!");
-      setKeyList([]);
-      onClose();
-    } catch (err: any) {
-      toast.error(`❌ ${err.message}`);
-    } finally {
-      setIsSubmitting(false);
-    }
+    // Passes the populated string list directly up to createEnvVar()
+    onSubmit(keyList, workspace);
   };
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
-      <div className="bg-white rounded-2xl w-full max-w-lg p-6 border border-gray-100 shadow-2xl relative z-10 animate-in zoom-in-95 duration-150">
+   return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg p-6 border border-gray-100 shadow-2xl relative z-10">
+        {(workspace === "" && selected.size > 0) &&<p className="text-xs text-gray-500 mt-0.5">
+          <span className="text-blue-600 font-bold text-md">{selected.size}</span> repository selected, you can select a workspace as well
+        </p>}
+        {(workspace != "" && selected.size < 1) &&<p className="text-xs text-gray-500 mt-0.5">
+          <span className="text-blue-600 font-bold text-md">{workspace}</span> workspace selected, you can select a repo as well
+        </p>}
+       {(workspace != "" && selected.size > 0) &&<p className="text-xs text-gray-500 mt-0.5">
+          <span className="text-blue-600 font-bold text-md">{selected.size}</span> repository and <span className="text-blue-600 font-bold text-md">{workspace}</span> workspace selected
+        </p>}
+       {(workspace === "" && selected.size < 1) &&<p className="text-xs text-red-600 font-bold text-md mt-0.5">
+          No workspace nor repo selected!
+        </p>}
         <h2 className="text-xl font-bold mb-4">Required Environment Variables</h2>
         
         {/* Input Row */}
@@ -82,7 +85,7 @@ export function EnvVarModal({ isOpen, onClose }: EnvVarModalProps) {
           <button 
             type="button"
             onClick={handleAddKey}
-            className="p-1 bg-green-500 hover:bg-green-700 rounded-full text-white cursor-pointer font-semibold px-2 hover:text-purple-400 transition"
+            className="p-1 bg-green-500 hover:bg-green-700 rounded-full text-white cursor-pointer font-semibold px-2 transition"
           >
             <Plus className="w-5 h-5" />
           </button>
@@ -117,10 +120,10 @@ export function EnvVarModal({ isOpen, onClose }: EnvVarModalProps) {
           </button>
           <button 
             onClick={handleBulkSubmit}
-            disabled={isSubmitting}
+            disabled={isPending} // 3. Use React Query's built-in pending state automatically!
             className="rounded cursor-pointer bg-green-500 px-5 py-2 text-white text-sm font-semibold hover:bg-green-700 disabled:bg-purple-800 transition"
           >
-            {isSubmitting ? 'Creating...' : 'Create'}
+            {isPending ? 'Creating...' : 'Create'}
           </button>
         </div>
       </div>

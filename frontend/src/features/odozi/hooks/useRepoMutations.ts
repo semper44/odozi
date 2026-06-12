@@ -1,5 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createSelectedRepos } from "../apis/createrepotest"; 
+import {createRepoEnvKeys} from "../apis/CreateEnv"
+import { toast } from 'react-toastify';
+
 
 // Explicit type contract describing your database mapping structure
 export interface GitHubRepoPayload {
@@ -23,6 +26,7 @@ export const useCreateReposMutation = () => {
   });
 };
 
+
 // 2. Hook wrapper handling high-speed bulk database deletions
 export const useDeleteReposMutation = () => {
   const queryClient = useQueryClient();
@@ -37,6 +41,22 @@ export const useDeleteReposMutation = () => {
   });
 };
 
+
+
+export const useCreateEnvKeysMutation = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createRepoEnvKeys,
+    onSuccess: (data) => {
+      toast.success(data.message || "Environment keys saved successfully!");
+      queryClient.invalidateQueries({ queryKey: ["env-keys"] });
+    },
+    onError: (err: any) => {
+      toast.error(`❌ ${err.message}`);
+    }
+  });
+};
 
 // Append inside useRepoMutations.ts:
 // export const createWorkspaceApi = async (name: string) => {

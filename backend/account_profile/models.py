@@ -53,13 +53,10 @@ class GitHubRepository(models.Model):
     repo_name = models.CharField(max_length=255, db_index=True)        # e.g., "Taskmaster"
     repo_owner = models.CharField(max_length=255, db_index=True)       # e.g., "OdoziEngine"
     repo_id = models.BigIntegerField(unique=True, db_index=True)
-    
-    # Pre-calculated full slug field for ultra-fast database lookups
-    # Indexed to guarantee lightning-fast performance for your curl webhooks
     repo_full_name = models.CharField(max_length=255, unique=True, db_index=True) # e.g., "OdoziEngine/Taskmaster"
     
     # Settings for your app orchestrator
-    is_active = models.BooleanField(default=True, db_index=True)
+    is_active = models.BooleanField(default=False, db_index=True)
     is_private = models.BooleanField(default=False)
     branches_url = models.URLField(max_length=500, blank=True, null=True)
     collaborators_url = models.URLField(max_length=500, blank=True, null=True)
