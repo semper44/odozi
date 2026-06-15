@@ -1,3 +1,5 @@
+import os
+import boto3
 import json
 import uuid
 import secrets
@@ -16,13 +18,15 @@ from django.db import transaction
 
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace, WorkspaceMembership
-from .models import UserProfileModel, RepoEnvKey
+from .models import UserProfileModel, RepoEnvKey, WorkflowRunHistory, ChatSession, ChatMessage
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.security import verify_signature
 from odozi.utils.github_auth_decorator import require_github_auth
 from odozi.utils.auth import get_client_ip, get_browser_family, invalidate_user_session
 from .serializer import GitHubRepositorySerializer, UserProfileSerializer
+from .schema import OrchestratorAction
+
 
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -32,6 +36,13 @@ from rest_framework_simplejwt.tokens import AccessToken
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_community.callbacks import get_openai_callback 
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import StrOutputParser
 
 
 
@@ -508,6 +519,7 @@ class CreateRepoEnvKeys(APIView):
                 print("doris", existing_env_set)
 
                 envs_to_create = []
+                already_exists = False
                 for repo in all_active_repos:
                     for key in cleaned_keys:
                         # 🌟 FIX: repo.pk is an integer. Ensure your lookup matches the type in existing_env_set!
@@ -515,28 +527,138 @@ class CreateRepoEnvKeys(APIView):
                         
                         # If this combination checklist match is found, skip it!
                         if lookup_tuple in existing_env_set:
+                            already_exists = True
                             print(f"Skipping duplicate: {repo.repo_name} already has {key}")
                             continue
                             
                         print(existing_env_set,"lookup", lookup_tuple)
+                        already_exists = False
                         envs_to_create.append(
                             RepoEnvKey(repo=repo, key_name=key)
                         )
 
                 # 2. Fire the bulk creation query safely
-                print("env 2create", envs_to_create)
+                print("env 2create", already_exists)
                 if envs_to_create:
                     RepoEnvKey.objects.bulk_create(envs_to_create)
+                else:
+                    if already_exists :
+                        return Response({
+                        "status": "success",
+                        "message": "Variables already exists.",
+                    }, status=status.HTTP_201_CREATED)
 
                 return Response({
                     "status": "success",
-                    "message": f"Variables Created for {len(all_active_repos)} in {workspace_name}.",
+                    "message": f"{len(envs_to_create)} Variables Created for {len(all_active_repos)} repos in {workspace_name} workspace.",
                     "repositories_created": len(repos_to_create),
                     "environment_keys_created": len(envs_to_create)
                 }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
             return Response({"error": f"Transaction mapping failure: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+class CreateUsersRepo(APIView):
+    def post(self, request, *args, **kwargs):
+        print("request.data", request.data)
+        
+        # 1. Safely extract values from request
+        repositories_data = request.data.get('repositories', [])
+        workspace_name = request.data.get('workspace', '').strip()
+        selected_repo_ids = request.data.get('selected', []) # List of selected GitHub IDs
+        
+        user = User.objects.get(pk=1)
+
+        if not repositories_data or not isinstance(repositories_data, list):
+            return Response({"error": "Please a repo."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                # 3. Fetch or establish the targeted Workspace environment record
+                if workspace_name:
+                    repo_workspace = Workspace.objects.get(
+                        name=workspace_name, 
+                        owner=user
+                    )
+                else:
+                    workspace_name = "Default"
+                    repo_workspace, _ = Workspace.objects.get_or_create(
+                        name="default", 
+                        owner=user,
+                        defaults={"github_account_name": user.username}
+                    )
+
+                # 4. Map ALL incoming repository data objects into an active memory dictionary lookup
+                # Structure: { 102938471: { 'repo_name': 'odozi', ... } }
+                incoming_repos_map = {int(repo['repo_id']): repo for repo in repositories_data if 'repo_id' in repo}
+                print("")
+                print("eze yoyo", incoming_repos_map)
+                # 5. Look up which of the SELECTED repositories already exist inside our database
+                # Crucial step: We convert selected IDs to integers to ensure strict matching
+                
+                existing_repos = GitHubRepository.objects.filter(
+                    repo_id__in=selected_repo_ids,
+                    # workspace=repo_workspace
+                )
+                print("")
+                print("cheche", existing_repos)
+                # Create a set of IDs that are already present in the database
+                existing_repo_ids = set(existing_repos.values_list('repo_id', flat=True))
+                print(000)
+                existing_repos_list= list(existing_repos)
+
+
+                # 6. STEP A: Identify and mass-create missing repositories
+                repos_to_create = []
+                for github_id in selected_repo_ids:
+                    # If it's already in the DB, skip it!
+                    print("")
+                    print("created", github_id, type(github_id))
+                    if int(github_id) in existing_repo_ids:
+                        continue
+                    
+                    # Fetch its raw object parameters from our memory dictionary
+                    repo_info = incoming_repos_map.get(int(github_id))
+                    print("ttttt", repo_info, github_id)
+                    if not repo_info:
+                        print(5555, repo_info)
+                        continue # Skip if selection mismatch happens
+                        
+                    repos_to_create.append(
+                        GitHubRepository(
+                            workspace=repo_workspace,
+                            repo_id=github_id,
+                            repo_name=repo_info.get('repo_name', ''),
+                            repo_owner=repo_info.get('repo_owner', ''),
+                            repo_full_name=repo_info.get('repo_full_name', f"{repo_info.get('repo_owner')}/{repo_info.get('repo_name')}")
+                        )
+                    )
+
+                # Execute creation batch for missing repositories
+                if repos_to_create:
+                    print(2222)
+                    # Django returns the newly generated model rows complete with database auto-increment IDs!
+                    created_repos = GitHubRepository.objects.bulk_create(repos_to_create)
+                    # Merge our newly created records with our existing records list
+                    all_active_repos = existing_repos_list + list(created_repos)
+                    print("opppss,", all_active_repos, "oburu", "existing_repos_list", "ogaa", list(created_repos))
+                else:
+                    all_active_repos = list(existing_repos)
+                    print("opppss2222,22", all_active_repos)
+
+
+                return Response({
+                    "status": "success",
+                    "message": f"{len(repos_to_create)} Repos Created in {workspace_name} workspace.",
+                    "repositories_created": len(repos_to_create),
+                }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": f"Transaction mapping failure: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 
 
 @csrf_exempt
@@ -701,77 +823,367 @@ def receive_ci_results(request):
 
 
 
-class AITestSummaryView(APIView):
-    authentication_classes = [HttpOnlyCookieJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+class AITestSummaryViews(APIView):
+    # authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request):        
-        test_summary = request.data.get("test_summary")
+        user_input = request.data.get("message", "")
+        memory_history = [] # Loaded from your DB as shown earlier
+
+        # 🚀 THE MONITORING WRAPPER
+        with get_openai_callback() as cb:
+            # Everything executed inside this indentation is tracked!
+            result = chain.invoke({
+                "chat_history": memory_history,
+                "input": user_input
+            })
+            
+            # Extract metrics directly into Python terminal variables
+            prompt_tokens = cb.prompt_tokens      # 👈 What your system prompt cost you!
+            completion_tokens = cb.completion_tokens  # 👈 What the AI's output generation cost you!
+            total_cost = cb.total_cost            # 👈 Exact financial price in USD!
+
+            print("\n============ TOKEN DIAGNOSTICS ============")
+            print(f"📥 PROMPT TOKENS (Input Size):  {prompt_tokens}")
+            print(f"📤 COMPLETION TOKENS (Output): {completion_tokens}")
+            print(f"💰 TOTAL USD RUNTIME COST:     ${total_cost:.5f}")
+            print("===========================================\n")
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
-        # prompt = f"""
-        #     Task: "{task_title}"
-        #     Deadline: "{deadline}"
+    prompt = '''
 
-        #     Return JSON only:
-        #     {{
-        #     "summary": "short summary",
-        #     "improved": "clear actionable task",
-        #     "subtasks": ["step 1", "step 2", "step 3"]
-        #     }}
+        You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into a strict, validated JSON infrastructure configuration schema.
+        You have access to a proprietary library of native Python AST Static Analysis Tooling strategies:
 
-        #     RULES:
-        #     - MAX 3 subtasks
-        #     - No explanations
-        #     - No extra text
-        #     - Be short and direct
-        #     """
-        # for attempt in range(3):
-        #     try:
-        #         response = client.models.generate_content(
-        #             model='gemini-2.5-flash', 
-        #             contents=prompt
-        #         )
-        #         raw = response.text
-        #         clean = raw.replace("```json", "").replace("```", "").strip()
-        #         data = json.loads(clean)
-        #         print(response.text, data, "heyyy")
+        "check_auth"
+        - Objective: Finds functions missing a mandatory authentication decorator.
+        - Required Params: {"function_prefix": string, "decorator_name": string}
 
-        #         return Response({"data": data})
-        #     except errors.ClientError as e:
-        #         # Handle quota / rate limit
-        #         if "RESOURCE_EXHAUSTED" in str(e):
-        #             return Response(
-        #                 {"error": "AI limit reached. Please wait a moment."},
-        #                 status=429
-        #             )
+        "check_required_call"
+        - Objective: Verifies target functions encapsulate specific architectural expressions (e.g., transaction wrappers).
+        - Required Params: {"keyword": string, "required_call": string}
 
-        #         return Response(
-        #             {"error": "AI client error", "details": str(e)},
-        #             status=500
-        #         )
+        "check_function_length"
+        - Objective: Enforces line boundary thresholds on functions.
+        - Required Params: {"keyword": string, "max_lines": integer}
 
-        #     except json.JSONDecodeError:
-        #         return Response(
-        #             {"error": "Invalid AI response format"},
-        #             status=500
-        #         )
+        "check_class_length"
+        - Objective: Enforces line boundary limits on target classes inheriting from specified parent modules.
+        - Required Params: {"parent_class": string, "max_lines": integer}
 
-        #     except Exception as e:
-        #         if attempt < 2:
-        #             time.sleep(2)
-        #             continue
+        "check_error_handling"
+        - Objective: Flags explicit external or risky calls executed outside defensive try/except wrappers.
+        - Required Params: {"risky_call": string}
 
-        #         return Response(
-        #             {"error": "Unexpected error", "details": str(e)},
-        #             status=500
-        #         )
+        "check_n_plus_one"
+        - Objective: Performance analyzer detecting database interaction statements inside iterative loops.
+        - Required Params: {"orm_method": string}
+
+        "check_pii"
+        - Objective: Compliance inspector flagging sensitive variable text blocks passed to log targets.
+        - Required Params: {"logging_method": string, "sensitive_keywords": string_pipe_separated_like_"email|password|ssn"}
+
+        "check_types"
+        - Objective: Pure Python type hint compliance checker. Validates return signatures and parameters.
+        - Required Params: {} (Leave params empty)
 
 
+        ### CRITICAL: INTENT HANDLING REGISTRY
+
+        Evaluate the user's input carefully to match exactly one of the three supported intents below:
+
+        INTENT: "run_static_analysis"
+        Trigger this if the user wants to run security checks, type hints, or run static tests against code files.
+        Required Structure:
+        {
+        "intent": "run_static_analysis",
+        "repo_meta": {
+            "branch": "string (defaults to 'main' if unprovided)",
+            "base_branch": "string (defaults to 'main' if unprovided)"
+        },
+        "environment_variables": {
+            "KEY_NAME": "VALUE"
+        },
+        "active_rules": [
+            {
+            "strategy": "string_from_registry_exactly",
+            "params": { "param_key": "param_value" }
+            }
+        ]
+        }
+
+        INTENT: "create_workspace"
+        Trigger this if the user wants to group, add, or register fresh repositories under a brand new workspace container.
+        Required Structure:
+        {
+        "intent": "create_workspace",
+        "new_workspace_name": "string (cleaned, stripped name)",
+        "repositories": [
+            {
+            "repo_id": integer,
+            "repo_name": "string",
+            "repo_owner": "string",
+            "repo_full_name": "string (formatted exactly as owner/repo_name)"
+            }
+        ]
+        }
+
+        INTENT: "create_env_keys"
+        Trigger this if the user wants to register, attach, or sync environment variable key names across a subset of selected repositories.
+        Required Structure:
+        {
+        "intent": "create_env_keys",
+        "workspace": "string (Target workspace name. Defaults to 'default' if unspecified)",
+        "key_names": ["string (Force transform all values into upper-case SNAKE_CASE formatting)"],
+        "selected": ["string (The specific stringified repo_id values that the user explicitly selected)"],
+        "repositories": [
+            {
+            "repo_id": integer,
+            "repo_name": "string",
+            "repo_owner": "string",
+            "repo_full_name": "string (formatted exactly as owner/repo_name)"
+            }
+        ]
+        }
 
 
-class DummyApp(generics.ListAPIView):
-    serializer_class = UserProfileSerializer
-    queryset = UserProfileModel.objects.all()
+        ### EXECUTION PIPELINE RULES
 
+        - Evaluate the user's text carefully to extract the target Git configuration, environment variables, or workspace operations.
+        - Cross-reference rule instructions to the Tool Registry or Intent Registry. Map them exactly. 
+        - If the user mentions general testing, code checking, or type security without specifying tools, auto-map them to relevant validators (e.g., "check types" maps to "check_types").
+        - If a requested strategy requires variables that the user did not specify, deduce a smart default based on best engineering practices.
+        - Output ONLY a valid JSON object. Do NOT include markdown code blocks, triple backticks (```json), summaries, or conversational pleasantries.
+
+                    
+            '''
+
+
+
+class AITestSummaryView(APIView):
+    # authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    # permission_classes = [IsAuthenticated]
+
+    def post(self, request):        
+        user_input = request.data.get("message", "")
+        memory_history = []  # Loaded from your DB as shown earlier
+
+        # 1. 🎯 DEFINING YOUR SYSTEM PROMPT RIGHT HERE
+        # Write your master orchestrator instructions and rule descriptions here.
+        system_instruction_text = """
+        You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. 
+        Your sole objective is to intercept a user's natural language project description and request, 
+        parse their intentions, and convert them into a strict, validated JSON configuration schema.
+        
+        You have access to a proprietary library of native Python AST Static Analysis Tooling strategies:
+        - "check_auth": Finds functions missing a mandatory authentication decorator.
+        - "check_required_call": Verifies target functions encapsulate specific architectural expressions.
+        - "check_types": Pure Python type hint compliance checker.
+        (Include the rest of your 8 tool strategy descriptions here...)
+
+        You must output ONLY a valid JSON object. Do not include markdown code blocks, backticks, 
+        summaries, or conversational pleasantries.
+
+        ### OUTPUT JSON SCHEMA TEMPLATE:
+        {{
+          "repo_meta": {{ "branch": "string" }},
+          "environment_variables": {{ "KEY": "VALUE" }},
+          "active_rules": [
+             {{ "strategy": "string", "params": {{}} }}
+          ]
+        }}
+        """
+        # Note: We use double curly braces {{ }} above so Python doesn't confuse the JSON format with prompt variables.
+
+        # 2. BIND THE TEXT INTO A LANGCHAIN PROMPT TEMPLATE MATRIX
+        prompt_template = ChatPromptTemplate.from_messages([
+            ("system", system_instruction_text),
+            MessagesPlaceholder(variable_name="chat_history"), # Tracks conversation state
+            ("human", "{input}")                              # Captures the user's immediate message
+        ])
+
+        # 3. INITIALIZE THE BASE LLM USING THE GOOGLE DRIVER
+        # We pass your API key and toggle temperature down to 0 for strict formatting adherence
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0,
+            google_api_key=settings.GEMINI_API_KEY
+        )
+
+        # 4. PIPE THEM TOGETHER TO BUILD THE ACTIVE PIPELINE CHAIN
+        # Test A uses StrOutputParser to catch the raw text configuration string
+        chain = prompt_template | llm | StrOutputParser()
+
+        # 5. THE RUNTIME MONITORING WRAPPER
+        with get_openai_callback() as cb:
+            # The execution pipeline triggers right here inside the context block!
+            raw_string_response = chain.invoke({
+                "chat_history": memory_history,
+                "input": user_input
+            })
+            
+            # Extract diagnostics metrics safely from the callback register box
+            prompt_tokens = cb.prompt_tokens      
+            completion_tokens = cb.completion_tokens  
+            total_cost = cb.total_cost            
+
+            print("\n============ TOKEN DIAGNOSTICS ============")
+            print(f"📥 PROMPT TOKENS (Input Size):  {prompt_tokens}")
+            print(f"📤 COMPLETION TOKENS (Output): {completion_tokens}")
+            print(f"💰 TOTAL USD RUNTIME COST:     ${total_cost:.5f}")
+            print("===========================================\n")
+
+        # 6. POST-PROCESSING CLEANUP
+        # Strip away any markdown formatting elements if the model hallucinated them
+        clean_json_string = raw_string_response.replace("```json", "").replace("```", "").strip()
+        
+        try:
+            import json
+            final_data = json.loads(clean_json_string)
+            return Response({
+                "status": "success",
+                "data": final_data,
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens
+                }
+            }, status=status.HTTP_200_OK)
+        except json.JSONDecodeError:
+            return Response({
+                "error": "Failed to parse AI output into valid JSON",
+                "raw_output": raw_string_response
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+class LogStreamingResultsView(APIView):
+    def post(self, request, *args, **kwargs):
+        run_id = request.data.get('run_id')
+        repo_full_name = request.data.get('repo')  # e.g., "semper44/odozi"
+        incoming_logs = request.data.get('logs', []) # List of strings from YAML
+        
+        # Check if this is the final structured summary upload block (multipart/form-data)
+        is_final_report = 'file' in request.FILES
+
+        if not run_id:
+            return Response({"error": "Missing run_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ---------------------------------------------------------------------
+        # PHASE 1: HANDLING LIVE CHUNK STREAM SESSIONS
+        # ---------------------------------------------------------------------
+        if not is_final_report:
+            # We append logs into Redis memory cache so they build up fast without hitting DB
+            redis_log_key = f"live_logs:{run_id}"
+            
+            # Fetch existing buffered lines, append new lines, and update Redis cache (valid for 2 hours)
+            existing_buffer = cache.get(redis_log_key, [])
+            existing_buffer.extend(incoming_logs)
+            cache.set(redis_log_key, existing_buffer, timeout=7200)
+            
+            # Optional: Broadcast `incoming_logs` via WebSockets here for live dashboard visual scrolls!
+            return Response({"status": "chunk_buffered"}, status=status.HTTP_200_OK)
+
+        # ---------------------------------------------------------------------
+        # PHASE 2: FINAL TERMINAL COMPLETION (Upload completely to R2 Object Storage)
+        # ---------------------------------------------------------------------
+        # Find or establish metadata database row placeholder
+        try:
+            repo_instance = GitHubRepository.objects.get(repo_full_name=repo_full_name)
+        except GitHubRepository.DoesNotExist:
+            return Response({"error": "Repository not tracked"}, status=status.HTTP_400_DEFAULT)
+
+        # Build or get the relational metadata history card
+        run_metadata, created = TestWorkflowRun.objects.get_or_create(
+            run_id=run_id,
+            defaults={
+                "repository": repo_instance,
+                "status": "success" # Parse status from file if needed
+            }
+        )
+
+        # Pull the complete combined raw logs from Redis RAM cache
+        redis_log_key = f"live_logs:{run_id}"
+        full_log_list = cache.get(redis_log_key, [])
+        full_log_text = "\n".join(full_log_list)
+
+        # Process the final report.json file payload passed via file upload fields
+        report_file = request.FILES['file']
+        report_data = json.loads(report_file.read().decode('utf-8'))
+
+        # Update metadata card stats summary metrics directly in PostgreSQL
+        run_metadata.total_tests = report_data.get('summary', {}).get('total', 0)
+        run_metadata.passed_tests = report_data.get('summary', {}).get('passed', 0)
+        run_metadata.failed_tests = report_data.get('summary', {}).get('failed', 0)
+        if run_metadata.failed_tests > 0:
+            run_metadata.status = "failed"
+
+        # Define destination layout key within Cloudflare R2 bucket storage container
+        r2_file_key = f"logs/repo_{repo_instance.id}/run_{run_id}.log"
+
+        try:
+            # Upload the heavy combined logs directly into Cloudflare R2
+            settings.R2_CLIENT.put_object(
+                Bucket=settings.CF_R2_BUCKET_NAME,
+                Key=r2_file_key,
+                Body=full_log_text,
+                ContentType="text/plain"
+            )
+            
+            # Map the clean, remote storage address path key straight into our PostgreSQL row column pointer
+            run_metadata.log_storage_path = r2_file_key
+            run_metadata.save()
+
+            # Clean up the Redis cache since the run is safely archived
+            cache.delete(redis_log_key)
+
+        except Exception as e:
+            return Response({"error": f"Cloudflare R2 offloading crashed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "status": "archived_success",
+            "message": "Logs offloaded to R2 bucket container seamlessly."
+        }, status=status.HTTP_201_CREATED)
+
+
+
+class GetWorkflowRunDetailsView(APIView):
+    def get(self, request, run_id):
+        try:
+            run = WorkflowRunHistory.objects.prefetch_related('steps').get(run_id=run_id)
+        except WorkflowRunHistory.DoesNotExist:
+            return Response({"error": "Run not found"}, status=404)
+
+        # Initialize standard S3/R2 client interface helper
+        r2_client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{settings.CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+            aws_access_key_id=settings.CF_R2_ACCESS_KEY,
+            aws_secret_access_key=settings.CF_R2_SECRET_KEY
+        )
+
+        steps_data = []
+        for step in run.steps.all():
+            presigned_url = None
+            if step.log_storage_path:
+                # Generate a temporary download link direct to the browser (expires in 15 mins)
+                presigned_url = r2_client.generate_presigned_url(
+                    'get_object',
+                    Params={'Bucket': settings.CF_R2_BUCKET_NAME, 'Key': step.log_storage_path},
+                    ExpiresIn=900
+                )
+
+            steps_data.append({
+                "tool_name": step.tool_name,
+                "status": step.status,
+                "summary": step.summary_metrics,
+                "log_download_url": presigned_url # 🚀 Direct link straight to cloud storage!
+            })
+
+        return Response({
+            "run_id": run.run_id,
+            "status": run.status,
+            "created_at": run.created_at,
+            "steps": steps_data
+        })
 
