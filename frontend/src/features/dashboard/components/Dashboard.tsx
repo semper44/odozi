@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, Plus } from "lucide-react";
 import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import gradientBg  from "../../../assets/gradient.jpg"
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
 import { useSelectionStore } from "../../store/selectionStore";
+import { useLLMStore } from "../../store/selectionStore";
+import { useSocketStore  } from "../../store/selectionStore";
 import { items } from "../../data/dummyData";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
@@ -16,14 +17,18 @@ import { useCreateReposMutation, useCreateEnvKeysMutation } from "@/features/odo
 import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh";
 import { EnvVarModal } from "./ui/ENV vars/EnvVarModal"; 
 import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
+import TestRepoEndpoint from "./ui/TestRepoEndpoint";
+// import {AgenticChatConsole} from "@features/streaming/api/AiChat.tsx"
 // import { EnvVariableCard } from "./ui/ENV vars/EnvVariableCard";
 
 
 
 
 export default function Dashboard() {
+    const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || 'http://127.0.0.1:8000';
     useAutonomicTokenRefresh();
     const [isAiOpen, setIsAiOpen] = useState(false);
+    const [isPending, setIsPending] = useState(false);
     const [isProcessingRequest, setIsProcessingRequest] = useState(false);
     const [isOn, setIsOn] = useState(false);
     const [envShowModal, setEnvShowModal] = useState(false);
@@ -56,8 +61,7 @@ export default function Dashboard() {
     }
     console.log("🔒 Tokens captured in RAM. Timestamp cached to localStorage.", localStorage.getItem("gh_token_expires_at"));
 
-     // Normalize data to avoid null errors
-    // 🚀 DUAL-FILTER CONSOLIDATION ENGINE
+     // Normalizing data to avoid null errors
     const filteredRepositories = useMemo(() => {
         if (!data?.repositories) return [];
 
@@ -81,6 +85,13 @@ export default function Dashboard() {
     const toggleSelect = useSelectionStore((state) => state.toggleSelect);
     const clearSelection = useSelectionStore((state) => state.clearSelection);
     
+    const { activeProvider, activeModel, savedApiKey } = useLLMStore();
+    const activeToast = useSocketStore((state) => state.activeToast);
+    const clearActiveToast = useSocketStore((state) => state.clearActiveToast);
+
+   
+
+
     const handleCreateWorkspace = (modalPayload: { workspaceName: string }) => {
         console.log("manage")
         // if (selectedIdsSet.size === 0 || !data?.repositories) return;
@@ -170,6 +181,39 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 };
 
 
+ const handleSendRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+     console.log(activeToast !== null,"activetoast", activeToast)
+        if (activeToast !== null){
+                toast.error(activeToast.message || "Gateway terminated connection: Reconnecting", {
+                position: "top-right",
+                autoClose: 4000,
+                theme: "colored"
+            });
+
+            return
+        }
+    const cleanedInput = prompt.trim();
+    if (!cleanedInput) return;
+
+    setIsPending(true);
+    setIsProcessingRequest(true);
+    setIsAiOpen(false);
+    console.log(activeModel,"buzz",activeProvider, "77", savedApiKey)
+
+    sendMessage({
+        type: "start_processing",
+        prompt: cleanedInput,
+        provider: activeProvider,
+        model_name: activeModel,
+        user_api_key: savedApiKey // Securely forward their credential keys
+    });
+
+
+    setIsPending(false);
+  };
+
+
     console.log(selected,"filteredRep", selectedWorkspace)
     // Active when there is a search query AND exactly one match is found
     const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
@@ -187,8 +231,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
     console.log(error, "h1osana",data)
 
     function SolveSendIconTasks(){
-        setIsProcessingRequest(true);
-        setIsAiOpen(false);
+        
 
         // sending message to the websocket
         sendMessage({
@@ -352,23 +395,47 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                     {/* input */}
                                     <div className="w-[70%] h-[20%] justify-self-center">
                                         <div className="relative w-[90%] h-[60%]">
-                                            <input
-                                                value={prompt}
-                                                onChange={(e) =>
-                                                    {
-                                                        setPrompt(e.target.value);
-                                                        console.log(prompt)
+                                                {isPending ? (
 
-                                                    }                                              
-                                                } 
-                                                id="ai-chat" type="text" placeholder="Chat"
-                                                className={`pl-4 rounded-xl border w-full h-full ${isProcessingRequest ? "hidden" : ""}`} style={{borderColor: "black"}} />
-                                            <div onClick={() => 
-                                                SolveSendIconTasks()
-                                                }
-                                                id="send-icon" className="absolute top-[30%] right-[5%] cursor-pointer">
-                                                <SendHorizontal/>            
-                                            </div>
+                                                    <form onSubmit={handleSendRequest} className="relative w-full">
+                                                        <input 
+                                                        type="text"
+                                                        value={prompt}
+                                                        onChange={(e) => setPrompt(e.target.value)}
+                                                        placeholder="Type a message..."
+                                                        className={`pl-4 rounded-xl border w-full h-full ${isProcessingRequest ? "hidden" : ""}`} style={{borderColor: "black"}}
+                                                        />
+                                                        
+                                                        <button 
+                                                        type="submit" 
+                                                        id="send-icon" 
+                                                        className="animate-spin absolute top-[30%] right-[5%] cursor-pointer"
+                                                        disabled={isPending || !prompt.trim()}
+                                                        >
+                                                        <SendHorizontal />            
+                                                        </button>
+                                                    </form>
+                                                    
+                                                ) : (
+                                                    <form onSubmit={handleSendRequest} className="relative w-full">
+                                                        <input 
+                                                        type="text"
+                                                        value={prompt}
+                                                        onChange={(e) => setPrompt(e.target.value)}
+                                                        placeholder="Type a message..."
+                                                        />
+                                                        
+                                                        {/* 🌟 Icon turned into a submit button. NO onClick handler needed! */}
+                                                        <button 
+                                                        type="submit" 
+                                                        id="send-icon" 
+                                                        className="absolute top-[30%] right-[5%] cursor-pointer bg-transparent border-none p-0"
+                                                        >
+                                                        <SendHorizontal />            
+                                                        </button>
+                                                    </form>
+                                                )}
+                                            
                                         </div>
                                     </div>
                                 </div>}
@@ -443,10 +510,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                     </div> 
                     {showLlmModal &&<LLMConfigModal isOpen={showLlmModal} onClose={() => setShowLlmModal(false)}/> }
 
-                    <button
-                    >
-                        create repo
-                    </button>
+                    <TestRepoEndpoint />
 
                 </div>  
     </div>

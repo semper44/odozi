@@ -36,7 +36,7 @@ export const useAutonomicTokenRefresh = () => {
           // Fallback timestamp generation if your refresh view doesn't explicitly return an 'expiresAt' field
           const futureTimestamp = data.expires_at || new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-          if (freshAccess) {
+          if (freshAccess && freshRefresh) {
             tokenStore.setTokens(freshAccess, freshRefresh, futureTimestamp);
             console.log("✅ Proactive local token rotation executed successfully in memory store.");
           } else {

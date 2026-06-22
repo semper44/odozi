@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { toast } from 'react-toastify';
+import { useLLMStore } from "../../../../store/selectionStore";
+
 
 // Hardcoded platform and models layout tree configuration
 const LLM_PROVIDERS: Record<string, string[]> = {
@@ -19,6 +21,8 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
   const [apiKey, setApiKey] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const setLLMConfig = useLLMStore((state) => state.setLLMConfig);
+
   if (!isOpen) return null;
 
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -35,7 +39,8 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
 
     setIsSubmitting(true);
     try {
-      // Replace with your actual backend integration destination
+        // SAVE SELECTIONS TO ZUSTAND STORE 
+      setLLMConfig(provider, model, apiKey.trim());
       console.log({ provider, model, apiKey });
       toast.success("LLM Configuration stored successfully!");
       onClose();

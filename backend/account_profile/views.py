@@ -19,6 +19,7 @@ from dateutil.parser import isoparse
 from django.utils import timezone
 from django.http import HttpResponseRedirect, JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.conf import settings
+from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
@@ -27,7 +28,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import login
 from django.contrib.auth.models import User
 from django.core.cache import cache
-
+from django.utils.decorators import method_decorator
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
@@ -78,113 +79,170 @@ def verify_github_signature(request):
 
 
 
-@csrf_exempt
-def github_refresh_view(request):
+
+@method_decorator(csrf_exempt, name="dispatch")
+class GitHubRefreshView(View):
+
     authentication_classes = [HttpOnlyCookieJWTAuthentication]
     permission_classes = [IsAuthenticated]
-    github_new_tokens = {}
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    try:
-        
-        print("Refresh token request body:", request.COOKIES)  # Debugging line to inspect the incoming payload structure
-        refresh_token = request.COOKIES.get("jwt_refresh_token")
-        expires_at = request.COOKIES.get("expires_at")
-        print("ran through")
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Malformed JSON payload"}, status=400)
+    def post(self, request):
 
-    if not expires_at:
-        return JsonResponse({"error": "Missing expiration timestamp"}, status=400)
+        github_new_tokens = {}
 
-    expires_at = isoparse(expires_at)
-    elapsed = timezone.now() - expires_at
-    refresh  = RefreshToken(refresh_token)
-    new_access = str(refresh.access_token)
-    parsed_jwt = AccessToken(new_access) # type: ignore
-    user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
-    print("ngozi",user_id)
-    
-    
-    if expires_at is None:
-        print("expires at is:", expires_at)
-        return JsonResponse({"error": "Missing expiration timestamp"}, status=400)
-    
-    if elapsed <= timedelta(hours=7):
-        return JsonResponse({"message": "Still valid"})
-    
-    print("checking expiration")
-    print(111)
-    if elapsed is not None:
-        print(2222)
-        print("into the cache")
-        details_cache_key = f"user:repos:{user_id}"
-        cached_repos = cache.get(details_cache_key)
-        if cached_repos:
-            github_refresh_token = cached_repos.get("github_access_token")
-            print("cached_repos", cached_repos)
-            # Payload format required by GitHub OAuth specification rules
-            payload = {
-                "client_id": settings.GITHUB_CLIENT_ID,
-                "client_secret": settings.GITHUB_APP_CLIENT_SECRET,
-                "grant_type": "refresh_token",
-                "refresh_token": github_refresh_token,
-            }
-            headers = {"Accept": "application/json"}
-            print("trying github token")
-            try:
-                # Non-blocking async/sync network call out to GitHub's token engine
-                with httpx.Client() as client:
-                    res = client.post("https://github.com", data=payload, headers=headers, timeout=5.0)
-                
-                if res.status_code != 200:
-                    return JsonResponse({"error": "GitHub authorization endpoint rejected request"}, status=401)
+        if request.user.is_authenticated:
+            print("shantelllllllll")
+            print("")
 
-                token_data = res.json()
-                if "error" in token_data:
-                    return JsonResponse({"error": token_data.get("error_description")}, status=400)
+        if request.method != "POST":
+            return JsonResponse({"error": "Method not allowed"}, status=405)
 
-                # Extract brand new plain-text token values issued by GitHub
-                new_access = token_data.get("access_token")
-                new_refresh = token_data.get("refresh_token")
-                expires_in = token_data.get("expires_in", 28800) # Defaults to 8 hours (28800 seconds)
+        try:
+            print("Refresh token request body:", request.COOKIES)
+            refresh_token = request.COOKIES.get("jwt_refresh_token")
+            expires_at = request.COOKIES.get("expires_at")
+            print("ran through")
 
-                # Securely archive the updated tokens inside your PostgreSQL instance
-                if request.user.is_authenticated:
-                    profile, _ = UserProfileModel.objects.get_or_create(user=request.user)
-                    profile.encrypted_access_token = encrypt_token(new_access)
-                    profile.encrypted_refresh_token = encrypt_token(new_refresh)
-                    profile.save()
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Malformed JSON payload"}, status=400)
 
-                github_new_tokens = {
-                    "github_access_token": new_access,
-                    "github_refresh_token": new_refresh,
-                    "expires_at": expires_in
-                } 
+        refresh = RefreshToken(refresh_token)
+        new_access = str(refresh.access_token)
 
-            except httpx.RequestError:
-                return JsonResponse({"error": "External connection timeout to GitHub gateway"}, status=503)
+        print("abeg", refresh)
+        print("new_access", new_access)
+        print("")
+
+        # ❗ FIX: guard BEFORE parsing
+        if expires_at is None:
+            print("expires at is:", expires_at)
+            return JsonResponse({"error": "Missing expiration timestamp"}, status=400)
+
+        expires_at = isoparse(expires_at)
+        elapsed = timezone.now() - expires_at
+
+        # check if its necessary to poll github
+        if elapsed is not None and elapsed >= timedelta(hours=7):
+
+            parsed_jwt = AccessToken(new_access)  # type: ignore
+            user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
+
+            print(2222)
+            print("into the cache")
+
+            details_cache_key = f"user:repos:{user_id}"
+            cached_repos = cache.get(details_cache_key)
+
+            if cached_repos:
+                github_refresh_token = cached_repos.get("github_access_token")
+
+                print("cached_repos", cached_repos)
+
+                payload = {
+                    "client_id": settings.GITHUB_CLIENT_ID,
+                    "client_secret": settings.GITHUB_APP_CLIENT_SECRET,
+                    "grant_type": "refresh_token",
+                    "refresh_token": github_refresh_token,
+                }
+
+                headers = {"Accept": "application/json"}
+
+                print("trying github token")
+
+                try:
+                    with httpx.Client() as client:
+                        res = client.post(
+                            "https://github.com",
+                            data=payload,
+                            headers=headers,
+                            timeout=5.0
+                        )
+
+                    if res.status_code != 200:
+                        return JsonResponse(
+                            {"error": "GitHub authorization endpoint rejected request"},
+                            status=401
+                        )
+
+                    token_data = res.json()
+
+                    if "error" in token_data:
+                        return JsonResponse(
+                            {"error": token_data.get("error_description")},
+                            status=400
+                        )
+
+                    github_new_access = token_data.get("access_token")
+                    github_new_refresh = token_data.get("refresh_token")
+                    expires_in = token_data.get("expires_in", 28800)
+
+                    if request.user.is_authenticated:
+                        profile, _ = UserProfileModel.objects.get_or_create(user=request.user)
+                        profile.encrypted_access_token = encrypt_token(github_new_access)
+                        profile.encrypted_refresh_token = encrypt_token(github_new_refresh)
+                        profile.save()
+
+                    github_new_tokens = {
+                        "github_access_token": github_new_access,
+                        "github_refresh_token": github_new_refresh,
+                        "expires_at": expires_in
+                    }
+
+                    cached_repos = cache.get(details_cache_key)
+
+                    if cached_repos:
+                        cached_repos["github_access_token"] = github_new_access
+                        cached_repos["github_refresh_token"] = github_new_refresh
+                        cached_repos["expires_at"] = expires_in
+
+                        cache.set(details_cache_key, cached_repos, timeout=3600)
+
+                except httpx.RequestError:
+                    return JsonResponse(
+                        {"error": "External connection timeout to GitHub gateway"},
+                        status=503
+                    )
+
+            else:
+                print("Cant find github refresh token")
+
         else:
-            print("Cant find github refresh token")
-    else:
-        print("GitHub expires at is None")      
-        
-    github_new_tokens["access"] = new_access
-    response = JsonResponse(github_new_tokens)
+            print("GitHub expires at is None")
 
-    response.set_cookie(
-        key="jwt_access_token",
-        value=str(new_access),
-        max_age=28800, # 8 Hours matching standard working cycles
-        httponly=True,
-        secure=True,     # Forces HTTPS requirement blocks
-        samesite="None", # Permits local cross-origin development handshakes
-        path="/"
-    )
+        # ✅ FIX HERE (your crash)
+        github_new_tokens["jwt_access_token"] = new_access
+        github_new_tokens["jwt_refresh_token"] = str(refresh)
 
-    return response
-   
+        response = JsonResponse(github_new_tokens)
+
+        print("")
+        print("------------------------")
+        print("refresh")
+        print(str(new_access))
+        print("------------------------")
+        print("")
+
+        response.set_cookie(
+            key="jwt_access_token",
+            value=str(new_access),
+            max_age=28800,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            path="/"
+        )
+
+        response.set_cookie(
+            key="jwt_refresh_token",
+            value=str(refresh),  # <-- FIXED HERE TOO
+            max_age=28800,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            path="/"
+        )
+
+        return response
 
 
  
@@ -324,8 +382,7 @@ def github_callback_view(request):
     if not code:
         return JsonResponse({"error": "No authorization code returned from GitHub"}, status=400)
     installation_id = request.GET.get('installation_id')
-    setup_action = request.GET.get('setup_action')
-    print(setup_action, "jesu")
+    print(request.GET, "jesu")
     # 2. Prepare the background request to trade the code for an Access Token
     # OAuth configuration credentials (keep your Client Secret in your settings.py env)
     client_id = "Iv23liUEbKH7D09scRIZ"
@@ -405,7 +462,7 @@ def github_callback_view(request):
     print("wahala", request.user)
     # workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
     if created:
-        W_Membership= WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
+        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
 
     # 5. DB MANAGEMENT: Locate or create the user record in Django
 
@@ -422,11 +479,13 @@ def github_callback_view(request):
     my_jwt_access_token = str(access)
     my_jwt_refresh_token = str(refresh)
 
+    print("breakpoint", installation_id)
 
     profile, _ = UserProfileModel.objects.get_or_create(
         user=user,
-        installation_id = installation_id
     )
+
+    print("installation_id", profile)
 
     raw_access_token = token_data.get("access_token")
     raw_refresh_token = token_data.get("refresh_token")
@@ -442,8 +501,10 @@ def github_callback_view(request):
     # 1. GENERATE THE SHORT-LIVED 60-SECOND TRANSIT TICKET
     ticket_id = str(uuid.uuid4())
     redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
+    if not installation_id:
+        profile.installation_id = installation_id
     
-    profile.encrypted_access_token = encrypt_token(raw_access_token)
+    
     profile.encrypted_refresh_token = encrypt_token(raw_refresh_token)
     profile.encrypted_jwt_access_token = encrypt_token(my_jwt_access_token)
     profile.encrypted_jwt_refresh_token = encrypt_token(my_jwt_refresh_token)

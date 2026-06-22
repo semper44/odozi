@@ -131,8 +131,10 @@ def dashboard_view(request):
     elif stored_jwt_access_token and stored_jwt_access_token != None and stored_jwt_access_token != "None":
         print("🍪 [DASHBOARD] Recycled cookie execution path. Authenticating via token string payload...")
         print(stored_jwt_access_token)
+        print("idrisss")
         print(stored_jwt_access_token != None)
         print(stored_jwt_access_token != "None")
+        print("")
         try:
             # If your cookie stores raw unencrypted text, read directly; if encrypted, run decrypt_token()
             github_access_token = stored_jwt_access_token.decode("utf-8") if isinstance(stored_jwt_access_token, bytes) else stored_jwt_access_token
@@ -146,7 +148,7 @@ def dashboard_view(request):
             token_string = stored_jwt_access_token
             user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
             print(f"✅ [DASHBOARD] Token authentication successful. User context resolved: {username}||{token_string}")
-
+            print("")
             expires_at = request.COOKIES.get("expires_at")
             
         except Exception as e:
@@ -216,8 +218,8 @@ def dashboard_view(request):
         user_details = {
             "repositories": cleaned_repos,
             "repo_selection":serialized_repo_selection,
-            "my_jwt_access_token": token_string,
-            "my_jwt_access_refresh": token_refresh_string,
+            # "my_jwt_access_token": token_string,
+            # "my_jwt_access_refresh": token_refresh_string,
             "github_access_token": github_access_token,
             "username": username,
             "user_id": user_id,
@@ -247,6 +249,13 @@ def dashboard_view(request):
         samesite="None",
     )
 
+    print("")
+    print("------------------------")
+    print("dashboard")
+    print(str(token_string))
+    print("------------------------")
+    print("")
+
     # Renew the long-lived secure HttpOnly session storage identifier
     response.set_cookie(
         key="jwt_access_token",
@@ -269,6 +278,7 @@ def dashboard_view(request):
 
     print(f"🚀 [DASHBOARD] Clean execution complete. Returning data payload for: {username}")
     return response
+
 
 
 
@@ -295,16 +305,6 @@ class CreateWorkspaceView(APIView):
                 # --- PATH B: CREATE A NEW WORKSPACE ON THE FLY ---
                 print(1111)
                 if new_workspace_name and str(new_workspace_name).strip():
-                    # Recover installation_id defensively from your user profile model mapping
-                    try:
-                        
-                        profile = UserProfileModel.objects.get(user=user)
-                        print(profile.installation_id)
-                        # Fallback placeholder if installation_id hasn't been set yet
-                        installation_id = getattr(profile, "installation_id", "3463363364") 
-                        print(222)
-                    except UserProfileModel.DoesNotExist:
-                        installation_id = "dynamic_fallback"
 
                     print("johhrr", new_workspace_name.strip(), user, "ppp")
                     workspace, created = Workspace.objects.get_or_create(
@@ -972,28 +972,110 @@ class AITestSummaryView(APIView):
         # 1. 🎯 DEFINING YOUR SYSTEM PROMPT RIGHT HERE
         # Write your master orchestrator instructions and rule descriptions here.
         system_instruction_text = """
-        You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. 
-        Your sole objective is to intercept a user's natural language project description and request, 
-        parse their intentions, and convert them into a strict, validated JSON configuration schema.
-        
-        You have access to a proprietary library of native Python AST Static Analysis Tooling strategies:
-        - "check_auth": Finds functions missing a mandatory authentication decorator.
-        - "check_required_call": Verifies target functions encapsulate specific architectural expressions.
-        - "check_types": Pure Python type hint compliance checker.
-        (Include the rest of your 8 tool strategy descriptions here...)
+            You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into a strict, validated JSON infrastructure configuration schema.
+            You have access to a proprietary library of native Python AST Static Analysis Tooling strategies:
 
-        You must output ONLY a valid JSON object. Do not include markdown code blocks, backticks, 
-        summaries, or conversational pleasantries.
+            "check_auth"
+            - Objective: Finds functions missing a mandatory authentication decorator.
+            - Required Params: {{"function_prefix": string, "decorator_name": string}}
 
-        ### OUTPUT JSON SCHEMA TEMPLATE:
-        {{
-          "repo_meta": {{ "branch": "string" }},
-          "environment_variables": {{ "KEY": "VALUE" }},
-          "active_rules": [
-             {{ "strategy": "string", "params": {{}} }}
-          ]
-        }}
-        """
+            "check_required_call"
+            - Objective: Verifies target functions encapsulate specific architectural expressions (e.g., transaction wrappers).
+            - Required Params: {{"keyword": string, "required_call": string}}
+
+            "check_function_length"
+            - Objective: Enforces line boundary thresholds on functions.
+            - Required Params: {{"keyword": string, "max_lines": integer}}
+
+            "check_class_length"
+            - Objective: Enforces line boundary limits on target classes inheriting from specified parent modules.
+            - Required Params: {{"parent_class": string, "max_lines": integer}}
+
+            "check_error_handling"
+            - Objective: Flags explicit external or risky calls executed outside defensive try/except wrappers.
+            - Required Params: {{"risky_call": string}}
+
+            "check_n_plus_one"
+            - Objective: Performance analyzer detecting database interaction statements inside iterative loops.
+            - Required Params: {{"orm_method": string}}
+
+            "check_pii"
+            - Objective: Compliance inspector flagging sensitive variable text blocks passed to log targets.
+            - Required Params: {{"logging_method": string, "sensitive_keywords": string_pipe_separated_like_"email|password|ssn"}}
+
+            "check_types"
+            - Objective: Pure Python type hint compliance checker. Validates return signatures and parameters.
+            - Required Params: {{}} (Leave params empty)
+
+
+            ### CRITICAL: INTENT HANDLING REGISTRY
+
+            Evaluate the user's input carefully to match exactly one of the three supported intents below:
+
+            INTENT: "run_static_analysis"
+            Trigger this if the user wants to run security checks, type hints, or run static tests against code files.
+            Required Structure:
+            {{
+            "intent": "run_static_analysis",
+            "repo_meta": {{
+                "branch": "string (defaults to 'main' if unprovided)",
+                "base_branch": "string (defaults to 'main' if unprovided)"
+            }},
+            "environment_variables": {{
+                "KEY_NAME": "VALUE"
+            }},
+            "active_rules": [
+                {{
+                "strategy": "string_from_registry_exactly",
+                "params": {{ "param_key": "param_value" }}
+                }}
+            ]
+            }}
+
+            INTENT: "create_workspace"
+            Trigger this if the user wants to group, add, or register fresh repositories under a brand new workspace container.
+            Required Structure:
+            {{
+            "intent": "create_workspace",
+            "new_workspace_name": "string (cleaned, stripped name)",
+            "repositories": [
+                {{
+                "repo_id": integer,
+                "repo_name": "string",
+                "repo_owner": "string",
+                "repo_full_name": "string (formatted exactly as owner/repo_name)"
+                }}
+            ]
+            }}
+
+            INTENT: "create_env_keys"
+            Trigger this if the user wants to register, attach, or sync environment variable key names across a subset of selected repositories.
+            Required Structure:
+            {{
+            "intent": "create_env_keys",
+            "workspace": "string (Target workspace name. Defaults to 'default' if unspecified)",
+            "key_names": ["string (Force transform all values into upper-case SNAKE_CASE formatting)"],
+            "selected": ["string (The specific stringified repo_id values that the user explicitly selected)"],
+            "repositories": [
+                {{
+                "repo_id": integer,
+                "repo_name": "string",
+                "repo_owner": "string",
+                "repo_full_name": "string (formatted exactly as owner/repo_name)"
+                }}
+            ]
+            }}
+
+
+            ### EXECUTION PIPELINE RULES
+
+            - Evaluate the user's text carefully to extract the target Git configuration, environment variables, or workspace operations.
+            - Cross-reference rule instructions to the Tool Registry or Intent Registry. Map them exactly. 
+            - If the user mentions general testing, code checking, or type security without specifying tools, auto-map them to relevant validators (e.g., "check types" maps to "check_types").
+            - If a requested strategy requires variables that the user did not specify, deduce a smart default based on best engineering practices.
+            - Output ONLY a valid JSON object. Do NOT include markdown code blocks, triple backticks (```json), summaries, or conversational pleasantries.
+            """
+
         # Note: We use double curly braces {{ }} above so Python doesn't confuse the JSON format with prompt variables.
 
         # 2. BIND THE TEXT INTO A LANGCHAIN PROMPT TEMPLATE MATRIX
@@ -1039,8 +1121,10 @@ class AITestSummaryView(APIView):
         clean_json_string = raw_string_response.replace("```json", "").replace("```", "").strip()
         
         try:
-            import json
             final_data = json.loads(clean_json_string)
+            print(prompt_tokens,"final", final_data)
+            print("")
+            print(completion_tokens)
             return Response({
                 "status": "success",
                 "data": final_data,

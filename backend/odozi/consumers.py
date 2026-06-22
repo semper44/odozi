@@ -1,31 +1,26 @@
 import json
+from celery import current_app
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 class ChatConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         self.user = self.scope.get("user")
-        
+        print("consumer_user", self.user)
 
         # Check if the user object is anonymous or completely unassigned
         if not self.user or self.user.is_anonymous:
-            # print("🛑 [CONSUMER] REJECTING HANDSHAKE: User context is anonymous or None. Booting connection.")
             await self.close(code=4001)
             return
 
         # Authorized user - assign to their secure private room
-        # print(f"🟢 [CONSUMER] Access Approved for {self.user.username}. Provisioning private memory channels...")
         self.room_name = f"user_room_{self.user.id}"
         self.user_group = f"group_{self.room_name}"
 
         await self.channel_layer.group_add(self.user_group, self.channel_name)
-        
         await self.accept()
 
-
     async def disconnect(self, code):
-        # print(f"❌ WebSocket disconnected with code: {code}")
-        
         # Safely discard using the exact matching group variable name
         if hasattr(self, 'user_group') and self.user_group:
             await self.channel_layer.group_discard(
@@ -33,45 +28,46 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 self.channel_name
             )
 
+    async def receive(self, text_data=None, bytes_data=None):
+        if not text_data:
+            return
 
-    async def receive(self, text_data):
-        print("📥 INCOMING WEB FRAME RECEIVED")
-        print("RAW STRING PACKET:", text_data)
-        
+        print("")
+        print("-------------")
+        print(text_data)
+        print("-------------")
+        print("")
         try:
             data = json.loads(text_data)
-            message = data.get('message', '')
-            print("PARSED MESSAGE TEXT:", message)
-            
-            # (Optional) Echo back to the sender's user group to verify the loopback works
-            await self.channel_layer.group_send(
-                self.user_group,
-                {
-                    "type": "chat_message",
-                    "message": f"Echo loopback: {message}"
-                }
-            )
-        except json.JSONDecodeError:
-            print("🚨 Failed to parse raw string data frame into JSON structures.")
+            print(data)
+            msg_type = data.get('type')
 
+            if msg_type == "start_processing":
+                # 🚀 INSTANTLY OFFLOAD EVERYTHING TO CELERY
+                # Your web processes remain 100% responsive while handling traffic peaks
+                current_app.send_task(  # type: ignore
+                    "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches your celery task path string exactly!
+                    kwargs={
+                        "channel_name": self.channel_name,
+                        "session_id": data.get('session_id', 1),
+                        "prompt_text": data.get('prompt', ''),
+                        "repos": data.get('repos', []),
+                        "provider": data.get('provider', 'google'),
+                        "model_name": data.get('model_name', 'gemini-2.5-flash'),
+                        "api_key": data.get('user_api_key', '')
+                    }
+                )
+
+                print("goal post")
+            print("sexy")
+
+        except json.JSONDecodeError:
+            print("🚨 Malformed socket frame payload dropped.")
 
     async def chat_message(self, event):
         """
-        This system handler picks up messages sent to self.user_group 
-        (from either this consumer or your Celery background tasks) 
-        and pushes them down the raw pipe directly to the browser.
+        Pushes broadcast packets sent from your isolated Celery workers 
+        directly down the raw socket pipe straight back to the browser.
         """
-
-        print(
-            f"📥 WS RECEIVED "
-            f"channel={self.channel_name}"
-        )
-        message = event['message']
-        # print(f"🚀 Outbound routing data to browser pipe layout: {message}")
-
-        # Push to browser
-        await self.send(text_data=json.dumps({
-            'message': message
-        }))
-
-
+        # Ensure we serialize the dictionary correctly to avoid downstream parsing crashes
+        await self.send(text_data=json.dumps(event['payload']))

@@ -1,5 +1,7 @@
 // socket.ts
 import type { StreamingMessage } from "./types";
+import { useSocketStore } from "@/features/store/selectionStore"
+import { toast } from 'react-toastify';
 
 interface SocketConfig {
   baseUrl: string;
@@ -12,11 +14,13 @@ class SocketService {
   private isIntentionalDisconnect: boolean = false;
   private reconnectTimeoutId: any = null;
   private currentDelay: number = 1000; // Base backoff delay (1s)
+  private count: number = 0; 
   private maxDelay: number = 16000;    // Cap backoff delay (16s)
 
   public configure(config: SocketConfig) {
     this.config = config;
   }
+  
 
   async connect() {
     if (!this.config) {
@@ -37,7 +41,12 @@ class SocketService {
 
     this.socket.onopen = () => {
       console.log("⚡ Browser WebSocket Channel Established via Secure HttpOnly Cookie");
+      this.count=0
       this.currentDelay = 1000; // Reset exponential sequence backoff upon clean entry
+      useSocketStore.getState().setConnectionStatus(true);
+      useSocketStore.getState().setSocketError(null);
+      useSocketStore.getState().triggerToastNotification(null);
+
     };
 
     this.socket.onclose = (event) => {
@@ -51,19 +60,39 @@ class SocketService {
 
       if (!this.isIntentionalDisconnect) {
         console.warn(`❌ Unscheduled link failure (Code: ${event.code}). Launching reconnect script...`);
+        useSocketStore.getState().setSocketError("Gateway terminated connection: Reconnecting")
+        if (this.count < 1) {
+          useSocketStore.getState().triggerToastNotification("❌ Connection dropped. Reconnecting to gateway...");
+        }
         this.scheduleReconnect();
       }
     };
 
     this.socket.onerror = (error) => {
-      console.error("🚨 Core browser connection layer error detected:", error);
+      console.error(this.count, "🚨 Core browser connection layer error detected:", error);
+      if (this.count < 1) {
+        useSocketStore.getState().triggerToastNotification("❌ Network handshake verification failure.");
+      }
+      useSocketStore.getState().setSocketError("Network handshake verification failure.")
     };
 
     this.socket.onmessage = (event) => {
       try {
-        const parsed = JSON.parse(event.data);
-        if (this.messageCallback) {
-          this.messageCallback(parsed);
+        // const parsed = JSON.parse(event.data);
+        const packet = JSON.parse(event.data);
+        // if (this.messageCallback) {
+        //   this.messageCallback(parsed);
+        // }
+        if (packet.type === "status") {
+          alert("june")
+          useSocketStore.getState().setProcessingStatus(true, packet.message);
+        } 
+        else if (packet.type === "error") {
+          useSocketStore.getState().setSocketError(packet.message);
+        } 
+        else if (packet.type === "orchestration_result") {
+          useSocketStore.getState().setProcessingStatus(false); // Done computing!
+          if (this.messageCallback) this.messageCallback(packet);
         }
       } catch (err) {
         console.error("⚠️ Failed parsing incoming WebSocket JSON data frame payload:", err);
@@ -106,7 +135,13 @@ class SocketService {
       this.socket = null;
     }
     this.messageCallback = null;
+
+    // 🟡 Reset state tracking variables upon disconnect execution
+    useSocketStore.getState().setConnectionStatus(false);
+    useSocketStore.getState().clearSocketStatus();
   }
+
+  
 }
 
 export const socketService = new SocketService();

@@ -1,4 +1,3 @@
-// useStreamingSocket.ts
 import { useEffect } from "react";
 import { socketService } from "@/services/websocket/socket";
 

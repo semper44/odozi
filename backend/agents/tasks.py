@@ -11,17 +11,30 @@ import time
 import jwt
 import base64
 import inspect
-from concurrent.futures import ThreadPoolExecutor
+
 from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
+from account_profile.models import GitHubRepository, Workspace
+
+from concurrent.futures import ThreadPoolExecutor
+
 from django.conf import settings
 from django_python.models import RepositoryScan, RepoEnvKey
-from account_profile.models import GitHubRepository, Workspace
 from django.contrib.auth.models import User
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+
+
+# LangChain Drivers
+from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.output_parsers import StrOutputParser
+
+from django_python.models import ChatSession, ChatMessage
 
 # Celery tasks (the parallel tools)
 
@@ -1102,6 +1115,87 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
     
     except Exception as e:
         print(f"❌ CRITICAL GENERAL TASK EXCEPTION: {str(e)}")
+
+
+
+
+
+
+@shared_task
+def process_agentic_chat_turn_task(channel_name, session_id, prompt_text, repos, provider, model_name, api_key):
+    channel_layer = get_channel_layer()
+    
+    try:
+        # 1. Reconstruct chat history context straight from database rows
+        # This allows any random background worker instance to perfectly continue the conversation!
+        session = ChatSession.objects.get(pk=session_id)
+        past_messages = session.messages.all().order_by('created_at')[:15] # Keep to last 15 turns
+        
+        memory_history = []
+        for msg in past_messages:
+            if msg.role == "user":
+                memory_history.append(HumanMessage(content=msg.content))
+            else:
+                memory_history.append(AIMessage(content=msg.content))
+
+        # 2. Build our dynamic Prompt Template
+        prompt_template = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. "
+                "Convert requirements into JSON infrastructure commands. If the user is just saying hello "
+                "or asking casual questions, chat naturally but maintain context of their selected repos."
+            ),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}")
+        ])
+
+        # 3. Setup LLM Driver Factory
+        if provider == "openai":
+            llm = ChatOpenAI(model=model_name, temperature=0.2, api_key=api_key)
+        else:
+            key = api_key if api_key else settings.GEMINI_API_KEY
+            llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.2, google_api_key=key)
+
+        chain = prompt_template | llm | StrOutputParser()
+
+        # 4. Invoke LangChain synchronous execution safely inside background server space
+        raw_response = chain.invoke({
+            "chat_history": memory_history,
+            "input": f"Active Repo IDs list: {repos}. Request: {prompt_text}"
+        })
+
+        clean_payload = raw_response.replace("```json", "").replace("```", "").strip()
+
+        # 5. Save this conversation transaction turn permanently to the database log
+        ChatMessage.objects.create(session=session, role="user", content=prompt_text)
+        ChatMessage.objects.create(session=session, role="ai", content=clean_payload)
+
+        # 6. Push data directly back to the active user's socket pipe channel!
+        async_to_sync(channel_layer.send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": clean_payload
+                }
+            }
+        )
+
+    except Exception as e:
+        # Send error alert notification back down the wire safely
+        async_to_sync(channel_layer.send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "error",
+                    "message": f"Background Pipeline Failure: {str(e)}"
+                }
+            }
+        )
+
 
 
 

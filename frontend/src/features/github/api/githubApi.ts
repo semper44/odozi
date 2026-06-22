@@ -1,7 +1,7 @@
 export const fetchRepos = async () => {
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
-  const response = await fetch(`${backendUrl}/dashboardss/`, {
+  const response = await fetch(`${backendUrl}/dashboard/`, {
     method: "POST",
     credentials: "include", 
     headers: {
