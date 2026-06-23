@@ -1,5 +1,9 @@
 from django.db import models
+from django.conf import settings
 from django.contrib.auth.models import User
+
+from cryptography.fernet import Fernet
+
 
 
 # Create your models here.
@@ -107,3 +111,31 @@ class WorkspaceMembership(models.Model):
     def __str__(self):
         return f"{self.members.username} in {self.workspace.name} ({self.role})"
 
+
+
+
+class UserLLMConfig(models.Model):
+    """
+    Secure storage vault tracking third-party AI credential metrics per user profile.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="llm_config")
+    provider = models.CharField(max_length=50)  # e.g., 'openai', 'anthropic', 'google'
+    model_name = models.CharField(max_length=100) # e.g., 'claude-3-5-sonnet-latest'
+    
+    # Stores the encrypted token string text
+    encrypted_api_key = models.TextField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.provider} ({self.model_name})"
+
+    # 🔒 INTERNAL VAULT LAYER: Automate symmetric encryption/decryption routines on access
+    def set_api_key(self, raw_key: str):
+        fernet = Fernet(settings.TOKEN_ENCRYPTION_KEY.encode())
+        self.encrypted_api_key = fernet.encrypt(raw_key.strip().encode()).decode()
+
+    def get_api_key(self) -> str:
+        if not self.encrypted_api_key:
+            return ""
+        fernet = Fernet(settings.TOKEN_ENCRYPTION_KEY.encode())
+        return fernet.decrypt(self.encrypted_api_key.encode()).decode()

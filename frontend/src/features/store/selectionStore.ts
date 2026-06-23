@@ -68,8 +68,8 @@ export const useSelectionStore =
 export const useLLMStore = create<LLMState>()(
   persist(
     (set) => ({
-      activeProvider: 'google',       // Default fallbacks
-      activeModel: 'gemini-2.5-flash',
+      activeProvider: '',       
+      activeModel: '',
       savedApiKey: '',
       setLLMConfig: (provider, model, apiKey) => 
         set({ activeProvider: provider, activeModel: model, savedApiKey: apiKey }),

@@ -16,9 +16,11 @@ interface LLMConfigModalProps {
 }
 
 export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
-  const [provider, setProvider] = useState('');
-  const [model, setModel] = useState('');
-  const [apiKey, setApiKey] = useState('');
+  const get_llm_values = localStorage.getItem("odozi-llm-context")
+  const parsed_llm_values = JSON.parse(get_llm_values)
+  const [provider, setProvider] = useState(parsed_llm_values?.Provider);
+  const [model, setModel] = useState(parsed_llm_values?.ActiveModel);
+  const [apiKey, setApiKey] = useState(parsed_llm_values && "**************");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const setLLMConfig = useLLMStore((state) => state.setLLMConfig);
@@ -50,6 +52,8 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
       setIsSubmitting(false);
     }
   };
+
+  
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">

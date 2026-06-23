@@ -28,8 +28,12 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import login
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.db import transaction
 from django.utils.decorators import method_decorator
-from rest_framework import generics
+
+from rest_framework import generics, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
@@ -39,9 +43,13 @@ from odozi.utils.crypto import encrypt_token, decrypt_token
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.authentication import rotate_github_token
 from agents.tasks import run_agentic_pipeline
-from .models import UserProfileModel, Workspace, WorkspaceMembership, GitHubRepository
+from .models import UserProfileModel, Workspace, WorkspaceMembership, GitHubRepository, UserLLMConfig
 
 from channels.db import database_sync_to_async
+
+
+
+
 
 
 
@@ -55,6 +63,53 @@ def is_input_safe(user_text):
     return False
 
 
+
+class SaveLLMConfigView(APIView):
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        provider = request.data.get("provider")
+        model_name = request.data.get("model_name")
+        api_key = request.data.get("api_key")
+
+        # Basic Parameter Boundaries Protection
+        if not provider or not model_name or not str(api_key).strip():
+            return Response(
+                {"error": "Incomplete configuration payload. All fields are mandatory."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                # Locate an existing record or provision a clean row instance for this user
+                config, created = UserLLMConfig.objects.get_or_create(
+                    user=request.user,
+                    defaults={
+                        "provider": provider.lower().strip(),
+                        "model_name": model_name.strip()
+                    }
+                )
+
+                # If it already existed, update the non-sensitive parameters
+                if not created:
+                    config.provider = provider.lower().strip()
+                    config.model_name = model_name.strip()
+
+                # Encrypt the raw token text using our custom model method!
+                config.set_api_key(api_key)
+                config.save()
+
+            return Response({
+                "status": "success",
+                "message": "LLM credentials stored and encrypted successfully."
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {"error": f"Internal storage transaction failure: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 

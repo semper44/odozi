@@ -86,8 +86,8 @@ export default function Dashboard() {
     const clearSelection = useSelectionStore((state) => state.clearSelection);
     
     const { activeProvider, activeModel, savedApiKey } = useLLMStore();
+    console.log("could",activeProvider, activeModel, savedApiKey)
     const activeToast = useSocketStore((state) => state.activeToast);
-    const clearActiveToast = useSocketStore((state) => state.clearActiveToast);
 
    
 
@@ -183,8 +183,17 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
  const handleSendRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-     console.log(activeToast !== null,"activetoast", activeToast)
-        if (activeToast !== null){
+     console.log(activeProvider,activeModel, savedApiKey,"activetoast", activeToast)
+     if(activeProvider === '' || activeModel === '' || savedApiKey=== ''){
+         toast.error("Please fill in the LLM details first", {
+                position: "top-right",
+                autoClose: 4000,
+                theme: "colored"
+            });
+
+            return
+     }   
+     if (activeToast !== null){
                 toast.error(activeToast.message || "Gateway terminated connection: Reconnecting", {
                 position: "top-right",
                 autoClose: 4000,

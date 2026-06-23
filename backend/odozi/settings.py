@@ -223,6 +223,7 @@ GEMINI_API_KEY = config("GEMINI_API_KEY")
 
 
 
+
 STATIC_URL = 'static/'
 
 CELERY_BROKER_URL = "redis://localhost:6379/0"

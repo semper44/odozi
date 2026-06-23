@@ -11,6 +11,7 @@ import time
 import jwt
 import base64
 import inspect
+from toon import encode
 
 from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
@@ -19,9 +20,13 @@ from account_profile.models import GitHubRepository, Workspace
 
 from concurrent.futures import ThreadPoolExecutor
 
-from django.conf import settings
-from django_python.models import RepositoryScan, RepoEnvKey
+from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage
 from django.contrib.auth.models import User
+
+from django.conf import settings
+from django_python.schema import OrchestratorAction # Your Pydantic structure
+from django.db import transaction
+
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -33,8 +38,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
+from langchain_community.callbacks import get_openai_callback 
 
-from django_python.models import ChatSession, ChatMessage
 
 # Celery tasks (the parallel tools)
 
@@ -1119,83 +1124,128 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
 
 
 
+system_instruction_text = """
+                You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into structured configuration variables.
+
+                ### REGISTERED SYSTEM TOOL STRATEGIES
+                - "check_auth": Finds functions missing a mandatory authentication decorator.
+                - "check_types": Pure Python type hint compliance checker.
+                - "check_n_plus_one": Performance analyzer detecting database statements inside loops.
+                - "pytest": Universal unit and integration testing runner framework.
+                - "bandit": Security and vulnerability flaw scanning tool.
+
+                ### INTENT PARSING AND VALUE DEVIATION RULES
+                - "create_workspace": Trigger this if the user wants to group, add, or register fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts.
+                - "create_env_keys" / "run_static_analysis": Trigger this if the user wants to register variable keys or trigger specific test tool strategies across certain repositories.
+                - If a user specifies multiple rules (e.g., run pytest and bandit for repo A, but only pytest for repo B), map each tool strategy selection to its targeted repositories precisely.
+                - Deduce smart engineering defaults if specific configuration variables are missing.
+                """
+
+
+
 
 
 @shared_task
 def process_agentic_chat_turn_task(channel_name, session_id, prompt_text, repos, provider, model_name, api_key):
     channel_layer = get_channel_layer()
     
-    try:
-        # 1. Reconstruct chat history context straight from database rows
-        # This allows any random background worker instance to perfectly continue the conversation!
-        session = ChatSession.objects.get(pk=session_id)
-        past_messages = session.messages.all().order_by('created_at')[:15] # Keep to last 15 turns
-        
-        memory_history = []
-        for msg in past_messages:
-            if msg.role == "user":
-                memory_history.append(HumanMessage(content=msg.content))
-            else:
-                memory_history.append(AIMessage(content=msg.content))
+    # -------------------------------------------------------------------------
+    # PHASE 1: FAST DATABASE READ (Get past records instantly)
+    # -------------------------------------------------------------------------
+    with transaction.atomic():
+        user = User.objects.get(pk=1)
+        session, _ = ChatSession.objects.get_or_create(pk=session_id, defaults={"user": user})
+        past_messages = list(session.messages.all().order_by('created_at')[:15])
+    
 
-        # 2. Build our dynamic Prompt Template
-        prompt_template = ChatPromptTemplate.from_messages([
-            (
-                "system",
-                "You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. "
-                "Convert requirements into JSON infrastructure commands. If the user is just saying hello "
-                "or asking casual questions, chat naturally but maintain context of their selected repos."
-            ),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}")
-        ])
-
-        # 3. Setup LLM Driver Factory
-        if provider == "openai":
-            llm = ChatOpenAI(model=model_name, temperature=0.2, api_key=api_key)
-        else:
-            key = api_key if api_key else settings.GEMINI_API_KEY
-            llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.2, google_api_key=key)
-
-        chain = prompt_template | llm | StrOutputParser()
-
-        # 4. Invoke LangChain synchronous execution safely inside background server space
-        raw_response = chain.invoke({
-            "chat_history": memory_history,
-            "input": f"Active Repo IDs list: {repos}. Request: {prompt_text}"
+    history_list = []
+    for msg in past_messages:
+        history_list.append({
+            "role": msg.role,
+            "text": msg.content
         })
+        
+    # Compress the historical database messages into a tiny TOON string text block
+    toon_history_memory =  encode(history_list)
+    # -------------------------------------------------------------------------
+    # 🛠️ THE MOUNT POINT: SETTING UP YOUR LANGCHAIN PIPELINE COMPONENTS
+    # -------------------------------------------------------------------------
+    # Define your master text system rules (no JSON examples written!)
+    # Assemble your structural Prompt Template with matching template variables
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", system_instruction_text),
+        ("system", "PAST_CONVERSATION_STATE_LOGS:\n{{toon_history}}"), # 🔄 Maps to "toon_history" key
+        ("human", "{{input}}")                                        # 🔄 Maps to "input" key
+    ])
 
-        clean_payload = raw_response.replace("```json", "").replace("```", "").strip()
+    # Dynamic model vendor factory setup based on your Zustand selection state
+    if provider == "openai":
+        llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
+    else:
+        key = api_key if api_key else settings.GEMINI_API_KEY
+        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=key)
 
-        # 5. Save this conversation transaction turn permanently to the database log
-        ChatMessage.objects.create(session=session, role="user", content=prompt_text)
-        ChatMessage.objects.create(session=session, role="ai", content=clean_payload)
+    # Bind the Pydantic schema class structure natively to the model runner engine
+    # This automatically replaces all old JSON text templates and output string parsing code!
+    structured_llm = llm.with_structured_output(OrchestratorAction)
+    
+    # Build the linear execution pipeline chain
+    chain = prompt_template | structured_llm
 
-        # 6. Push data directly back to the active user's socket pipe channel!
+    try:
+        # -------------------------------------------------------------------------
+        # PHASE 2: LONG NETWORK API CALL (Token Tracking Context - No DB Lock)
+        # -------------------------------------------------------------------------
+        with get_openai_callback() as cb:
+            # LangChain takes the keys passed here and injects them right into the placeholders!
+            result: OrchestratorAction = chain.invoke({
+                "toon_history": toon_history_memory, # Matches {{toon_history}}
+                "input": f"Available Global Repos: {repos}. Request: {prompt_text}" # Matches {{input}}
+            })
+            
+            prompt_tokens = cb.prompt_tokens
+            completion_tokens = cb.completion_tokens
+            total_cost = cb.total_cost
+
+        # Safely serialize your structured Pydantic object into a clean JSON string
+        clean_payload_json = result.model_dump_json()
+
+        # -------------------------------------------------------------------------
+        # PHASE 3: FAST DATABASE WRITE (Isolated Transaction Block)
+        # -------------------------------------------------------------------------
+        with transaction.atomic():
+            # Save the natural human text and the clean AI JSON output string to the log history table
+            ChatMessage.objects.create(session=session, role="user", content=prompt_text)
+            ChatMessage.objects.create(session=session, role="ai", content=clean_payload_json)
+
+        # -------------------------------------------------------------------------
+        # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
+        # -------------------------------------------------------------------------
         async_to_sync(channel_layer.send)(
             channel_name,
             {
                 "type": "chat_message",
                 "payload": {
                     "type": "orchestration_result",
-                    "raw_output": clean_payload
+                    "raw_output": clean_payload_json,
+                    "usage": {
+                        "input_tokens": prompt_tokens,
+                        "output_tokens": completion_tokens,
+                        "cost": total_cost
+                    }
                 }
             }
         )
 
     except Exception as e:
-        # Send error alert notification back down the wire safely
+        # Handle exceptions gracefully over the socket wire...
         async_to_sync(channel_layer.send)(
             channel_name,
             {
                 "type": "chat_message",
-                "payload": {
-                    "type": "error",
-                    "message": f"Background Pipeline Failure: {str(e)}"
-                }
+                "payload": {"type": "error", "message": f"Background Worker Crash: {str(e)}"}
             }
         )
-
 
 
 

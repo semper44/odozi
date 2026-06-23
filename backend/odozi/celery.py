@@ -13,4 +13,8 @@ app = Celery("odozi")
 
 app.config_from_object("django.conf:settings", namespace="CELERY")
 
+app.conf.imports = [
+    'agents.tasks',
+]
+
 app.autodiscover_tasks()

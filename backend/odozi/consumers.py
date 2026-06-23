@@ -34,6 +34,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         print("")
         print("-------------")
+        print("dermatologist")
+        print(self.user)
+        print(self.scope.get("user"))
         print(text_data)
         print("-------------")
         print("")
@@ -42,6 +45,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             print(data)
             msg_type = data.get('type')
 
+
             if msg_type == "start_processing":
                 # 🚀 INSTANTLY OFFLOAD EVERYTHING TO CELERY
                 # Your web processes remain 100% responsive while handling traffic peaks
@@ -49,6 +53,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches your celery task path string exactly!
                     kwargs={
                         "channel_name": self.channel_name,
+                        "user_id": self.user.pk,
                         "session_id": data.get('session_id', 1),
                         "prompt_text": data.get('prompt', ''),
                         "repos": data.get('repos', []),
