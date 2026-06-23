@@ -18,8 +18,8 @@ interface LLMConfigModalProps {
 export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
   const get_llm_values = localStorage.getItem("odozi-llm-context")
   const parsed_llm_values = JSON.parse(get_llm_values)
-  const [provider, setProvider] = useState(parsed_llm_values?.Provider);
-  const [model, setModel] = useState(parsed_llm_values?.ActiveModel);
+  const [provider, setProvider] = useState(parsed_llm_values?.state?.activeProvider);
+  const [model, setModel] = useState(parsed_llm_values?.state?.activeModel);
   const [apiKey, setApiKey] = useState(parsed_llm_values && "**************");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -39,13 +39,36 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
       return;
     }
 
-    setIsSubmitting(true);
+   setIsSubmitting(true);
     try {
-        // SAVE SELECTIONS TO ZUSTAND STORE 
-      setLLMConfig(provider, model, apiKey.trim());
-      console.log({ provider, model, apiKey });
-      toast.success("LLM Configuration stored successfully!");
+      const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || 'http://127.0.0.1:8000';
+      
+      // 1. Fire HTTP POST request down to your new Class-Based View endpoint URL
+      const response = await fetch(`${backendUrl}/account/api/ai/config/save/`, {
+        method: "POST",
+        credentials: "include", 
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          provider: provider,
+          model_name: model,
+          api_key: apiKey
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `Server returned status: ${response.status}`);
+      }
+
+      // 2. 🌟 SUCCESS: Commit to global Zustand state store for immediate sync
+      setLLMConfig(provider, model);
+      
+      toast.success(result.message || "LLM Configuration stored successfully!");
       onClose();
+      
     } catch (err: any) {
       toast.error(`Error saving setup configuration: ${err.message}`);
     } finally {
@@ -53,12 +76,13 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
     }
   };
 
-  
+  console.log("parsed_llm_values", parsed_llm_values, parsed_llm_values?.state)
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
       <div className="bg-white rounded-2xl w-full max-w-lg p-6 border border-gray-100 shadow-2xl relative z-10 animate-in zoom-in-95 duration-150">
         <h2 className="text-xl font-bold mb-4">Configure LLM Credentials</h2>
+        <h2 className="text-xl font-bold mb-4">biko{parsed_llm_values?.activeProvider}</h2>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Dropdown 1: Provider selection */}

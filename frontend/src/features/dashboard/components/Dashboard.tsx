@@ -183,7 +183,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
  const handleSendRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-     console.log(activeProvider,activeModel, savedApiKey,"activetoast", activeToast)
+     console.log(activeToast !== null,"activetoast", activeToast)
      if(activeProvider === '' || activeModel === '' || savedApiKey=== ''){
          toast.error("Please fill in the LLM details first", {
                 position: "top-right",

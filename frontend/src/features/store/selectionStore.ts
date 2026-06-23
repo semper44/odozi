@@ -15,8 +15,7 @@ interface SelectionStore {
 interface LLMState {
   activeProvider: string;
   activeModel: string;
-  savedApiKey: string;
-  setLLMConfig: (provider: string, model: string, apiKey: string) => void;
+  setLLMConfig: (provider: string, model: string) => void;
 }
 
 interface SocketState {
@@ -70,9 +69,8 @@ export const useLLMStore = create<LLMState>()(
     (set) => ({
       activeProvider: '',       
       activeModel: '',
-      savedApiKey: '',
-      setLLMConfig: (provider, model, apiKey) => 
-        set({ activeProvider: provider, activeModel: model, savedApiKey: apiKey }),
+      setLLMConfig: (provider, model) => 
+        set({ activeProvider: provider, activeModel: model }),
     }),
     { name: 'odozi-llm-context' }
   )

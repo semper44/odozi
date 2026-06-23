@@ -65,13 +65,15 @@ def is_input_safe(user_text):
 
 
 class SaveLLMConfigView(APIView):
-    authentication_classes = [HttpOnlyCookieJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    # authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         provider = request.data.get("provider")
         model_name = request.data.get("model_name")
         api_key = request.data.get("api_key")
+        user = User.objects.get(pk=1)
+        print("sense",request.data)
 
         # Basic Parameter Boundaries Protection
         if not provider or not model_name or not str(api_key).strip():
@@ -79,23 +81,26 @@ class SaveLLMConfigView(APIView):
                 {"error": "Incomplete configuration payload. All fields are mandatory."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
+        print("build-up")
         try:
             with transaction.atomic():
+                print("keduuu")
                 # Locate an existing record or provision a clean row instance for this user
                 config, created = UserLLMConfig.objects.get_or_create(
-                    user=request.user,
+                    user=user,
                     defaults={
                         "provider": provider.lower().strip(),
                         "model_name": model_name.strip()
                     }
                 )
+                print(22222)
 
                 # If it already existed, update the non-sensitive parameters
                 if not created:
                     config.provider = provider.lower().strip()
                     config.model_name = model_name.strip()
 
+                print(9999888)
                 # Encrypt the raw token text using our custom model method!
                 config.set_api_key(api_key)
                 config.save()
