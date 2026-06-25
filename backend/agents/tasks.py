@@ -19,6 +19,7 @@ from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
 from account_profile.models import GitHubRepository, Workspace
+from django_python.schema import OrchestratorAction 
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -166,43 +167,6 @@ def transform_ci_results(raw_results):
 
 
 
-def run_in_sandbox(path, command, image="python:3.11-slim"):
-    # 1. Environment for the WORKER (to find docker)
-    worker_env = {"PATH": os.environ.get("PATH")}
-
-    # 2. Environment for the CONTAINER (to harden the tool)
-    docker_cmd = [
-        "docker", "run", "--rm",
-        "--user",
-        f"{os.getuid()}:{os.getgid()}",
-        "--net", "none",
-        "-e", "PYTEST_ADDOPTS=-c /dev/null",  # <--- Passed into the sandbox
-        "-e", "HOME=/tmp",                   # <--- Passed into the sandbox
-        "-v", f"{path}:/app",
-        "-w", "/app",
-        image,
-        *command
-    ]
-    
-    result = subprocess.run(docker_cmd, env=worker_env, capture_output=True, text=True)
-    
-    # --- THE SENIOR DEBUG LAYER ---
-    # print(f"📦 [DOCKER STATUS]: Exited with code {result.returncode}")
-    # if result.stdout:
-    #     print(f"📄 [DOCKER STDOUT]:\n{result.stdout.strip()}")
-    # if result.stderr:
-    #     print(f"🛑 [DOCKER STDERR]:\n{result.stderr.strip()}")
-    # print("═" * 50)
-    # 2. YOU MUST CONVERT IT TO A DICTIONARY HERE:
-    return {
-        "exit_code": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr
-    }
-
-
-
-
 def extract_test_coverage(path):
     coverage_file = os.path.join(path, "coverage.json")
     if not os.path.exists(coverage_file):
@@ -221,366 +185,6 @@ def extract_test_coverage(path):
         "summary": f"Codebase tracking achieved {round(total_coverage, 2)}% statement execution coverage"
     }
 
-
-
-@shared_task(bind=True, autoretry_for=(requests.exceptions.ConnectionError,), retry_backoff=True)
-def run_pytest(self, path):
-    """
-    Runs pytest in the specified sandbox directory.
-    """
-    try:
-        # 1. Run the command
-        # we use 'universal_newlines' to get string output instead of bytes
-        safe_env = {
-            "PATH": os.environ.get("PATH"),
-            "HOME": "/tmp",
-            "PYTEST_ADDOPTS": "-c /dev/null" # Prevents pytest from reading global configs
-        }
-
-        result = subprocess.run(
-            ["pytest", "--json-report", "--json-report-file=report.json", "--cov=.", "--cov-report=json"], 
-            cwd=path,               # Run inside the sandbox folder
-            env=safe_env,
-            capture_output=True, 
-            text=True,
-            timeout=300             # 5 minute timeout safety net
-        )
-
-        # 2. Check the exit code, 0 = All tests passed, 1 = Tests failed, Others = System/No tests found error
-        if result.returncode == 0:
-            status = "passed"
-        elif result.returncode == 1:
-            status = "failed"
-        else:
-            status = "System Error or No tests found Error"
-
-        return {
-            "tool": "pytest",
-            "status": status,
-            "stdout": result.stdout[-2000:], # Return last 2000 chars of logs
-            "stderr": result.stderr
-        }
-
-    except subprocess.TimeoutExpired:
-        return {"tool": "pytest", "status": "error", "message": "Timed out after 5 mins"}
-    # except Exception as e:
-    #     # If it's a transient error, retry!
-    #     raise self.retry(exc=e)
-
-
-
-@shared_task
-def run_lint_check(path):
-    """
-    Checks for code quality using Ruff inside an isolated container.
-    """
-
-    # Dynamically install ruff, then execute the check
-    # command = ["sh", "-c", "pip install --quiet ruff && ruff check --format json ."]
-    command = ["ruff", "check", "--output-format", "json", "."]
-    
-    # 1. Check for errors
-    response = run_in_sandbox(path, command, image="odozi-tools:latest") # Use a pre-built image with ruff installed
-    
-    # if response["exit_code"] != 0:
-    #     # 2. Run the fix in the sandbox
-    #     run_in_sandbox(path, ["ruff", "check", "--fix", "."])
-        
-    #     # 3. Get the DIFF (This is the 'Senior' part)
-    #     # We ask git: "What did the linter just change?"
-    #     diff_result = subprocess.run(
-    #         ["git", "diff"], cwd=path, capture_output=True, text=True
-    #     )
-        
-    #     return {
-    #         "tool": "linter",
-    #         "status": "failed_but_fixable",
-    #         "fix_suggestion": diff_result.stdout, # <--- Pass this to the LLM/UI
-    #         "summary": "Found style issues. Suggested fixes are available."
-    #     }
-    status = "passed" if response["exit_code"] == 0 else "failed"
-
-    errors = response["stdout"] if response["stdout"] else response["stderr"]
-
-    
-    return {
-        "tool": "linter",
-        "status": status,
-        "errors_found": errors,
-        "summary": "Code format is clean" if status == "passed" else "Linting errors detected"
-    }
-
-
-
-@shared_task
-def run_security_scan(path):
-    """
-    Scans for security vulnerabilities using Bandit.
-    """
-    # -lll: Only show high-severity issues
-    # -f json: Easy for our Agent to parse
-    command = ["bandit", "-r", ".", "-lll", "-f", "json"]
-    
-    # This command handles installation and execution sequentially inside the container
-    # command = ["sh", "-c", "pip install --quiet bandit && bandit -r . -lll -f json"]
-    
-    # We can use a basic python image with bandit installed
-    response = run_in_sandbox(path, command, image="odozi-tools:latest") # Use a pre-built image with bandit installed
-    
-    # Bandit returns exit code 1 if it finds vulnerabilities
-    status = "passed" if response["exit_code"] == 0 else "failed"
-    errors = response["stdout"] if response["stdout"] else response["stderr"]
-    
-    return {
-        "k":"k"
-        # "tool": "security_scan",
-        # "status": status,
-        # "vulnerabilities": errors,
-        # "summary": "Security scan cleared" if status == "passed" else "Vulnerabilities detected!"
-    }
-
-
-
-@shared_task
-def run_custom_semgrep(path, yaml_rule_text):
-    rule_filename = f"rule_{uuid.uuid4().hex[:8]}.yaml"
-    rule_path = os.path.join(path, rule_filename)
-
-    try:
-        with open(rule_path, "w") as f:
-            f.write(yaml_rule_text)
-
-        # Optimization: We keep the scanning target dot at the absolute end
-        command = [
-            "semgrep", "scan",
-            "--config", rule_filename, 
-            "--json", 
-            "--skip-unknown-extensions", 
-            "--quiet",
-            "--force-color",  # <-- Add this flag here to disable Git path locks
-            "/app"  # <-- Explicitly scan the /app mount inside Docker not path nor root . 
-        ]        
-        response = run_in_sandbox(path, command, image="odozi-tools:latest")
-
-        findings = []
-        system_errors = []
-
-        # Parse response safely
-        if response["stdout"].strip():
-            try:
-                full_output = json.loads(response["stdout"])
-                findings = full_output.get("results", [])
-                system_errors = full_output.get("errors", [])
-            except json.JSONDecodeError:
-                system_errors = [{"system_error": response["stdout"].strip()}]
-        else:
-            # If stdout is empty check if stderr contained actual system crashes
-            if response["stderr"].strip():
-                system_errors = [{"system_stderr": response["stderr"].strip()}]
-
-        # FIXED SCOPE: This execution tracking line is now safe and runs unconditionally
-        status = "failed" if (findings or system_errors) else "passed"
-
-        return {
-            "tool": "semgrep_custom",
-            "findings": findings,
-            "status": status,
-            "errors": system_errors,
-        }
-
-    finally:
-        if os.path.exists(rule_path):
-            os.remove(rule_path)
-
-
-
-# @shared_task
-# def run_mypy_check(path):
-#     """
-#     Validates Python strict typing consistency inside the sandbox.
-#     """
-#     # --hide-error-context keeps the output brief and easy to parse
-#     command = ["mypy", ".", "--hide-error-context", "--no-error-summary"]
-    
-#     response = run_in_sandbox(path, command, image="odozi-tools:latest")
-    
-#     status = "passed" if response["exit_code"] == 0 else "failed"
-#     errors = response["stdout"] if response["stdout"] else response["stderr"]
-
-#     return {
-#         "tool": "mypy_type_check",
-#         "status": status,
-#         "errors_found": errors,
-#         "type_errors": response["stdout"].strip().split("\n") if response["stdout"] else [],
-#         "summary": "Type signatures are completely consistent" if status == "passed" else "Type safety deviations found"
-#     }
-
-
-@shared_task
-def run_mypy_check(path):
-    """
-    Pure Python Governance Checker: Enforces that all functions and methods 
-    implement explicit type annotations for parameter arguments and return paths.
-    """
-    import ast
-    
-    type_errors = []
-    
-    for root, dirs, files in os.walk(path):
-        # Scan only your core codebase files
-        if "venv" in root or ".git" in root or "migrations" in root:
-            continue
-            
-        for file in files:
-            # Explicitly skip framework entrypoints
-            if file == "manage.py" or file == "wsgi.py" or file == "asgi.py":
-                continue
-            
-            if file.endswith(".py"):
-                full_path = os.path.join(root, file)
-                relative_file_path = os.path.relpath(full_path, path)
-                
-                with open(full_path, "r") as f:
-                    try:
-                        tree = ast.parse(f.read())
-                    except SyntaxError:
-                        continue
-                
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.FunctionDef):
-                        # Avoid checking standard class constructor setups
-                        if node.name == "__init__":
-                            continue
-                            
-                        # Rule A: Validate Return Path Annotations
-                        if not node.returns:
-                            type_errors.append({
-                                "file": relative_file_path,
-                                "line": node.lineno,
-                                "function": node.name,
-                                "error": "Function is missing an explicit return type annotation (e.g., -> None or -> Response)."
-                            })
-                            
-                        # Rule B: Validate Input Argument Annotations
-                        for arg in node.args.args:
-                            if arg.arg == "self" or arg.arg == "cls" or arg.arg == "request":
-                                continue
-                            if not arg.annotation:
-                                type_errors.append({
-                                    "file": relative_file_path,
-                                    "line": node.lineno,
-                                    "function": node.name,
-                                    "error": f"Argument '{arg.arg}' is missing an explicit type hint annotation."
-                                })
-
-    status = "failed" if type_errors else "passed"
-    
-    return {
-        "tool": "mypy_type_check",
-        "status": status,
-        "type_errors": type_errors,
-        "summary": "Type signatures are completely compliant" if status == "passed" else f"Found {len(type_errors)} unannotated execution points"
-    }
-
-
-
-@shared_task
-def run_secret_scanning(path):
-    """
-    Scans the repository for hardcoded passwords, tokens, and private keys.
-    """
-    # This regex means: Exclude any file that does NOT end in .py OR is named manage.py
-    exclude_regex = r"^(?!.*\.py$)|.*manage\.py$"
-    
-    command = [
-        "detect-secrets", "scan", 
-        "--exclude-files", exclude_regex
-    ]
-    # detect-secrets scans the folder and outputs a clean JSON structure
-    response = run_in_sandbox(path, command, image="odozi-tools:latest")
-    
-    status = "passed"
-    findings = {}
-    
-    if response["stdout"].strip():
-        try:
-            full_output = json.loads(response["stdout"])
-            # Extract only the explicit credential leaks found across files
-            findings = full_output.get("results", {})
-            if findings:
-                status = "failed"
-        except json.JSONDecodeError:
-            status = "failed"
-            findings = {"system_error": "Failed to parse detect-secrets output"}
-    errors = response["stdout"] if response["stdout"] else response["stderr"]
-
-    return {
-        "tool": "secret_scanner",
-        "status": status,
-        "leaked_secrets": findings,
-        "errors_found": errors,
-        "summary": "No exposed credentials detected" if status == "passed" else "Critical: Exposed credentials detected!"
-    }
-
-
-@shared_task
-def run_migration_check(path):
-    """
-    Pure Python Migration Check: Looks for modified model files 
-    that lack corresponding incremental migration records.
-    """
-    import ast
-    
-    violations = []
-    
-    # 1. Scan the directory path for Django apps
-    for root, dirs, files in os.walk(path):
-        if "models.py" in files and "migrations" in dirs:
-            models_file = os.path.join(root, "models.py")
-            migrations_dir = os.path.join(root, "migrations")
-            
-            # 2. Extract model class names using AST
-            with open(models_file, "r") as f:
-                try:
-                    tree = ast.parse(f.read())
-                except SyntaxError:
-                    continue
-                    
-            model_names = []
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    # Check if the class inherits from models.Model
-                    for base in node.bases:
-                        if isinstance(base, ast.Attribute) and base.attr == "Model":
-                            model_names.append(node.name)
-                        elif isinstance(base, ast.Name) and base.id == "Model":
-                            model_names.append(node.name)
-
-            # 3. Read the contents of the migrations folder
-            migration_files = [f for f in os.listdir(migrations_dir) if f.endswith(".py") and f != "__init__.py"]
-            
-            combined_migration_content = ""
-            for mf in migration_files:
-                with open(os.path.join(migrations_dir, mf), "r") as f:
-                    combined_migration_content += f.read()
-
-            # 4. CRITERIA: If a model class exists but its name isn't found in any migration file
-            for model in model_names:
-                if f"name='{model}'" not in combined_migration_content and f"'{model}'" not in combined_migration_content:
-                    violations.append({
-                        "app": os.path.basename(root),
-                        "model": model,
-                        "message": f"Model '{model}' is defined in models.py but has no matching tracking state record inside the migrations folder."
-                    })
-
-    status = "failed" if violations else "passed"
-    
-    return {
-        "tool": "migration_consistency",
-        "status": status,
-        "violations": violations,
-        "summary": "All local database schema definitions are properly recorded" if status == "passed" else f"Detected {len(violations)} missing migrations."
-    }
 
 
 
@@ -609,57 +213,6 @@ user_payload = {
     ]
 }
 
-
-
-@shared_task
-def run_ci_suite(path, actions):
-    job_list = []
-
-    # 1. Add parallel legacy checkers to queue
-    if actions.get("run_lint"):
-        job_list.append(run_lint_check.s(path))
-    if actions.get("check_security"):
-        job_list.append(run_security_scan.s(path))
-
-    if actions.get("run_mypy"):
-        job_list.append(run_mypy_check.s(path))
-    if actions.get("scan_secrets"):
-        job_list.append(run_secret_scanning.s(path))
-    if actions.get("check_migrations"):
-        job_list.append(run_migration_check.s(path))
-
-    # 2. Build the unified Semgrep rules block safely
-    constraints_to_run = user_payload.get("constraints", [])
-    combined_yaml = "rules:\n"
-    has_custom_rules = False
-    
-    for item in constraints_to_run:
-        rule_type = item.get("type")
-        params = item.get("params", {})
-
-        if rule_type in LIBRARY:
-            has_custom_rules = True
-            raw_template = LIBRARY[rule_type]
-            formatted_rule = raw_template.format(**params)
-            
-            rule_lines = formatted_rule.strip().split("\n")
-            for line in rule_lines:
-                if not line.strip().startswith("rules:"):
-                    combined_yaml += f"{line}\n"
-    
-    # 3. Append the unified Semgrep task signature to the central Chord collection
-    if has_custom_rules:
-        job_list.append(run_custom_semgrep.s(path, combined_yaml))
-
-    if not job_list:
-        return "No tasks to execute"
-    
-    # 4. Fire off all tools in parallel. The aggregator will capture all findings!
-    callback = cleanup_and_report.s(path)
-    workflow = chord(job_list)(callback)
-    
-    print("🔥 [CELERY MANAGER] Parallel fan-out complete. Running tools.")
-    return "Workflow Started"
 
 
 
@@ -838,6 +391,215 @@ def get_installation_access_token(installation_id):
         return response.json().get("token")
     else:
         raise Exception(f"Failed to generate installation token: {response.text}")
+
+
+
+system_instruction_text = """
+You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into structured configuration variables inside our Pydantic action schema.
+
+### REGISTERED SYSTEM TOOL STRATEGIES & CROSS-CUTTING BUNDLES
+
+When a user requests analysis, you must cross-reference their keywords to populate the 'active_rules' array with the exact matching strategies defined below. 
+
+1. PILAR A: CODE SECURITY AUDITING
+- Keywords: "security", "vulnerability", "audit", "owasp", "leak", "secret", "credentials"
+- Trigger Rules: If any security keyword is mentioned, you MUST add BOTH "bandit" (for code flaws) AND "pii_leakage" (for logger file data leaks) to the active_rules array list. 
+
+2. PILLAR B: DEPENDENCY INTEGRITY (NEW)
+- Keywords: "dependencies", "packages", "requirements", "requirements.txt", "outdated packages", "vulnerable packages"
+- Trigger Rules: If the user mentions packages or dependencies, assign the strategy "pip_audit". If they ask for a complete security check, bundle "pip_audit" alongside your Pillar A tools.
+
+3. PILLAR C: CODE QUALITY & MAINTENANCE COMPLEXITY
+- Keywords: "lint", "code smell", "clean code", "formatting", "complexity", "nested loops", "lines"
+- Trigger Rules: If the user wants to evaluate code smells or style, assign "ruff" (generic linting). If they mention specific boundaries, map them to your native AST validators: "check_function_length" or "check_class_length".
+
+4. PILLAR D: UNIT RUNNERS & CODE COVERAGE
+- Keywords: "test", "pytest", "run tests", "coverage", "test percentage"
+- Trigger Rules: If the user mentions testing, assign the strategy "pytest". If they explicitly mention tracking "coverage" or "percentage", you MUST include "pytest" and toggle your internal coverage flag fields.
+
+5. GENERIC AST HOOK COGNITIVE SCAVENGERS
+- Keywords: "transaction atomic", "db wrapper", "docstrings", "documentation comments"
+- Trigger Rules: Map these precisely to "check_transaction_atomic" or "check_docstrings" using your parameters interface setup mapping block.
+
+
+### INTENT PARSING AND MAPPING BOUNDARY RULES
+- "create_workspace": Select this if the user wants to group fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts (e.g., "repo-a").
+- "run_static_analysis": Select this intent ONLY if the user uses explicit, active commands ordering you to kick off, launch, run, or execute a test block run immediately (e.g., "Run pytest now", "Execute security audit"). You MUST populate the active_rules array mapping strategies to their target repositories.
+- "technical_query": Select this intent if the user is asking a general question about options, capabilities, configurations, or checking what is possible without explicitly ordering a live execution run right now (e.g., "Can you run tests?", "How do I check types?"). When this intent is selected, the active_rules list MUST remain empty.
+- Deduce smart engineering defaults if specific parameters or repository targets are omitted from the request context.
+"""
+
+
+
+
+
+@shared_task
+def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_text, repos, provider, model_name, api_key):
+    channel_layer = get_channel_layer()
+    
+    # -------------------------------------------------------------------------
+    # PHASE 1: FAST DATABASE READ (Get past records instantly)
+    # -------------------------------------------------------------------------
+    with transaction.atomic():
+        user = User.objects.get(pk=user_id)
+        session, _ = ChatSession.objects.get_or_create(pk=session_id, defaults={"user": user})
+        past_messages = list(session.messages.all().order_by('created_at')[:15])
+
+    history_list = []
+    for msg in past_messages:
+        history_list.append({
+            "role": msg.role,
+            "text": msg.content
+        })
+    
+    print("atitude")
+    toon_history_memory = encode(history_list)
+    print("iti")
+    print(history_list)
+    print("")
+    print(toon_history_memory)
+
+    master_system_prompt = f"""
+        {system_instruction_text}
+
+        ### PAST CONVERSATION STATE LOGS (TOON):
+        {{toon_history}}
+    """
+
+    # Assemble your structural Prompt Template using ONE clean system message entry
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", master_system_prompt),
+        ("human", "{input}")                                        
+    ])
+
+    # Dynamic model vendor factory setup based on your Zustand selection state
+    if provider == "openai":
+        llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
+    else:
+        key = settings.GEMINI_API_KEY
+        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=key)
+
+    # Bind the Pydantic schema class structure natively to the model runner engine
+    structured_llm = llm.with_structured_output(OrchestrAction)
+    chain = prompt_template | structured_llm
+
+    try:
+        # -------------------------------------------------------------------------
+        # PHASE 2: LONG NETWORK API CALL (Token Tracking Context - No DB Lock)
+        # -------------------------------------------------------------------------
+        with get_openai_callback() as cb:
+            result = cast(OrchestratorAction , chain.invoke({
+                "toon_history": toon_history_memory, 
+                "input": prompt_text.strip()
+            }))
+            
+            prompt_tokens = cb.prompt_tokens
+            completion_tokens = cb.completion_tokens
+            total_cost = cb.total_cost
+
+            print("\n🤖 ================== LLM FEEDBACK OBJECT ==================")
+            print(f"🎯 DETECTED INTENTS: {result.intents}")
+            if hasattr(result, 'chat_response') and result.chat_response:
+                print(f"💬 CASUAL CHAT REPLY: {result.chat_response}")
+            print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
+            print(json.dumps(result.model_dump(), indent=2)) 
+            print(prompt_tokens, "chim", completion_tokens, "uche", total_cost)
+            print("============================================================\n")
+
+        clean_payload_json = result.model_dump_json()
+
+        # -------------------------------------------------------------------------
+        # PHASE 3: FAST DATABASE WRITE (Isolated Transaction Block)
+        # -------------------------------------------------------------------------
+        with transaction.atomic():
+            ChatMessage.objects.create(session=session, role="user", content=prompt_text)
+            ChatMessage.objects.create(session=session, role="ai", content=clean_payload_json)
+
+        # -------------------------------------------------------------------------
+        # 🚀 BRIDGE PLUG: INTERCEPT THE DESIGN INTENTS & TRIGGER YOUR CORE PIPELINE
+        # -------------------------------------------------------------------------
+        # We look up the GitHub owner/username from the active authenticated user profile context
+        repo_owner = user.username 
+
+        if "run_static_analysis" in result.intents and result.active_rules:
+            # Gather the tool names that map directly to standard runners
+            selected_tools = []
+            user_rules_payload = []
+            
+            for rule in result.active_rules:
+                if rule.strategy in ["pytest", "bandit", "pip_audit", "ruff"]:
+                    selected_tools.append(rule.strategy)
+                else:
+                    # If it matches an AST checker, append to custom payload
+                    user_rules_payload.append({
+                        "rule_key": rule.strategy,
+                        "params": rule.params      
+                    })
+
+            if user_rules_payload:
+                selected_tools.append("odozi_visitors")
+
+            final_tools_list = list(set(selected_tools))
+
+            # Trigger your existing pipeline task for every repository target the AI extracted
+            for target_repo in result.selected_repo_names:
+                try:
+                    repo_merge = f"{repo_owner}/{target_repo}"
+                    repo_obj = GitHubRepository.objects.get(repo_name=repo_merge)
+                    
+                    # 💥 RUN YOUR EXHAUSTIVE DISPATCHER ASYNC LOOP TASK!
+                    run_agentic_pipeline.delay(
+                        repo_owner=repo_owner,
+                        repo_name=target_repo,
+                        default_branch=repo_obj.default_branch or "main",
+                        repo_data={}, 
+                        commit_sha=repo_obj.latest_commit_sha or "main",
+                        target_branch=repo_obj.default_branch or "main",
+                        ref_string=f"refs/heads/{repo_obj.default_branch}",
+                        installation_id=repo_obj.installation_id,
+                        user_requested_rules=user_rules_payload
+                    )
+                    print(f"🎉 Successfully triggered asset workflow for: {target_repo}")
+                except GitHubRepository.DoesNotExist:
+                    print(f"⚠️ Repository {target_repo} not found in database for user {repo_owner}")
+
+        # -------------------------------------------------------------------------
+        # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
+        # -------------------------------------------------------------------------
+        print("coat", channel_name, "swaaaaa")
+        
+        # 🚀 FIXED: Swapped from .send to .group_send to connect to group_user_room static strings safely!
+        async_to_sync(channel_layer.group_send)(
+            channel_name, # Targets the static room name string
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": clean_payload_json,
+                    "usage": {
+                        "input_tokens": prompt_tokens,
+                        "output_tokens": completion_tokens,
+                        "cost": total_cost
+                    }
+                }
+            }
+        )
+
+    except Exception as e:
+        print("=" * 80)
+        print("EXCEPTION TYPE:", type(e))
+        print("EXCEPTION:", repr(e))
+        traceback.print_exc()
+        print("=" * 80)
+        
+        # 🚀 FIXED: Swapped from .send to .group_send for fallback alerts too!
+        async_to_sync(channel_layer.group_send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {"type": "error", "message": f"Background Worker Crash: {str(e)}"}
+            }
+        )
 
 
 
@@ -1125,179 +887,6 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
 
 
 
-
-system_instruction_text = """
-You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into structured configuration variables inside our Pydantic action schema.
-
-### REGISTERED SYSTEM TOOL STRATEGIES & CROSS-CUTTING BUNDLES
-
-When a user requests analysis, you must cross-reference their keywords to populate the 'active_rules' array with the exact matching strategies defined below. 
-
-1. PILAR A: CODE SECURITY AUDITING
-- Keywords: "security", "vulnerability", "audit", "owasp", "leak", "secret", "credentials"
-- Trigger Rules: If any security keyword is mentioned, you MUST add BOTH "bandit" (for code flaws) AND "pii_leakage" (for logger file data leaks) to the active_rules array list. 
-
-2. PILLAR B: DEPENDENCY INTEGRITY (NEW)
-- Keywords: "dependencies", "packages", "requirements", "requirements.txt", "outdated packages", "vulnerable packages"
-- Trigger Rules: If the user mentions packages or dependencies, assign the strategy "pip_audit". If they ask for a complete security check, bundle "pip_audit" alongside your Pillar A tools.
-
-3. PILLAR C: CODE QUALITY & MAINTENANCE COMPLEXITY
-- Keywords: "lint", "code smell", "clean code", "formatting", "complexity", "nested loops", "lines"
-- Trigger Rules: If the user wants to evaluate code smells or style, assign "ruff" (generic linting). If they mention specific boundaries, map them to your native AST validators: "check_function_length" or "check_class_length".
-
-4. PILLAR D: UNIT RUNNERS & CODE COVERAGE
-- Keywords: "test", "pytest", "run tests", "coverage", "test percentage"
-- Trigger Rules: If the user mentions testing, assign the strategy "pytest". If they explicitly mention tracking "coverage" or "percentage", you MUST include "pytest" and toggle your internal coverage flag fields.
-
-5. GENERIC AST HOOK COGNITIVE SCAVENGERS
-- Keywords: "transaction atomic", "db wrapper", "docstrings", "documentation comments"
-- Trigger Rules: Map these precisely to "check_transaction_atomic" or "check_docstrings" using your parameters interface setup mapping block.
-
-
-### INTENT PARSING AND MAPPING BOUNDARY RULES
-- "create_workspace": Select this if the user wants to group fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts (e.g., "repo-a").
-- "run_static_analysis": Select this intent ONLY if the user uses explicit, active commands ordering you to kick off, launch, run, or execute a test block run immediately (e.g., "Run pytest now", "Execute security audit"). You MUST populate the active_rules array mapping strategies to their target repositories.
-- "technical_query": Select this intent if the user is asking a general question about options, capabilities, configurations, or checking what is possible without explicitly ordering a live execution run right now (e.g., "Can you run tests?", "How do I check types?"). When this intent is selected, the active_rules list MUST remain empty.
-- Deduce smart engineering defaults if specific parameters or repository targets are omitted from the request context.
-"""
-
-
-
-
-@shared_task
-def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_text, repos, provider, model_name, api_key):
-    channel_layer = get_channel_layer()
-    
-    # -------------------------------------------------------------------------
-    # PHASE 1: FAST DATABASE READ (Get past records instantly)
-    # -------------------------------------------------------------------------
-    with transaction.atomic():
-        user = User.objects.get(pk=user_id)
-        session, _ = ChatSession.objects.get_or_create(pk=session_id, defaults={"user": user})
-        past_messages = list(session.messages.all().order_by('created_at')[:15])
-    
-
-    history_list = []
-    for msg in past_messages:
-        history_list.append({
-            "role": msg.role,
-            "text": msg.content
-        })
-    
-    print("atitude")
-        
-    # Compress the historical database messages into a tiny TOON string text block
-    
-    toon_history_memory =  encode(history_list)
-    print("iti")
-    print(history_list)
-    print("")
-    print(toon_history_memory)
-
-    master_system_prompt = f"""
-        {system_instruction_text}
-
-        ### PAST CONVERSATION STATE LOGS (TOON):
-        {{toon_history}}
-    """
-    # -------------------------------------------------------------------------
-    # 🛠️ THE MOUNT POINT: SETTING UP YOUR LANGCHAIN PIPELINE COMPONENTS
-    # -------------------------------------------------------------------------
-    # Define your master text system rules (no JSON examples written!)
-    # Assemble your structural Prompt Template with matching template variables
-    prompt_template = ChatPromptTemplate.from_messages([
-        ("system", master_system_prompt),
-        # ("system", "PAST_CONVERSATION_STATE_LOGS:\n{{toon_history}}"), # 🔄 Maps to "toon_history" key
-        ("human", "{input}")                                        # 🔄 Maps to "input" key
-    ])
-
-    # Dynamic model vendor factory setup based on your Zustand selection state
-    if provider == "openai":
-        llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
-    else:
-        # key = api_key if api_key else settings.GEMINI_API_KEY
-        key = settings.GEMINI_API_KEY
-        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=key)
-
-    # Bind the Pydantic schema class structure natively to the model runner engine
-    # This automatically replaces all old JSON text templates and output string parsing code!
-    structured_llm = llm.with_structured_output(OrchestratorAction)
-    
-    # Build the linear execution pipeline chain
-    chain = prompt_template | structured_llm
-
-    try:
-        # -------------------------------------------------------------------------
-        # PHASE 2: LONG NETWORK API CALL (Token Tracking Context - No DB Lock)
-        # -------------------------------------------------------------------------
-        with get_openai_callback() as cb:
-            # LangChain takes the keys passed here and injects them right into the placeholders!
-            result = cast(OrchestratorAction, chain.invoke({
-                "toon_history": toon_history_memory, 
-                "input": prompt_text.strip()
-            }))
-            
-            prompt_tokens = cb.prompt_tokens
-            completion_tokens = cb.completion_tokens
-            total_cost = cb.total_cost
-
-
-             # 🌟 PRINT THE LLM FEEDBACK TO YOUR CELERY CONSOLE LOGS HERE!
-            print("\n🤖 ================== LLM FEEDBACK OBJECT ==================")
-            print(f"🎯 DETECTED INTENT: {result}")
-            if hasattr(result, 'chat_response') and result.chat_response:
-                print(f"💬 CASUAL CHAT REPLY: {result.chat_response}")
-            print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
-            print(json.dumps(result.model_dump(), indent=2)) # Formats the entire object beautifully
-            print(prompt_tokens,"chim", completion_tokens,"uche", total_cost )
-            print("============================================================\n")
-
-
-        # Safely serialize your structured Pydantic object into a clean JSON string
-        clean_payload_json = result.model_dump_json()
-
-        # -------------------------------------------------------------------------
-        # PHASE 3: FAST DATABASE WRITE (Isolated Transaction Block)
-        # -------------------------------------------------------------------------
-        with transaction.atomic():
-            # Save the natural human text and the clean AI JSON output string to the log history table
-            ChatMessage.objects.create(session=session, role="user", content=prompt_text)
-            ChatMessage.objects.create(session=session, role="ai", content=clean_payload_json)
-
-        # -------------------------------------------------------------------------
-        # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
-        # -------------------------------------------------------------------------
-        print("coat",channel_name, "swaaaaa")
-        async_to_sync(channel_layer.send)(
-            channel_name,
-            {
-                "type": "chat_message",
-                "payload": {
-                    "type": "orchestration_result",
-                    "raw_output": clean_payload_json,
-                    "usage": {
-                        "input_tokens": prompt_tokens,
-                        "output_tokens": completion_tokens,
-                        "cost": total_cost
-                    }
-                }
-            }
-        )
-
-    except Exception as e:
-        print("=" * 80)
-        print("EXCEPTION TYPE:", type(e))
-        print("EXCEPTION:", repr(e))
-        traceback.print_exc()
-        print("=" * 80)
-        # Handle exceptions gracefully over the socket wire...
-        async_to_sync(channel_layer.send)(
-            channel_name,
-            {
-                "type": "chat_message",
-                "payload": {"type": "error", "message": f"Background Worker Crash: {str(e)}"}
-            }
-        )
 
 
 

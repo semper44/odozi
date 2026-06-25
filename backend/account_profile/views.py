@@ -1,7 +1,6 @@
 from urllib import response
 import uuid
 
-from agents.orchestrator import start_agentic_workflow
 import re
 import json
 import hmac
@@ -424,12 +423,6 @@ def github_push_webhook(request):
     if not repo_url or not branch:
         return JsonResponse({"error": "Missing repository tracking or reference tracking keys"}, status=400)
 
-    # 4. Asynchronous Pipeline Triggers
-    # Ensure start_agentic_workflow shifts computing workloads immediately off the view loop
-    result = start_agentic_workflow(repo_url, branch, base_branch=base_branch)
-    
-    if result and result.get("status") == "error":
-        return JsonResponse(result, status=400) 
 
     return JsonResponse({"status": "processing", "branch": branch})
 
