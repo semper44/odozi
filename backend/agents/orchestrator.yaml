@@ -290,6 +290,51 @@ jobs:
             -F "tool=odozi_visitors" \
             -F "file=@odozi_report.json"
 
+
+    # =========================================================================
+ 
+  # JOB 5: PIP-AUDIT RUNNER (Dependency Vulnerability Scanner)
+  # =========================================================================
+  run-pip-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: contains(fromJson(inputs.tools_list), 'pip_audit')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Pip-Audit & Check Chunks
+        shell: bash
+        run: |
+          echo "================================================"
+          echo "STARTING DEPENDENCY AUDIT SECURITY CHECK"
+          echo "================================================"
+          pip install --upgrade pip pip-audit
+          
+          # Locate requirements.txt dynamically anywhere in the repo
+          REQ_FILE=$(find . -name "requirements.txt" | head -n 1)
+          
+          if [ -n "$REQ_FILE" ]; then
+              echo "Found dependency file: $REQ_FILE"
+              # Run audit and output a raw text stream
+              pip-audit -r "$REQ_FILE" 2>&1
+          else
+              echo "⚠️ Warning: No requirements.txt found. Auditing active python environment instead."
+              pip-audit 2>&1
+          fi
+
+
+
   cleanup:
     needs:
       - run-pytest

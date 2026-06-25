@@ -1,5 +1,6 @@
 from celery import shared_task, group, chord
 import shutil
+import traceback
 import subprocess
 import textwrap
 import os
@@ -12,6 +13,7 @@ import jwt
 import base64
 import inspect
 from toon import encode
+from typing import cast
 
 from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
@@ -1125,35 +1127,52 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
 
 
 system_instruction_text = """
-                You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into structured configuration variables.
+You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into structured configuration variables inside our Pydantic action schema.
 
-                ### REGISTERED SYSTEM TOOL STRATEGIES
-                - "check_auth": Finds functions missing a mandatory authentication decorator.
-                - "check_types": Pure Python type hint compliance checker.
-                - "check_n_plus_one": Performance analyzer detecting database statements inside loops.
-                - "pytest": Universal unit and integration testing runner framework.
-                - "bandit": Security and vulnerability flaw scanning tool.
+### REGISTERED SYSTEM TOOL STRATEGIES & CROSS-CUTTING BUNDLES
 
-                ### INTENT PARSING AND VALUE DEVIATION RULES
-                - "create_workspace": Trigger this if the user wants to group, add, or register fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts.
-                - "create_env_keys" / "run_static_analysis": Trigger this if the user wants to register variable keys or trigger specific test tool strategies across certain repositories.
-                - If a user specifies multiple rules (e.g., run pytest and bandit for repo A, but only pytest for repo B), map each tool strategy selection to its targeted repositories precisely.
-                - Deduce smart engineering defaults if specific configuration variables are missing.
-                """
+When a user requests analysis, you must cross-reference their keywords to populate the 'active_rules' array with the exact matching strategies defined below. 
 
+1. PILAR A: CODE SECURITY AUDITING
+- Keywords: "security", "vulnerability", "audit", "owasp", "leak", "secret", "credentials"
+- Trigger Rules: If any security keyword is mentioned, you MUST add BOTH "bandit" (for code flaws) AND "pii_leakage" (for logger file data leaks) to the active_rules array list. 
+
+2. PILLAR B: DEPENDENCY INTEGRITY (NEW)
+- Keywords: "dependencies", "packages", "requirements", "requirements.txt", "outdated packages", "vulnerable packages"
+- Trigger Rules: If the user mentions packages or dependencies, assign the strategy "pip_audit". If they ask for a complete security check, bundle "pip_audit" alongside your Pillar A tools.
+
+3. PILLAR C: CODE QUALITY & MAINTENANCE COMPLEXITY
+- Keywords: "lint", "code smell", "clean code", "formatting", "complexity", "nested loops", "lines"
+- Trigger Rules: If the user wants to evaluate code smells or style, assign "ruff" (generic linting). If they mention specific boundaries, map them to your native AST validators: "check_function_length" or "check_class_length".
+
+4. PILLAR D: UNIT RUNNERS & CODE COVERAGE
+- Keywords: "test", "pytest", "run tests", "coverage", "test percentage"
+- Trigger Rules: If the user mentions testing, assign the strategy "pytest". If they explicitly mention tracking "coverage" or "percentage", you MUST include "pytest" and toggle your internal coverage flag fields.
+
+5. GENERIC AST HOOK COGNITIVE SCAVENGERS
+- Keywords: "transaction atomic", "db wrapper", "docstrings", "documentation comments"
+- Trigger Rules: Map these precisely to "check_transaction_atomic" or "check_docstrings" using your parameters interface setup mapping block.
+
+
+### INTENT PARSING AND MAPPING BOUNDARY RULES
+- "create_workspace": Select this if the user wants to group fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts (e.g., "repo-a").
+- "run_static_analysis": Select this intent ONLY if the user uses explicit, active commands ordering you to kick off, launch, run, or execute a test block run immediately (e.g., "Run pytest now", "Execute security audit"). You MUST populate the active_rules array mapping strategies to their target repositories.
+- "technical_query": Select this intent if the user is asking a general question about options, capabilities, configurations, or checking what is possible without explicitly ordering a live execution run right now (e.g., "Can you run tests?", "How do I check types?"). When this intent is selected, the active_rules list MUST remain empty.
+- Deduce smart engineering defaults if specific parameters or repository targets are omitted from the request context.
+"""
 
 
 
 
 @shared_task
-def process_agentic_chat_turn_task(channel_name, session_id, prompt_text, repos, provider, model_name, api_key):
+def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_text, repos, provider, model_name, api_key):
     channel_layer = get_channel_layer()
     
     # -------------------------------------------------------------------------
     # PHASE 1: FAST DATABASE READ (Get past records instantly)
     # -------------------------------------------------------------------------
     with transaction.atomic():
-        user = User.objects.get(pk=1)
+        user = User.objects.get(pk=user_id)
         session, _ = ChatSession.objects.get_or_create(pk=session_id, defaults={"user": user})
         past_messages = list(session.messages.all().order_by('created_at')[:15])
     
@@ -1164,25 +1183,40 @@ def process_agentic_chat_turn_task(channel_name, session_id, prompt_text, repos,
             "role": msg.role,
             "text": msg.content
         })
+    
+    print("atitude")
         
     # Compress the historical database messages into a tiny TOON string text block
+    
     toon_history_memory =  encode(history_list)
+    print("iti")
+    print(history_list)
+    print("")
+    print(toon_history_memory)
+
+    master_system_prompt = f"""
+        {system_instruction_text}
+
+        ### PAST CONVERSATION STATE LOGS (TOON):
+        {{toon_history}}
+    """
     # -------------------------------------------------------------------------
     # 🛠️ THE MOUNT POINT: SETTING UP YOUR LANGCHAIN PIPELINE COMPONENTS
     # -------------------------------------------------------------------------
     # Define your master text system rules (no JSON examples written!)
     # Assemble your structural Prompt Template with matching template variables
     prompt_template = ChatPromptTemplate.from_messages([
-        ("system", system_instruction_text),
-        ("system", "PAST_CONVERSATION_STATE_LOGS:\n{{toon_history}}"), # 🔄 Maps to "toon_history" key
-        ("human", "{{input}}")                                        # 🔄 Maps to "input" key
+        ("system", master_system_prompt),
+        # ("system", "PAST_CONVERSATION_STATE_LOGS:\n{{toon_history}}"), # 🔄 Maps to "toon_history" key
+        ("human", "{input}")                                        # 🔄 Maps to "input" key
     ])
 
     # Dynamic model vendor factory setup based on your Zustand selection state
     if provider == "openai":
         llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
     else:
-        key = api_key if api_key else settings.GEMINI_API_KEY
+        # key = api_key if api_key else settings.GEMINI_API_KEY
+        key = settings.GEMINI_API_KEY
         llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=key)
 
     # Bind the Pydantic schema class structure natively to the model runner engine
@@ -1198,14 +1232,26 @@ def process_agentic_chat_turn_task(channel_name, session_id, prompt_text, repos,
         # -------------------------------------------------------------------------
         with get_openai_callback() as cb:
             # LangChain takes the keys passed here and injects them right into the placeholders!
-            result: OrchestratorAction = chain.invoke({
-                "toon_history": toon_history_memory, # Matches {{toon_history}}
-                "input": f"Available Global Repos: {repos}. Request: {prompt_text}" # Matches {{input}}
-            })
+            result = cast(OrchestratorAction, chain.invoke({
+                "toon_history": toon_history_memory, 
+                "input": prompt_text.strip()
+            }))
             
             prompt_tokens = cb.prompt_tokens
             completion_tokens = cb.completion_tokens
             total_cost = cb.total_cost
+
+
+             # 🌟 PRINT THE LLM FEEDBACK TO YOUR CELERY CONSOLE LOGS HERE!
+            print("\n🤖 ================== LLM FEEDBACK OBJECT ==================")
+            print(f"🎯 DETECTED INTENT: {result}")
+            if hasattr(result, 'chat_response') and result.chat_response:
+                print(f"💬 CASUAL CHAT REPLY: {result.chat_response}")
+            print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
+            print(json.dumps(result.model_dump(), indent=2)) # Formats the entire object beautifully
+            print(prompt_tokens,"chim", completion_tokens,"uche", total_cost )
+            print("============================================================\n")
+
 
         # Safely serialize your structured Pydantic object into a clean JSON string
         clean_payload_json = result.model_dump_json()
@@ -1221,6 +1267,7 @@ def process_agentic_chat_turn_task(channel_name, session_id, prompt_text, repos,
         # -------------------------------------------------------------------------
         # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
         # -------------------------------------------------------------------------
+        print("coat",channel_name, "swaaaaa")
         async_to_sync(channel_layer.send)(
             channel_name,
             {
@@ -1238,6 +1285,11 @@ def process_agentic_chat_turn_task(channel_name, session_id, prompt_text, repos,
         )
 
     except Exception as e:
+        print("=" * 80)
+        print("EXCEPTION TYPE:", type(e))
+        print("EXCEPTION:", repr(e))
+        traceback.print_exc()
+        print("=" * 80)
         # Handle exceptions gracefully over the socket wire...
         async_to_sync(channel_layer.send)(
             channel_name,

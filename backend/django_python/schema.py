@@ -1,53 +1,40 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 class RepositoryItem(BaseModel):
-    repo_name: str = Field(description="The extracted name of the repository (e.g., 'odozi')")
-    repo_owner: str = Field(default="unknown_owner", description="The organization or user owner name if mentioned")
-    repo_full_name: str = Field(description="Formatted strictly as 'owner/repo_name'")
+    repo_name: str = Field(description="Name of the repo (e.g., 'repo-a')")
+    repo_owner: str = Field(default="unknown_owner")
+    repo_full_name: str = Field(description="Formatted as owner/repo_name")
 
 class ToolStrategyMapping(BaseModel):
-    strategy: str = Field(description="Exact tool strategy name from the registry (e.g., 'pytest' or 'bandit')")
-    target_repo_names: List[str] = Field(description="The specific repository names this specific tool rule applies to")
+    strategy: str = Field(description="e.g., 'pytest', 'bandit', 'generate_django_tests'")
+    target_repo_names: List[str] = Field(description="Target repos for this specific tool")
+
+class WorkspaceCreationTask(BaseModel):
+    new_workspace_name: str = Field(description="The workspace name to create (e.g., 'mom')")
+    associated_repo_names: List[str] = Field(description="List of repo names to put in this workspace")
 
 class OrchestratorAction(BaseModel):
     """
-    The Master Agent Schema. LangChain forces the LLM to output this exact structure.
+    The Master Multitask Schema. Allows combinations of operations in 1 chat turn.
     """
-    intent: str = Field(
-        description=(
-            "Must be exactly one of: "
-            "'create_workspace', 'delete_workspace', "
-            "'create_env_keys', 'delete_env_keys', "
-            "'general_chat', 'analyze_test_failure'"
-        )
+    intents: List[str] = Field(
+        description="List of all detected intents, e.g., ['create_workspace', 'run_static_analysis']"
+    )
+    chat_response: str = Field(
+        description="Your natural, friendly response explaining your actions and technical insights."
     )
     
-    # 🌟 THE CONVERSATIONAL CORE FIELD
-    # This is where the LLM writes its natural text, technical explanations, or hello messages!
-    chat_response: Optional[str] = Field(
-        None, 
-        description="Write your natural text response, greetings, or deep technical analysis reports here."
-    )
-    
-    # --- CREATION & DELETION CONFIGURATION FIELDS ---
-    workspace: Optional[str] = Field(None, description="Target workspace container name involved in the action")
-    new_workspace_name: Optional[str] = Field(None, description="Cleaned destination workspace name if creating one")
-    
-    key_names: List[str] = Field(
+    # 🌟 Multi-Workspace Tracking Array
+    workspaces_to_create: List[WorkspaceCreationTask] = Field(
         default=[], 
-        description="Upper-case SNAKE_CASE variable keys being added or deleted"
-    )
-    selected_repo_names: List[str] = Field(
-        default=[], 
-        description="Repository names involved in this specific pipeline turn"
+        description="Populate this with an object for EVERY workspace the user wants to create."
     )
     
-    repositories: List[RepositoryItem] = Field(
-        default=[], 
-        description="List of raw repository objects extracted if creating a workspace"
-    )
+    # Execution Mappings
+    key_names: List[str] = Field(default=[])
+    selected_repo_names: List[str] = Field(default=[], description="All repositories involved across the entire request")
     active_rules: List[ToolStrategyMapping] = Field(
         default=[], 
-        description="List mapping specific tools to specific target repositories for analysis runs"
+        description="List mapping test runners or test generation tasks to specific repositories"
     )

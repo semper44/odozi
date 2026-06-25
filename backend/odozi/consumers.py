@@ -52,7 +52,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 current_app.send_task(  # type: ignore
                     "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches your celery task path string exactly!
                     kwargs={
-                        "channel_name": self.channel_name,
+                        "channel_name": self.user_group,
                         "user_id": self.user.pk,
                         "session_id": data.get('session_id', 1),
                         "prompt_text": data.get('prompt', ''),
