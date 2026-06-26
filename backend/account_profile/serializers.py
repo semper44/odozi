@@ -1,33 +1,28 @@
-from rest_framework_simplejwt.serializers import TokenRefreshSerializer
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import get_user_model
+# account_profile/serializers.py
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 
-User = get_user_model()
-
-class MyCustomTokenRefreshSerializer(TokenRefreshSerializer):
-    def validate(self, attrs):
-        # 1. Run the default SimpleJWT validation logic
-        # This checks if the refresh token cookie string is valid/unexpired
-        data = super().validate(attrs)
+class OdoziCustomRefreshToken(RefreshToken):
+    """
+    Staff-Level Custom Token Class.
+    Ensures custom claims are injected globally whenever an access token 
+    is generated or rotated from this refresh token instance.
+    """
+    @property
+    def access_token(self):
+        # 1. Generate the baseline standard access token object
+        access = super().access_token
         
-        # 2. Extract the user instance from the validated refresh token payload
-        refresh_token_string = attrs["refresh"]
-        refresh_token_obj = RefreshToken(refresh_token_string)
-        user_id = refresh_token_obj.payload.get('user_id')
+        # 2. Extract the user identity safely from the current refresh payload
+        user_id = self.payload.get("user_id")
         
-        try:
-            user = User.objects.get(id=user_id)
-            
-            # 3. Create a temporary token object to recalculate claims
-            # We target SimpleJWT's internal token wrapper tracking dictionary
-            new_access_token = refresh_token_obj.access_token
-            new_access_token.payload['username'] = str(user.username)
-            new_access_token.payload['id'] = int(user.pk) #type: ignore
-            
-            # 4. Overwrite the default access token string inside the return dictionary data payload
-            data['access'] = str(new_access_token)
-            
-        except User.DoesNotExist:
-            pass # Fallback cleanly if user cannot be found mapped to that token scope
-            
-        return data
+        if user_id:
+            from django.contrib.auth.models import User
+            try:
+                user = User.objects.get(pk=user_id)
+                # 🚀 FORCE claims directly onto the payload before string serialization!
+                access["username"] = str(user.username)
+                access["id"] = int(user.pk)
+            except User.DoesNotExist:
+                pass
+                
+        return access

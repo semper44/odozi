@@ -1,4 +1,3 @@
-from celery import shared_task, group, chord
 import shutil
 import traceback
 import subprocess
@@ -15,22 +14,24 @@ import inspect
 from toon import encode
 from typing import cast
 
+from celery import shared_task, group, chord
+
 from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
 from account_profile.models import GitHubRepository, Workspace
 from django_python.schema import OrchestratorAction 
 
-from concurrent.futures import ThreadPoolExecutor
 
 from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage
 from django.contrib.auth.models import User
+from django_python.schema import OrchestratorAction
 
 from django.conf import settings
-from django_python.schema import OrchestratorAction # Your Pydantic structure
 from django.db import transaction
+from django.core.cache import cache
 
-
+from concurrent.futures import ThreadPoolExecutor
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
@@ -421,6 +422,14 @@ When a user requests analysis, you must cross-reference their keywords to popula
 - Keywords: "transaction atomic", "db wrapper", "docstrings", "documentation comments"
 - Trigger Rules: Map these precisely to "check_transaction_atomic" or "check_docstrings" using your parameters interface setup mapping block.
 
+### CONTEXT EVOLUTION & HISTORY OVERHAUL PROTOCOL:
+- For standard casual chats or technical inquiries, leave 'evict_prior_history' as False and 'condensed_history_summary' as None.
+- The exact moment the user issues an operational execution command (e.g., "Run the first 2"), map the references to 'active_rules', set 'evict_prior_history' to True, and use your intelligence to populate 'condensed_history_summary'.
+- Inside 'condensed_history_summary', extract ONLY the critical contextual baseline established prior to execution, combined with a record of the tools just launched. Strip all fluff, greetings, or basic question loops. 
+
+Example Summary Output:
+"User verified platform capabilities for pytest/bandit. Consolidated active workflow initiated for repo-b running strategy models: bandit, pytest."
+
 
 ### INTENT PARSING AND MAPPING BOUNDARY RULES
 - "create_workspace": Select this if the user wants to group fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts (e.g., "repo-a").
@@ -480,7 +489,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=key)
 
     # Bind the Pydantic schema class structure natively to the model runner engine
-    structured_llm = llm.with_structured_output(OrchestrAction)
+    structured_llm = llm.with_structured_output(OrchestratorAction)
     chain = prompt_template | structured_llm
 
     try:
@@ -502,18 +511,38 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             if hasattr(result, 'chat_response') and result.chat_response:
                 print(f"💬 CASUAL CHAT REPLY: {result.chat_response}")
             print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
-            print(json.dumps(result.model_dump(), indent=2)) 
+            print(result.active_rules)
+            # print(json.dumps(result.model_dump(), indent=2)) 
             print(prompt_tokens, "chim", completion_tokens, "uche", total_cost)
+            print(result)
             print("============================================================\n")
 
-        clean_payload_json = result.model_dump_json()
 
         # -------------------------------------------------------------------------
-        # PHASE 3: FAST DATABASE WRITE (Isolated Transaction Block)
+        # PHASE 3: CONTEXT CONVERSATION OVERHAUL & BASELINE SEEDING
         # -------------------------------------------------------------------------
+        clean_payload_json = result.model_dump_json()
+
         with transaction.atomic():
-            ChatMessage.objects.create(session=session, role="user", content=prompt_text)
-            ChatMessage.objects.create(session=session, role="ai", content=clean_payload_json)
+            if result.evict_prior_history:
+                # 1. 🧹 THE OVERHAUL: Instantly wipe out all past messages for this session
+                session.messages.all().delete()
+                print(f"🔄 Database Overhaul Triggered: Purged casual history fluff for Session {session_id}.")
+                
+                # 2. Save the current user text prompt as the first record of the new era
+                ChatMessage.objects.create(session=session, role="user", content=prompt_text)
+                
+                # 3. 🌱 THE SEED: Save the LLM's own high-utility condensed text summary
+                # This becomes the single baseline row memory anchor for the next message turn!
+                summary_marker = f"PREVIOUS_SESSION_CONTEXT_SUMMARY: {result.condensed_history_summary}"
+                ChatMessage.objects.create(session=session, role="ai", content=summary_marker)
+                
+                print("🌱 New memory baseline seed successfully planted in PostgreSQL history logs.")
+            else:
+                # 📥 STANDARD WORKING MEMORY: Save strings sequentially during casual Q&A phases
+                ChatMessage.objects.create(session=session, role="user", content=prompt_text)
+                ChatMessage.objects.create(session=session, role="ai", content=clean_payload_json)
+
 
         # -------------------------------------------------------------------------
         # 🚀 BRIDGE PLUG: INTERCEPT THE DESIGN INTENTS & TRIGGER YOUR CORE PIPELINE
@@ -523,45 +552,64 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
 
         if "run_static_analysis" in result.intents and result.active_rules:
             # Gather the tool names that map directly to standard runners
-            selected_tools = []
-            user_rules_payload = []
+            user_rules_payload = result.active_rules[0].strategy
+            pipeline_tasks= []
+            # active_rules: [{"strategy": "bandit","target_repo_names": ["repo-a","repo-b","repo-p"]}]
             
-            for rule in result.active_rules:
-                if rule.strategy in ["pytest", "bandit", "pip_audit", "ruff"]:
-                    selected_tools.append(rule.strategy)
-                else:
-                    # If it matches an AST checker, append to custom payload
-                    user_rules_payload.append({
-                        "rule_key": rule.strategy,
-                        "params": rule.params      
-                    })
+            # for rule in result.active_rules:
+            #     if rule.strategy in ["pytest", "bandit", "pip_audit", "ruff"]:
+            #         selected_tools.append(rule.strategy)
+            #     else:
+            #         # If it matches an AST checker, append to custom payload
+            #         rule_params = getattr(rule, "params", {}) or {}
+            #         user_rules_payload.append({
+            #             "rule_key": rule.strategy,
+            #             "params": rule_params     
+            #         })
 
-            if user_rules_payload:
-                selected_tools.append("odozi_visitors")
+            # if user_rules_payload:
+            #     selected_tools.append("odozi_visitors")
 
-            final_tools_list = list(set(selected_tools))
+            # final_tools_list = list(set(selected_tools))
 
-            # Trigger your existing pipeline task for every repository target the AI extracted
-            for target_repo in result.selected_repo_names:
-                try:
-                    repo_merge = f"{repo_owner}/{target_repo}"
-                    repo_obj = GitHubRepository.objects.get(repo_name=repo_merge)
-                    
-                    # 💥 RUN YOUR EXHAUSTIVE DISPATCHER ASYNC LOOP TASK!
-                    run_agentic_pipeline.delay(
-                        repo_owner=repo_owner,
-                        repo_name=target_repo,
-                        default_branch=repo_obj.default_branch or "main",
-                        repo_data={}, 
-                        commit_sha=repo_obj.latest_commit_sha or "main",
-                        target_branch=repo_obj.default_branch or "main",
-                        ref_string=f"refs/heads/{repo_obj.default_branch}",
-                        installation_id=repo_obj.installation_id,
-                        user_requested_rules=user_rules_payload
-                    )
-                    print(f"🎉 Successfully triggered asset workflow for: {target_repo}")
-                except GitHubRepository.DoesNotExist:
-                    print(f"⚠️ Repository {target_repo} not found in database for user {repo_owner}")
+            # Triggering existing pipeline task for every repository target the AI extracted
+            print(user_id)
+            details_cache_key = f"user:repos:{user_id}"
+            cached_details = cache.get(details_cache_key)
+            if not cached_details or not isinstance(cached_details, dict):
+                print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
+                cached_details = {}
+            cached_repos = cached_details.get("repositories", {})
+
+            for target_repo in cached_repos:
+                print("target_repo", target_repo)
+                sanitized_name = target_repo.lower().replace(" ", "-").strip()
+                if target_repo in result.selected_repo_names:
+                    try:
+                        repo_merge = f"{repo_owner}/{sanitized_name}"
+                        repo_obj = GitHubRepository.objects.get(repo_name=repo_merge)
+                        
+                        # Append the task signature context blocks to the array list
+                        pipeline_tasks.append(
+                            run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
+                                repo_owner=repo_owner,
+                                repo_name=sanitized_name,
+                                default_branch=repo_obj.default_branch or "main",
+                                repo_data = {},
+                                commit_sha=repo_obj.latest_commit_sha or "main",
+                                target_branch=repo_obj.default_branch or "main",
+                                ref_string=f"refs/heads/{repo_obj.default_branch}",
+                                installation_id=repo_obj.installation_id,
+                                user_requested_rules=user_rules_payload
+                            )
+                        )
+                    except GitHubRepository.DoesNotExist:
+                        pass
+
+            # 🚀 BULK TRIGGER: Fire all task pipelines concurrently in microseconds!
+            if pipeline_tasks:
+                group(pipeline_tasks).apply_async()
+                print(f"🎉 Bulk signature queue launched concurrently for {len(pipeline_tasks)} targets.")
 
         # -------------------------------------------------------------------------
         # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
@@ -695,7 +743,8 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     # =========================================================================
     # STEP 2: DISPATCH TO LIVE GITHUB API (Uncomment when ready to go live)
     # =========================================================================
-    selected_tools = ["ruff", "bandit", "odozi_visitors"]
+    print("user_requested_rules", user_requested_rules)
+    selected_tools = user_requested_rules
      # 1. Look up the repository full slug name in your DB
     # repo_slug = f"{repo_owner}/{repo_name}"
 
@@ -703,7 +752,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     
     # 2. Fetch only the variable names registered for THIS specific repository
     repo_merge = f'{repo_owner}/{repo_name}'
-    repo_instance = GitHubRepository.objects.get(repo_name=repo_merge)
+    # repo_instance = GitHubRepository.objects.get(repo_name=repo_merge)
     registered_keys = RepoEnvKey.objects.filter(
          repo__repo_name=repo_merge
     ).values_list('key_name', flat=True)

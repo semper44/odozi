@@ -269,8 +269,8 @@ SIMPLE_JWT = {
     'AUTH_COOKIE_HTTPONLY': True,
     'AUTH_COOKIE_SECURE': True,       # True for HTTPS/Production/Loca.lt
     'AUTH_COOKIE_SAMESITE': 'Lax',     # Use 'None' if completely cross-domain
+    "TOKEN_OBTAIN_SERIALIZER": "account_profile.serializers.OdoziCustomTokenSerializer"
 
-    'TOKEN_REFRESH_SERIALIZER': 'account_profile.serializers.MyCustomTokenRefreshSerializer'
 }
 
 

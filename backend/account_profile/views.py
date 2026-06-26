@@ -1,7 +1,5 @@
-from urllib import response
-import uuid
-
 import re
+import uuid
 import json
 import hmac
 import time
@@ -43,7 +41,7 @@ from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.authentication import rotate_github_token
 from agents.tasks import run_agentic_pipeline
 from .models import UserProfileModel, Workspace, WorkspaceMembership, GitHubRepository, UserLLMConfig
-
+from .serializers import OdoziCustomRefreshToken
 from channels.db import database_sync_to_async
 
 
@@ -165,7 +163,7 @@ class GitHubRefreshView(View):
         except json.JSONDecodeError:
             return JsonResponse({"error": "Malformed JSON payload"}, status=400)
 
-        refresh = RefreshToken(refresh_token)
+        refresh = OdoziCustomRefreshToken(refresh_token)
         new_access = str(refresh.access_token)
 
         print("abeg", refresh)

@@ -130,7 +130,8 @@ def dashboard_view(request):
     
     elif stored_jwt_access_token and stored_jwt_access_token != None and stored_jwt_access_token != "None":
         print("🍪 [DASHBOARD] Recycled cookie execution path. Authenticating via token string payload...")
-        print(stored_jwt_access_token)
+        # print(cached_repos)
+        print("idri111111111")
         print("idrisss")
         print(stored_jwt_access_token != None)
         print(stored_jwt_access_token != "None")
@@ -147,7 +148,7 @@ def dashboard_view(request):
             # token_string = parsed_jwt.get("my_jwt_access_token")
             token_string = stored_jwt_access_token
             user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
-            print(f"✅ [DASHBOARD] Token authentication successful. User context resolved: {username}||{token_string}")
+            print(f"✅ [DASHBOARD] Token authentication successful. User context resolved: {username}||{user_id}")
             print("")
             expires_at = request.COOKIES.get("expires_at")
             
@@ -155,13 +156,15 @@ def dashboard_view(request):
             print(f"💥 [DASHBOARD AUTH FAILURE] SimpleJWT threw an exception: {str(e)}")
             return JsonResponse({"error": f"Session verification expired or invalid: {str(e)}"}, status=401)
 
-
+        print(555555555555)
     else:
         print("")
         print("NOTING")
         return JsonResponse({"error": "Anonymous context rejected. Missing valid authentication elements."}, status=403)
 
+    print("moreeeeeeeeeeeeeeeeeeeeee")
     if not username or not user_id:
+        print(99999999999)
         return JsonResponse({"error": "Failed to map token identities securely."}, status=401)
 
 
@@ -169,6 +172,8 @@ def dashboard_view(request):
     cached_repos = cache.get(details_cache_key)
 
     if cached_repos:
+        print("")
+        print(cached_repos)
         print(f"⚡ [CACHE HIT] Serving repositories for '{username}' instantly from Redis RAM.")
         # Handle string parsing dependencies if using raw serialization
         # cleaned_repos = json.loads(cached_repos) if isinstance(cached_repos, str) else cached_repos

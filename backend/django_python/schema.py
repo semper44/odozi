@@ -21,6 +21,16 @@ class OrchestratorAction(BaseModel):
     intents: List[str] = Field(
         description="List of all detected intents, e.g., ['create_workspace', 'run_static_analysis']"
     )
+
+    evict_prior_history: bool = Field(
+        default=False,
+        description="Set to True ONLY when an execution command is given. This signals the backend to execute a complete database overhaul."
+    )
+    condensed_history_summary: Optional[str] = Field(
+        None,
+        description="When evict_prior_history is True, compile a high-utility, short summary of the important context and execution choices from the past casual turns to act as the lone seed for future memory."
+    )
+    
     chat_response: str = Field(
         description="Your natural, friendly response explaining your actions and technical insights."
     )
@@ -32,8 +42,7 @@ class OrchestratorAction(BaseModel):
     )
     
     # Execution Mappings
-    key_names: List[str] = Field(default=[])
-    selected_repo_names: List[str] = Field(default=[], description="All repositories involved across the entire request")
+    # selected_repo_names: List[str] = Field(default=[], description="All repositories involved across the entire request")
     active_rules: List[ToolStrategyMapping] = Field(
         default=[], 
         description="List mapping test runners or test generation tasks to specific repositories"
