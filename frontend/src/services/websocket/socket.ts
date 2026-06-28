@@ -80,6 +80,7 @@ class SocketService {
       try {
         // const parsed = JSON.parse(event.data);
         const packet = JSON.parse(event.data);
+        console.log("packet", packet)
         // if (this.messageCallback) {
         //   this.messageCallback(parsed);
         // }

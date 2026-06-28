@@ -33,6 +33,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -50,12 +51,18 @@ from langchain_core.output_parsers import StrOutputParser
 
 
 @csrf_exempt
+@extend_schema(
+    summary="Dashboard bootstrap",
+    description="Authenticate the browser session, resolve repository data, and return the dashboard payload.",
+    responses={
+        200: OpenApiResponse(description="Dashboard data returned"),
+        401: OpenApiResponse(description="Invalid or expired authentication"),
+        403: OpenApiResponse(description="Anonymous or fingerprint validation failed"),
+        405: OpenApiResponse(description="Method not allowed"),
+    },
+)
 def dashboard_view(request):
-    """
-    Consolidated Dashboard Gateway: Validates initialization transit tickets OR active sessions,
-    implements a high-performance Cache-Aside Redis data pipeline, and securely manages 
-    HttpOnly browser tokens.
-    """
+    """Authenticate the dashboard request and return repository data for the signed-in user."""
     print("wahsahala")
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed. Must use POST for security verification."}, status=405)
@@ -288,9 +295,41 @@ def dashboard_view(request):
 
 
 class CreateWorkspaceView(APIView):
+    """Create a workspace and attach selected repositories to it."""
+
     authentication_classes = [HttpOnlyCookieJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Create workspace",
+        description="Create a new workspace and save the selected GitHub repositories under it.",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "new_workspace_name": {"type": "string", "example": "My Workspace"},
+                    "repositories": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "repo_id": {"type": "integer"},
+                                "repo_name": {"type": "string"},
+                                "repo_owner": {"type": "string"},
+                                "repo_full_name": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+                "required": ["repositories", "new_workspace_name"],
+            }
+        },
+        responses={
+            201: OpenApiResponse(description="Workspace created"),
+            400: OpenApiResponse(description="Invalid payload"),
+            500: OpenApiResponse(description="Transaction failure"),
+        },
+    )
     def post(self, request, *args, **kwargs):
         repo_list = request.data.get('repositories', [])
         user = request.user
@@ -382,13 +421,32 @@ class CreateWorkspaceView(APIView):
 
 
 class DeleteUserSelectedRepos(APIView):
-    """
-    DRF Class-Based View gateway to securely execute database deletion
-    queries with strict multi-tenant workspace ownership checks.
-    """
+    """Delete selected repositories from the authenticated user's accessible workspaces."""
     authentication_classes = [HttpOnlyCookieJWTAuthentication]
-    permission_classes = [IsAuthenticated] 
+    permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Delete selected repositories",
+        description="Remove one or more repository records from the authenticated user's workspaces.",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "repo_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "example": [101, 102],
+                    }
+                },
+                "required": ["repo_ids"],
+            }
+        },
+        responses={
+            200: OpenApiResponse(description="Deletion completed"),
+            400: OpenApiResponse(description="Missing or malformed payload"),
+            404: OpenApiResponse(description="No matching repositories found"),
+        },
+    )
     def post(self, request, *args, **kwargs):
                 # B. PARSE INPUT PAYLOAD 
         # Support both: {"repo_ids": [123]} (single) or {"repo_ids": [123, 456, 789]} (bulk)
@@ -416,6 +474,29 @@ class DeleteUserSelectedRepos(APIView):
 
 
 class CreateRepoEnvKeys(APIView):
+    """Create environment variable key entries for the selected repositories."""
+
+    @extend_schema(
+        summary="Create environment keys",
+        description="Register key names for one or more repositories inside a workspace.",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "workspace": {"type": "string", "example": "default"},
+                    "key_names": {"type": "array", "items": {"type": "string"}},
+                    "selected": {"type": "array", "items": {"type": "integer"}},
+                    "repositories": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["key_names"],
+            }
+        },
+        responses={
+            201: OpenApiResponse(description="Environment keys created or already present"),
+            400: OpenApiResponse(description="Invalid payload"),
+            500: OpenApiResponse(description="Transaction mapping failure"),
+        },
+    )
     def post(self, request, *args, **kwargs):
         print("request.data", request.data)
         
@@ -566,6 +647,28 @@ class CreateRepoEnvKeys(APIView):
 
 
 class CreateUsersRepo(APIView):
+    """Create repository records for the selected GitHub repositories in a workspace."""
+
+    @extend_schema(
+        summary="Create repositories for workspace",
+        description="Save selected GitHub repositories to the requested workspace record.",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "workspace": {"type": "string", "example": "default"},
+                    "selected": {"type": "array", "items": {"type": "integer"}},
+                    "repositories": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["repositories"],
+            }
+        },
+        responses={
+            201: OpenApiResponse(description="Repositories created"),
+            400: OpenApiResponse(description="Invalid payload"),
+            500: OpenApiResponse(description="Transaction mapping failure"),
+        },
+    )
     def post(self, request, *args, **kwargs):
         print("request.data", request.data)
         
@@ -668,6 +771,16 @@ class CreateUsersRepo(APIView):
 
 @csrf_exempt
 @require_github_auth  # Secures the endpoint
+@extend_schema(
+    summary="Receive CI tool results",
+    description="Buffer CI test and scan results from tool runners for storage and dashboard streaming.",
+    responses={
+        200: OpenApiResponse(description="CI payload accepted"),
+        400: OpenApiResponse(description="Missing tracking parameters"),
+        404: OpenApiResponse(description="Workspace not configured"),
+        500: OpenApiResponse(description="Processing failure"),
+    },
+)
 def receive_ci_results(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -829,6 +942,8 @@ def receive_ci_results(request):
 
 
 class AITestSummaryViews(APIView):
+    """Generate an AI-driven orchestration plan from a natural-language request."""
+
     # authentication_classes = [HttpOnlyCookieJWTAuthentication]
     # permission_classes = [IsAuthenticated]
 
@@ -967,6 +1082,8 @@ class AITestSummaryViews(APIView):
 
 
 class AITestSummaryView(APIView):
+    """Convert a natural-language request into a structured JSON action plan."""
+
     # authentication_classes = [HttpOnlyCookieJWTAuthentication]
     # permission_classes = [IsAuthenticated]
 
@@ -1147,6 +1264,29 @@ class AITestSummaryView(APIView):
 
 
 class LogStreamingResultsView(APIView):
+    """Buffer live tool logs or archive the final report payload for a workflow run."""
+
+    @extend_schema(
+        summary="Stream log results",
+        description="Accept live log chunks or a final report upload for a workflow run and archive it.",
+        request={
+            "multipart/form-data": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string"},
+                    "repo": {"type": "string"},
+                    "logs": {"type": "array", "items": {"type": "string"}},
+                    "file": {"type": "string", "format": "binary"},
+                },
+            }
+        },
+        responses={
+            200: OpenApiResponse(description="Log chunk buffered"),
+            201: OpenApiResponse(description="Final log report archived"),
+            400: OpenApiResponse(description="Missing run id"),
+            500: OpenApiResponse(description="Archiving failed"),
+        },
+    )
     def post(self, request, *args, **kwargs):
         run_id = request.data.get('run_id')
         repo_full_name = request.data.get('repo')  # e.g., "semper44/odozi"
@@ -1237,6 +1377,16 @@ class LogStreamingResultsView(APIView):
 
 
 class GetWorkflowRunDetailsView(APIView):
+    """Return workflow run metadata and signed log download links for a run."""
+
+    @extend_schema(
+        summary="Get workflow run details",
+        description="Retrieve the recorded workflow run data and log URLs for the specified run id.",
+        responses={
+            200: OpenApiResponse(description="Workflow run details returned"),
+            404: OpenApiResponse(description="Run not found"),
+        },
+    )
     def get(self, request, run_id):
         try:
             run = WorkflowRunHistory.objects.prefetch_related('steps').get(run_id=run_id)

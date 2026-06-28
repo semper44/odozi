@@ -75,4 +75,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         directly down the raw socket pipe straight back to the browser.
         """
         # Ensure we serialize the dictionary correctly to avoid downstream parsing crashes
-        await self.send(text_data=json.dumps(event['payload']))
+        text_data=json.dumps(event['payload'])
+        print("heyy", text_data)
+        await self.send(text_data)

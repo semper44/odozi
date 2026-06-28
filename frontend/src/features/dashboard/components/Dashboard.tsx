@@ -85,8 +85,8 @@ export default function Dashboard() {
     const toggleSelect = useSelectionStore((state) => state.toggleSelect);
     const clearSelection = useSelectionStore((state) => state.clearSelection);
     
-    const { activeProvider, activeModel, savedApiKey } = useLLMStore();
-    console.log("could",activeProvider, activeModel, savedApiKey)
+    const { activeProvider, activeModel } = useLLMStore();
+    console.log("could",activeProvider, activeModel)
     const activeToast = useSocketStore((state) => state.activeToast);
 
    
@@ -184,7 +184,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
  const handleSendRequest = async (e: React.FormEvent) => {
     e.preventDefault();
      console.log(activeToast !== null,"activetoast", activeToast)
-     if(activeProvider === '' || activeModel === '' || savedApiKey=== ''){
+     if(activeProvider === '' || activeModel === ''){
          toast.error("Please fill in the LLM details first", {
                 position: "top-right",
                 autoClose: 4000,
@@ -208,14 +208,13 @@ const createEnvVar = (keyList: string[], workspace:string) => {
     setIsPending(true);
     setIsProcessingRequest(true);
     setIsAiOpen(false);
-    console.log(activeModel,"buzz",activeProvider, "77", savedApiKey)
+    console.log(activeModel,"buzz",activeProvider, "77")
 
     sendMessage({
         type: "start_processing",
         prompt: cleanedInput,
         provider: activeProvider,
         model_name: activeModel,
-        user_api_key: savedApiKey // Securely forward their credential keys
     });
 
 
@@ -239,18 +238,18 @@ const createEnvVar = (keyList: string[], workspace:string) => {
     // }
     console.log(error, "h1osana",data)
 
-    function SolveSendIconTasks(){
+    // function SolveSendIconTasks(){
         
 
-        // sending message to the websocket
-        sendMessage({
-            type: "start_processing",
-            repos: Array.from(selected),
-            prompt,
-        });
-        // clearing the input prompt
-        setPrompt("")
-    }
+    //     // sending message to the websocket
+    //     sendMessage({
+    //         type: "start_processing",
+    //         repos: Array.from(selected),
+    //         prompt,
+    //     });
+    //     // clearing the input prompt
+    //     setPrompt("")
+    // }
 
     function ClickBackIconTasks(){
         if (isProcessingRequest) {

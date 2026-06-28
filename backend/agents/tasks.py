@@ -430,12 +430,26 @@ When a user requests analysis, you must cross-reference their keywords to popula
 Example Summary Output:
 "User verified platform capabilities for pytest/bandit. Consolidated active workflow initiated for repo-b running strategy models: bandit, pytest."
 
+### MANDATORY BRANCH CONFIGURATION & CLARIFICATION RULES:
+- Whenever a user commands a live tool run or execution suite ("run_static_analysis"), you MUST check if they explicitly specified WHICH branch to target for each involved repository.
+- If the user omitted branch names (e.g., they just said "run pytest on repo-a" without specifying a branch context), you MUST:
+  1. Classify the intent as a "technical_query" instead of "run_static_analysis".
+  2. Leave the active_rules array list completely empty [].
+  3. Set your 'chat_response' to a clear, helpful text reply asking the user which branch context they want to target (e.g., "I see you want to run pytest on repo-a. Which branch context should I look into? 'main', 'dev', or another branch?").
+- Only select "run_static_analysis" and populate active_rules if the branch name is explicitly provided in the text or clearly inherited from previous session baseline memory logs.
 
 ### INTENT PARSING AND MAPPING BOUNDARY RULES
 - "create_workspace": Select this if the user wants to group fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts (e.g., "repo-a").
 - "run_static_analysis": Select this intent ONLY if the user uses explicit, active commands ordering you to kick off, launch, run, or execute a test block run immediately (e.g., "Run pytest now", "Execute security audit"). You MUST populate the active_rules array mapping strategies to their target repositories.
 - "technical_query": Select this intent if the user is asking a general question about options, capabilities, configurations, or checking what is possible without explicitly ordering a live execution run right now (e.g., "Can you run tests?", "How do I check types?"). When this intent is selected, the active_rules list MUST remain empty.
 - Deduce smart engineering defaults if specific parameters or repository targets are omitted from the request context.
+
+### UI LAYOUT CODES:
+Set 'ui_layout_route' to:
+- "CHAT": Conversational chat, questions, greetings, or branch clarifications.
+- "CARD": Infrastructure changes (workspaces/repositories) with no testing tools.
+- "TERM": Active CI/CD test runner pipelines (pytest, bandit, pip_audit, ruff, AST) are triggered.
+
 """
 
 
@@ -453,31 +467,38 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         user = User.objects.get(pk=user_id)
         session, _ = ChatSession.objects.get_or_create(pk=session_id, defaults={"user": user})
         past_messages = list(session.messages.all().order_by('created_at')[:15])
+        past_messages.reverse()
 
-    history_list = []
+    history_messages = []
     for msg in past_messages:
-        history_list.append({
-            "role": msg.role,
-            "text": msg.content
-        })
-    
-    print("atitude")
-    toon_history_memory = encode(history_list)
-    print("iti")
-    print(history_list)
-    print("")
-    print(toon_history_memory)
+        if msg.role == "user":
+            history_messages.append(
+                HumanMessage(content=msg.content)
+            )
+        elif msg.role == "ai":
+            history_messages.append(
+                AIMessage(content=msg.content)
+            )
 
-    master_system_prompt = f"""
-        {system_instruction_text}
+    # print("atitude")
+    # toon_history_memory = encode(history_list)
+    # print("iti")
+    # print(history_list)
+    # print("")
+    # print(toon_history_memory)
 
-        ### PAST CONVERSATION STATE LOGS (TOON):
-        {{toon_history}}
-    """
+    # master_system_prompt = f"""
+    #     {system_instruction_text}
+
+    #     ### PAST CONVERSATION STATE LOGS (TOON):
+    #     {{toon_history}}
+    # """
 
     # Assemble your structural Prompt Template using ONE clean system message entry
     prompt_template = ChatPromptTemplate.from_messages([
-        ("system", master_system_prompt),
+        ("system", system_instruction_text),
+        # 🚀 THE NATIVE FIX: Pass history as an explicit, independent structural message entry block!
+        MessagesPlaceholder(variable_name="history"),
         ("human", "{input}")                                        
     ])
 
@@ -498,7 +519,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         # -------------------------------------------------------------------------
         with get_openai_callback() as cb:
             result = cast(OrchestratorAction , chain.invoke({
-                "toon_history": toon_history_memory, 
+                "history": history_messages, 
                 "input": prompt_text.strip()
             }))
             
@@ -534,14 +555,18 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
                 
                 # 3. 🌱 THE SEED: Save the LLM's own high-utility condensed text summary
                 # This becomes the single baseline row memory anchor for the next message turn!
-                summary_marker = f"PREVIOUS_SESSION_CONTEXT_SUMMARY: {result.condensed_history_summary}"
+                summary_marker = f"""
+                    [ACTIVE SYSTEM CONTEXT BASELINE]:
+                    The following infrastructure states were successfully verified and created by you in previous turns:
+                    {result.condensed_history_summary}
+                """
                 ChatMessage.objects.create(session=session, role="ai", content=summary_marker)
                 
                 print("🌱 New memory baseline seed successfully planted in PostgreSQL history logs.")
             else:
                 # 📥 STANDARD WORKING MEMORY: Save strings sequentially during casual Q&A phases
                 ChatMessage.objects.create(session=session, role="user", content=prompt_text)
-                ChatMessage.objects.create(session=session, role="ai", content=clean_payload_json)
+                ChatMessage.objects.create(session=session, role="ai", content=result.chat_response)
 
 
         # -------------------------------------------------------------------------
@@ -550,9 +575,12 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         # We look up the GitHub owner/username from the active authenticated user profile context
         repo_owner = user.username 
 
-        if "run_static_analysis" in result.intents and result.active_rules:
+        print(result.intents, "and", result.active_rules)
+        if "run_static_analysis" in result.intents:
             # Gather the tool names that map directly to standard runners
+            print(result.active_rules[0])
             user_rules_payload = result.active_rules[0].strategy
+            print(user_rules_payload)
             pipeline_tasks= []
             # active_rules: [{"strategy": "bandit","target_repo_names": ["repo-a","repo-b","repo-p"]}]
             
@@ -648,6 +676,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
                 "payload": {"type": "error", "message": f"Background Worker Crash: {str(e)}"}
             }
         )
+
 
 
 

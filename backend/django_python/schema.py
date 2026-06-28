@@ -5,14 +5,21 @@ class RepositoryItem(BaseModel):
     repo_name: str = Field(description="Name of the repo (e.g., 'repo-a')")
     repo_owner: str = Field(default="unknown_owner")
     repo_full_name: str = Field(description="Formatted as owner/repo_name")
+    target_branch: Optional[str] = Field(
+        default=None, 
+        description="The specific branch requested (e.g., 'main', 'staging'). Set to null or 'unknown' if not specified."
+    )
 
 class ToolStrategyMapping(BaseModel):
     strategy: str = Field(description="e.g., 'pytest', 'bandit', 'generate_django_tests'")
     target_repo_names: List[str] = Field(description="Target repos for this specific tool")
-
+    target_branch: Optional[str] = Field(
+        default=None, 
+        description="The branch context requested for this tool execution run. Set to null if unprovided."
+    )
 class WorkspaceCreationTask(BaseModel):
     new_workspace_name: str = Field(description="The workspace name to create (e.g., 'mom')")
-    associated_repo_names: List[str] = Field(description="List of repo names to put in this workspace")
+    repositories: List[str] = Field(description="List of repo names to put in this workspace")
 
 class OrchestratorAction(BaseModel):
     """
@@ -31,6 +38,9 @@ class OrchestratorAction(BaseModel):
         description="When evict_prior_history is True, compile a high-utility, short summary of the important context and execution choices from the past casual turns to act as the lone seed for future memory."
     )
     
+    ui_layout_route: str = Field(
+        description="Select layout mode code. Must be: 'CHAT', 'CARD', or 'TERM'."
+    )
     chat_response: str = Field(
         description="Your natural, friendly response explaining your actions and technical insights."
     )
