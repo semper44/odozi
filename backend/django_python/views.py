@@ -205,11 +205,34 @@ def dashboard_view(request):
 
 
         # Parse data defensively mapping dict properties safely
-        cleaned_repos = [{
-            "id": r.get("id"),
-            "name": r.get("name"),
-            "full_name": r.get("full_name")
-        } for r in repositories_data if isinstance(r, dict)]
+        # cleaned_repos = [{
+        #     "id": r.get("id"),
+        #     "name": r.get("name"),
+        #     "full_name": r.get("full_name")
+        # } for r in repositories_data if isinstance(r, dict)]
+        
+        cleaned_repos = []
+        # for easy access in tasks.py
+        repo_names = []
+        for r in repositories_data:
+            # 1. Defensive type check
+            if not isinstance(r, dict):
+                continue
+                
+            name = r.get("name")
+            
+            # 2. Append to full structured list
+            cleaned_repos.append({
+                "id": r.get("id"),
+                "name": name,
+                "full_name": r.get("full_name")
+            })
+            
+            # 3. Simultaneously append to the flat name list
+            if name:
+                repo_names.append(name)
+
+
 
         try:
             db_user = User.objects.get(pk=user_id)
@@ -230,6 +253,7 @@ def dashboard_view(request):
         user_details = {
             "repositories": cleaned_repos,
             "repo_selection":serialized_repo_selection,
+            "repo_names":repo_names,
             # "my_jwt_access_token": token_string,
             # "my_jwt_access_refresh": token_refresh_string,
             "github_access_token": github_access_token,
@@ -242,6 +266,10 @@ def dashboard_view(request):
         if github_res_status == 200:
             cache.set(details_cache_key, user_details, timeout=3600)
             print(f"💾 [REDIS] Successfully cached repository state array for user '{username}'.")
+
+        details_cache_key = f"user:repos:{user_id}"
+        cached_repos = cache.get(details_cache_key)
+        print("cacheee",  cached_repos)
 
 
         response = JsonResponse({
@@ -332,17 +360,12 @@ class CreateWorkspaceView(APIView):
     )
     def post(self, request, *args, **kwargs):
         repo_list = request.data.get('repositories', [])
+        new_repo_instances = []
         user = request.user
         # user = User.objects.get(pk = 1)
         print("repos", repo_list)
         new_workspace_name = request.data.get('new_workspace_name') # Can be a string name or None
         print("ewo", new_workspace_name)
-        if not repo_list or not isinstance(repo_list, list):
-            print("1 error")
-            return Response(
-                {"error": "Malformed payload structure. 'repositories' must be a non-empty list."}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
         try:
             with transaction.atomic():              
@@ -372,40 +395,41 @@ class CreateWorkspaceView(APIView):
 
                 # --- VALIDATE & MASS BULK INSERT REPOSITORIES ---
                 print(555)
-                serializer = GitHubRepositorySerializer(data=repo_list, many=True)
-                if not serializer.is_valid():
-                    print(serializer.errors)
-                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                if repo_list:
+                    serializer = GitHubRepositorySerializer(data=repo_list, many=True)
+                    if not serializer.is_valid():
+                        print(serializer.errors)
+                        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-                validated_data_list = serializer.validated_data
-                print(444, validated_data_list)
-                incoming_ids = [item['repo_id'] for item in validated_data_list]
-                print(6666, incoming_ids)
-                existing_ids = set(GitHubRepository.objects.filter(
-                    repo_id__in=incoming_ids
-                ).values_list('repo_id', flat=True))
+                    validated_data_list = serializer.validated_data
+                    print(444, validated_data_list)
+                    incoming_ids = [item['repo_id'] for item in validated_data_list]
+                    print(6666, incoming_ids)
+                    existing_ids = set(GitHubRepository.objects.filter(
+                        repo_id__in=incoming_ids
+                    ).values_list('repo_id', flat=True))
 
-                new_repo_instances = []
-                print(5555, existing_ids)
-                for data in validated_data_list:
-                    if data['repo_id'] in existing_ids:
-                        continue
+                    
+                    print(5555, existing_ids)
+                    for data in validated_data_list:
+                        if data['repo_id'] in existing_ids:
+                            continue
 
-                    new_repo_instances.append(
-                        GitHubRepository(
-                            workspace=workspace,
-                            repo_id=data['repo_id'], # Ensure your model fields map properly
-                            repo_name=data['repo_name'],
-                            repo_owner=data['repo_owner'],
-                            repo_full_name=data['repo_full_name']
+                        new_repo_instances.append(
+                            GitHubRepository(
+                                workspace=workspace,
+                                repo_id=data['repo_id'], # Ensure your model fields map properly
+                                repo_name=data['repo_name'],
+                                repo_owner=data['repo_owner'],
+                                repo_full_name=data['repo_full_name']
+                            )
                         )
-                    )
 
-                if new_repo_instances:
-                    GitHubRepository.objects.bulk_create(new_repo_instances)
+                    if new_repo_instances:
+                        GitHubRepository.objects.bulk_create(new_repo_instances)
 
-                # Evict user's repository state array from Redis cache so dashboard re-syncs instantly
-                cache.delete(f"user:repos:{request.user.id}")
+                    # Evict user's repository state array from Redis cache so dashboard re-syncs instantly
+                    cache.delete(f"user:repos:{request.user.id}")
 
                 return Response({
                     "status": "success",
@@ -469,7 +493,6 @@ class DeleteUserSelectedRepos(APIView):
 
         if deleted_count == 0:
             return Response({"error": "No matching repositories found or access denied."}, status=404)
-
 
 
 

@@ -28,6 +28,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 self.channel_name
             )
 
+
     async def receive(self, text_data=None, bytes_data=None):
         if not text_data:
             return
@@ -68,6 +69,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         except json.JSONDecodeError:
             print("🚨 Malformed socket frame payload dropped.")
+
 
     async def chat_message(self, event):
         """

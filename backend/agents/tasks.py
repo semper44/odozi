@@ -456,6 +456,75 @@ Set 'ui_layout_route' to:
 
 
 
+
+@shared_task
+def parallel_handle_static_analysis_task(result_data, user_id, repo_owner):
+    """
+    🚀 TRUE INTENT PARALLELISM: This block now runs on its own independent worker thread.
+    It handles all repository signature gathering and concurrent cloud dispatches
+    without causing any lag to your database workspace creation steps!
+    """
+    pipeline_tasks = []
+
+    # 1. Fetch and secure your repository cache guardrails layers defensively
+    print(user_id)
+    details_cache_key = f"user:repos:{user_id}"
+    cached_details = cache.get(details_cache_key)
+    
+    if not cached_details or not isinstance(cached_details, dict):
+        print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
+        cached_details = {}
+        
+    cached_repos = cached_details.get("repositories", {})
+    cached_repos_set = set(cached_repos.get('repo_names', []))
+
+    # 2. Extract tools and match parameters exactly as your stitching machine reads
+    user_rules_payload = []
+    for rule in result_data.get("active_rules", []):
+        strategy = rule.get("strategy")
+        if strategy not in ["pytest", "bandit", "pip_audit", "ruff"]:
+            rule_params = getattr(rule, "params", {}) or {}
+            user_rules_payload.append({
+                "rule_key": strategy,
+                "params": rule_params     
+            })
+
+    # 3. Loop through your rules list to build the parallel execution signature arrays
+    for rule in result_data.get("active_rules", []):
+        # Handle rule formatting checks securely
+        rule_repo_name = rule.get("repo_name")
+        
+        if rule_repo_name in cached_repos_set:
+            print("rule.repo_name", rule_repo_name)
+            sanitized_name = rule_repo_name.lower().replace(" ", "-").strip()
+            print("sanitized_name", sanitized_name)
+            
+            try:
+                # Append the task signature context blocks to the array list
+                pipeline_tasks.append(
+                    run_agentic_pipeline.s( 
+                        repo_owner=repo_owner,
+                        repo_name=sanitized_name,
+                        default_branch="main",
+                        repo_data={},
+                        commit_sha="main", 
+                        target_branch=rule.get("target_branch") or "main",
+                        ref_string=f"refs/heads/{rule.get('target_branch') or 'main'}",
+                        installation_id="repo_obj.installation_id", 
+                        user_requested_rules=user_rules_payload
+                    )
+                )
+            except Exception:
+                pass
+
+    # 4. Fire all repository pipelines concurrently across your servers
+    if pipeline_tasks:
+        group(pipeline_tasks).apply_async()
+        print(f"🎉 Bulk signature queue launched concurrently for {len(pipeline_tasks)} targets.")
+
+
+
+
 @shared_task
 def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_text, repos, provider, model_name, api_key):
     channel_layer = get_channel_layer()
@@ -569,6 +638,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
                 ChatMessage.objects.create(session=session, role="ai", content=result.chat_response)
 
 
+
         # -------------------------------------------------------------------------
         # 🚀 BRIDGE PLUG: INTERCEPT THE DESIGN INTENTS & TRIGGER YOUR CORE PIPELINE
         # -------------------------------------------------------------------------
@@ -578,27 +648,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         print(result.intents, "and", result.active_rules)
         if "run_static_analysis" in result.intents:
             # Gather the tool names that map directly to standard runners
-            print(result.active_rules[0])
-            user_rules_payload = result.active_rules[0].strategy
-            print(user_rules_payload)
             pipeline_tasks= []
-            # active_rules: [{"strategy": "bandit","target_repo_names": ["repo-a","repo-b","repo-p"]}]
-            
-            # for rule in result.active_rules:
-            #     if rule.strategy in ["pytest", "bandit", "pip_audit", "ruff"]:
-            #         selected_tools.append(rule.strategy)
-            #     else:
-            #         # If it matches an AST checker, append to custom payload
-            #         rule_params = getattr(rule, "params", {}) or {}
-            #         user_rules_payload.append({
-            #             "rule_key": rule.strategy,
-            #             "params": rule_params     
-            #         })
-
-            # if user_rules_payload:
-            #     selected_tools.append("odozi_visitors")
-
-            # final_tools_list = list(set(selected_tools))
 
             # Triggering existing pipeline task for every repository target the AI extracted
             print(user_id)
@@ -608,27 +658,26 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
                 print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
                 cached_details = {}
             cached_repos = cached_details.get("repositories", {})
+            cached_repos_set = set(cached_repos['repo_names'])
 
-            for target_repo in cached_repos:
-                print("target_repo", target_repo)
-                sanitized_name = target_repo.lower().replace(" ", "-").strip()
-                if target_repo in result.selected_repo_names:
+            for rule in result.active_rules:
+                if rule.repo_name in cached_repos_set:
+                    print("rule.repo_name", rule.repo_name)
+                    sanitized_name = rule.repo_name.lower().replace(" ", "-").strip()
+                    print("sanitized_name", sanitized_name)
                     try:
-                        repo_merge = f"{repo_owner}/{sanitized_name}"
-                        repo_obj = GitHubRepository.objects.get(repo_name=repo_merge)
-                        
                         # Append the task signature context blocks to the array list
                         pipeline_tasks.append(
                             run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
                                 repo_owner=repo_owner,
                                 repo_name=sanitized_name,
-                                default_branch=repo_obj.default_branch or "main",
+                                default_branch="main",
                                 repo_data = {},
-                                commit_sha=repo_obj.latest_commit_sha or "main",
-                                target_branch=repo_obj.default_branch or "main",
-                                ref_string=f"refs/heads/{repo_obj.default_branch}",
-                                installation_id=repo_obj.installation_id,
-                                user_requested_rules=user_rules_payload
+                                commit_sha="main", #work
+                                target_branch=rule.target_branch or "main",
+                                ref_string=f"refs/heads/{rule.target_branch}",
+                                installation_id="repo_obj.installation_id", #work
+                                user_requested_rules=rule.strategies
                             )
                         )
                     except GitHubRepository.DoesNotExist:
@@ -638,6 +687,9 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             if pipeline_tasks:
                 group(pipeline_tasks).apply_async()
                 print(f"🎉 Bulk signature queue launched concurrently for {len(pipeline_tasks)} targets.")
+
+        if "create_workspace" in result.intents:
+            workspace = result.workspaces_to_create
 
         # -------------------------------------------------------------------------
         # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)

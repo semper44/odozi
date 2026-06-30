@@ -21,6 +21,12 @@ class WorkspaceCreationTask(BaseModel):
     new_workspace_name: str = Field(description="The workspace name to create (e.g., 'mom')")
     repositories: List[str] = Field(description="List of repo names to put in this workspace")
 
+class RepoExecutionRule(BaseModel):
+    repo_name: str = Field(description="Name of the repository")
+    target_branch: str = Field(default="master")
+    strategies: List[str] = Field(description="List of security strategies to run, e.g., ['bandit', 'pii_leakage']")
+
+
 class OrchestratorAction(BaseModel):
     """
     The Master Multitask Schema. Allows combinations of operations in 1 chat turn.
@@ -53,7 +59,8 @@ class OrchestratorAction(BaseModel):
     
     # Execution Mappings
     # selected_repo_names: List[str] = Field(default=[], description="All repositories involved across the entire request")
-    active_rules: List[ToolStrategyMapping] = Field(
-        default=[], 
-        description="List mapping test runners or test generation tasks to specific repositories"
+      # 🌟 NEW STRUCTURE: A flat list of repositories and their tools
+    active_rules: List[RepoExecutionRule] = Field(
+        default=[],
+        description="List of each repo and the specific strategies assigned to it."
     )
