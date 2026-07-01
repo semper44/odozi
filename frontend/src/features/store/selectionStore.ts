@@ -24,12 +24,14 @@ interface SocketState {
   statusMessage: string;
   socketError: string | null;
    activeToast: string | null;
+  streamingMessage: any | null;  // ✅ Global streaming data
   
   // Actions to mutate state from your WebSocket manager
   setConnectionStatus: (status: boolean) => void;
   setProcessingStatus: (isProcessing: boolean, message?: string) => void;
   setSocketError: (error: string | null) => void;
   triggerToastNotification: (message: string) => void;
+  setStreamingMessage: (data: any) => void;  // ✅ Action to update streaming data
   clearSocketStatus: () => void;
 }
 
@@ -83,7 +85,8 @@ export const useSocketStore = create<SocketState>((set) => ({
   isProcessing: false,
   statusMessage: '',
   socketError: null,
-  activeToast: null, 
+  activeToast: null,
+  streamingMessage: null,  // ✅ Initialize streaming data
   
 
   setConnectionStatus: (status) => set({ isConnected: status }),
@@ -96,5 +99,8 @@ export const useSocketStore = create<SocketState>((set) => ({
   clearSocketStatus: () => set({ isProcessing: false, statusMessage: '', socketError: null }),
 
   triggerToastNotification: (message) => set({ activeToast: message }),
+  
+  setStreamingMessage: (data) => set({ streamingMessage: data }),  // ✅ Action to set streaming data
+  
   clearActiveToast: () => set({ activeToast: null })
 }));

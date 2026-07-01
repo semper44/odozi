@@ -19,6 +19,7 @@ from django.db import transaction
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace, WorkspaceMembership
 from .models import UserProfileModel, RepoEnvKey, WorkflowRunHistory, ChatSession, ChatMessage
+from odozi.service import create_workspace_with_repos  
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.security import verify_signature
@@ -30,6 +31,7 @@ from .schema import OrchestratorAction
 
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
@@ -358,91 +360,29 @@ class CreateWorkspaceView(APIView):
             500: OpenApiResponse(description="Transaction failure"),
         },
     )
+    
     def post(self, request, *args, **kwargs):
         repo_list = request.data.get('repositories', [])
-        new_repo_instances = []
-        user = request.user
-        # user = User.objects.get(pk = 1)
-        print("repos", repo_list)
-        new_workspace_name = request.data.get('new_workspace_name') # Can be a string name or None
-        print("ewo", new_workspace_name)
+        new_workspace_name = request.data.get('new_workspace_name')
 
         try:
-            with transaction.atomic():              
-                # --- PATH B: CREATE A NEW WORKSPACE ON THE FLY ---
-                print(1111)
-                if new_workspace_name and str(new_workspace_name).strip():
+            result = create_workspace_with_repos(
+                user=request.user,
+                workspace_name=new_workspace_name,
+                repositories_data=repo_list
+            )
+            return Response({
+                "status": "success",
+                "message": f"Successfully processed {result['total_processed']} repositories.",
+                "workspace_id": result['workspace_id'],
+                "workspace_name": result['workspace_name'],
+                "saved_count": result['saved_count']
+            }, status=status.HTTP_201_CREATED)
 
-                    print("johhrr", new_workspace_name.strip(), user, "ppp")
-                    workspace, created = Workspace.objects.get_or_create(
-                        name=new_workspace_name.strip(),
-                        owner=user,
-                        defaults={
-                            "github_account_name": user.username,
-                        }
-                    )
-                    print("yoowaaa", created, workspace.name)
-
-                    if created:
-                        print("created")
-                        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=user)
-                else:
-                    print("errorr")
-                    return Response(
-                        {"error": "Must provide either an existing 'workspace_id' or a 'new_workspace_name'."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-                # --- VALIDATE & MASS BULK INSERT REPOSITORIES ---
-                print(555)
-                if repo_list:
-                    serializer = GitHubRepositorySerializer(data=repo_list, many=True)
-                    if not serializer.is_valid():
-                        print(serializer.errors)
-                        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-                    validated_data_list = serializer.validated_data
-                    print(444, validated_data_list)
-                    incoming_ids = [item['repo_id'] for item in validated_data_list]
-                    print(6666, incoming_ids)
-                    existing_ids = set(GitHubRepository.objects.filter(
-                        repo_id__in=incoming_ids
-                    ).values_list('repo_id', flat=True))
-
-                    
-                    print(5555, existing_ids)
-                    for data in validated_data_list:
-                        if data['repo_id'] in existing_ids:
-                            continue
-
-                        new_repo_instances.append(
-                            GitHubRepository(
-                                workspace=workspace,
-                                repo_id=data['repo_id'], # Ensure your model fields map properly
-                                repo_name=data['repo_name'],
-                                repo_owner=data['repo_owner'],
-                                repo_full_name=data['repo_full_name']
-                            )
-                        )
-
-                    if new_repo_instances:
-                        GitHubRepository.objects.bulk_create(new_repo_instances)
-
-                    # Evict user's repository state array from Redis cache so dashboard re-syncs instantly
-                    cache.delete(f"user:repos:{request.user.id}")
-
-                return Response({
-                    "status": "success",
-                    "message": f"Successfully processed {len(repo_list)} repositories.",
-                    "workspace_id": workspace.id,
-                    "workspace_name": workspace.name,
-                    "saved_count": len(new_repo_instances)
-                }, status=status.HTTP_201_CREATED)
-
+        except ValidationError as e:
+            return Response({"error": e.detail}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": f"Transaction failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 class DeleteUserSelectedRepos(APIView):
     """Delete selected repositories from the authenticated user's accessible workspaces."""

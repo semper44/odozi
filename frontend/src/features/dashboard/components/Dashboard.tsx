@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, Plus } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
+import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMessage";
 import { useSelectionStore } from "../../store/selectionStore";
 import { useLLMStore } from "../../store/selectionStore";
 import { useSocketStore  } from "../../store/selectionStore";
@@ -34,14 +35,20 @@ export default function Dashboard() {
     const [envShowModal, setEnvShowModal] = useState(false);
     const [showLlmModal, setShowLlmModal] = useState(false);
     const [prompt, setPrompt] = useState("");
-    const { sendMessage } = useStreamingSocket();
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    // const isProcessing = useSocketStore((state) => state.isProcessing);
+    // const statusMessage = useSocketStore((state) => state.statusMessage);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedWorkspace, setSelectedWorkspace] = useState(""); // "" means "All Workspaces"
+    const [isModalOpen, setIsModalOpen] = useState(false)
 
     const selected = useSelectionStore((state) => state.selected);
     const useCreateRepos = useCreateReposMutation();
     const useCreateEnv = useCreateEnvKeysMutation();
-    const [isModalOpen, setIsModalOpen] = useState(false)
+    const socketError = useSocketStore((state) => state.socketError);
+    const streamingMessage = useSocketStore((state) => state.streamingMessage);  // ✅ Access from store
+    const { sendMessage } = useStreamingSocket();
+
     console.log(selected, "selected repos in dashboard")
     
     const {
@@ -49,6 +56,16 @@ export default function Dashboard() {
         isLoading,
         error,
     } = useRepos();
+
+
+    
+    // ✅ Console log streaming messages in Dashboard
+    useEffect(() => {
+        if (streamingMessage) {
+            console.log("🎯 Dashboard caught streaming packet:", streamingMessage);
+        }
+    }, [streamingMessage]);
+
     console.log( "alagbara", data?.expires_at)
     localStorage.setItem("gh_token_expires_at", data?.expires_at);
     const get_time_obj = localStorage.getItem("jwt_token_expires_at");
@@ -90,7 +107,6 @@ export default function Dashboard() {
     const activeToast = useSocketStore((state) => state.activeToast);
 
    
-
 
     const handleCreateWorkspace = (modalPayload: { workspaceName: string }) => {
         console.log("manage")
@@ -209,6 +225,14 @@ const createEnvVar = (keyList: string[], workspace:string) => {
     setIsProcessingRequest(true);
     setIsAiOpen(false);
     console.log(activeModel,"buzz",activeProvider, "77")
+
+    // Append user bubble instantly to the UI tree layout
+    const newUserMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      sender: "user",
+      text: cleanedInput,
+    };
+    setMessages((prev) => [...prev, newUserMessage]);
 
     sendMessage({
         type: "start_processing",
@@ -449,10 +473,18 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                 </div>}
 
                                 {/* live terminal component */}
-                                {(isProcessingRequest && !isAiOpen) && (
+                                {(isProcessingRequest && !isAiOpen ) && (
+                                    streamingMessage?.ui_layout_route === "TERM"?
                                     <div className="w-full h-[80%]">
                                         <LiveTerminal />
+                                    </div> : 
+                                    <div className="w-full h-[80%]">
+                                        <AIChat 
+                                            onSendMessage={handleSendRequest} 
+                                            isAiLoading={false} 
+                                        />
                                     </div>
+                                    
                                 )}
 
                             </div>

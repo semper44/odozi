@@ -19,8 +19,11 @@ from celery import shared_task, group, chord
 from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
+
 from account_profile.models import GitHubRepository, Workspace
 from django_python.schema import OrchestratorAction 
+
+from odozi.service import create_workspace_with_repos
 
 
 from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage
@@ -646,51 +649,93 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         repo_owner = user.username 
 
         print(result.intents, "and", result.active_rules)
+        details_cache_key = f"user:repos:{user_id}"
+        cached_details = cache.get(details_cache_key)
+        if not cached_details or not isinstance(cached_details, dict):
+            print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
+            cached_details = {}
+        cached_repos = cached_details.get("repositories", {})
+        
+        # 2. BuildIing concurrent execution canvas signature list array
+        intent_signatures = []
+
+
         if "run_static_analysis" in result.intents:
-            # Gather the tool names that map directly to standard runners
-            pipeline_tasks= []
-
-            # Triggering existing pipeline task for every repository target the AI extracted
-            print(user_id)
-            details_cache_key = f"user:repos:{user_id}"
-            cached_details = cache.get(details_cache_key)
-            if not cached_details or not isinstance(cached_details, dict):
-                print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
-                cached_details = {}
-            cached_repos = cached_details.get("repositories", {})
-            cached_repos_set = set(cached_repos['repo_names'])
-
-            for rule in result.active_rules:
-                if rule.repo_name in cached_repos_set:
-                    print("rule.repo_name", rule.repo_name)
-                    sanitized_name = rule.repo_name.lower().replace(" ", "-").strip()
-                    print("sanitized_name", sanitized_name)
-                    try:
-                        # Append the task signature context blocks to the array list
-                        pipeline_tasks.append(
-                            run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
-                                repo_owner=repo_owner,
-                                repo_name=sanitized_name,
-                                default_branch="main",
-                                repo_data = {},
-                                commit_sha="main", #work
-                                target_branch=rule.target_branch or "main",
-                                ref_string=f"refs/heads/{rule.target_branch}",
-                                installation_id="repo_obj.installation_id", #work
-                                user_requested_rules=rule.strategies
-                            )
-                        )
-                    except GitHubRepository.DoesNotExist:
-                        pass
-
-            # 🚀 BULK TRIGGER: Fire all task pipelines concurrently in microseconds!
-            if pipeline_tasks:
-                group(pipeline_tasks).apply_async()
-                print(f"🎉 Bulk signature queue launched concurrently for {len(pipeline_tasks)} targets.")
+            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER!
+            from celery import signature
+            
+            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
+            # You pass the task path name string and your parameters directly inside signature()
+            intent_signatures.append(
+                signature(
+                    "agents.tasks.async_handle_static_analysis_task",
+                    args=(result, user_id, cached_repos) # 📥 Pass your variables as an ordered tuple
+                )
+            )
 
         if "create_workspace" in result.intents:
-            workspace = result.workspaces_to_create
+            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
+            from celery import signature
+            
+            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
+            # You pass the task path name string and your parameters directly inside signature()
+            intent_signatures.append(
+                signature(
+                    "agents.tasks.async_handle_workspace_creation_task",
+                    args=(result, user_id, cached_repos) # 📥 Pass your variables as an ordered tuple
+                )
+            )
 
+        # Fire both intent tasks concurrently in microseconds
+        if intent_signatures:
+            group(intent_signatures).apply_async()
+
+
+
+        # if "run_static_analysis" in result.intents:
+        #     # Gather the tool names that map directly to standard runners
+        #     pipeline_tasks= []
+
+        #     # Triggering existing pipeline task for every repository target the AI extracted
+        #     print(user_id)
+            
+        #     for rule in result.active_rules:
+        #         if rule.repo_name in cached_repos_set:
+        #             print("rule.repo_name", rule.repo_name)
+        #             sanitized_name = rule.repo_name.lower().replace(" ", "-").strip()
+        #             print("sanitized_name", sanitized_name)
+        #             try:
+        #                 # Append the task signature context blocks to the array list
+        #                 pipeline_tasks.append(
+        #                     run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
+        #                         repo_owner=repo_owner,
+        #                         repo_name=sanitized_name,
+        #                         default_branch="main",
+        #                         repo_data = {},
+        #                         commit_sha="main", #work
+        #                         target_branch=rule.target_branch or "main",
+        #                         ref_string=f"refs/heads/{rule.target_branch}",
+        #                         installation_id="repo_obj.installation_id", #work
+        #                         user_requested_rules=rule.strategies
+        #                     )
+        #                 )
+        #             except GitHubRepository.DoesNotExist:
+        #                 pass
+
+        #     # 🚀 BULK TRIGGER: Fire all task pipelines concurrently in microseconds!
+        #     if pipeline_tasks:
+        #         group(pipeline_tasks).apply_async()
+        #         print(f"🎉 Bulk signature queue launched concurrently for {len(pipeline_tasks)} targets.")
+
+        # if "create_workspace" in result.intents:
+        #     repos_found=[]
+        #     workspace_details = result.workspaces_to_create[0]
+        #     for item in workspace_details.repositories:
+        #         if item in cached_repos_set:
+        #             repos_found.append(item)
+        #     create_workspace_with_repos(user, workspace_details.new_workspace_name, repos_found)
+
+       
         # -------------------------------------------------------------------------
         # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
         # -------------------------------------------------------------------------
@@ -728,6 +773,116 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
                 "payload": {"type": "error", "message": f"Background Worker Crash: {str(e)}"}
             }
         )
+
+
+
+@shared_task
+def async_handle_static_analysis_task(result_data, user_id, repo_owner, parent_repo_list):
+    """
+    Runs in parallel. Reads the repo list straight out of RAM memory parameters,
+    requiring ZERO outbound network connections to Redis!
+    """
+    # Convert the passed parameter directly into a lookup set array
+    cached_repos_set = set(parent_repo_list['repo_names'])
+
+    pipeline_tasks = []
+    
+    # Process your rules...
+    # user_rules_payload = []
+    # for rule in result_data.get("active_rules", []):
+    #     strategy = rule.get("strategy")
+    #     if strategy not in ["pytest", "bandit", "pip_audit", "ruff"]:
+    #         user_rules_payload.append({
+    #             "rule_key": strategy,
+    #             "params": rule.get("params", {}) or {}
+    #         })
+
+    # Build repository signature queues
+    # for rule in result_data.get("active_rules", []):
+    #     for target_repo in rule.get("target_repo_names", []):
+    #         sanitized_name = target_repo.lower().replace(" ", "-").strip()
+            
+    #         if sanitized_name in cached_repos_set:
+    #             try:
+    #                 repo_obj = GitHubRepository.objects.get(repo_name=f"{repo_owner}/{sanitized_name}")
+    #                 target_branch = rule.get("target_branch") or repo_obj.default_branch or "main"
+                    
+    #                 pipeline_tasks.append(
+    #                     run_agentic_pipeline.s(
+    #                         repo_owner=repo_owner,
+    #                         repo_name=sanitized_name,
+    #                         default_branch=repo_obj.default_branch or "main",
+    #                         repo_data={},
+    #                         commit_sha=repo_obj.latest_commit_sha or "main",
+    #                         target_branch=target_branch,
+    #                         ref_string=f"refs/heads/{target_branch}",
+    #                         installation_id=repo_obj.installation_id,
+    #                         user_requested_rules=user_rules_payload
+    #                     )
+    #                 )
+    #             except GitHubRepository.DoesNotExist:
+    #                 pass
+
+
+
+    for rule in result_data.active_rules:
+        if rule.repo_name in cached_repos_set:
+            print("rule.repo_name", rule.repo_name)
+            sanitized_name = rule.repo_name.lower().replace(" ", "-").strip()
+            print("sanitized_name", sanitized_name)
+            try:
+                # Append the task signature context blocks to the array list
+                pipeline_tasks.append(
+                    run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
+                        repo_owner=repo_owner,
+                        repo_name=sanitized_name,
+                        default_branch="main",
+                        repo_data = {},
+                        commit_sha="main", #work
+                        target_branch=rule.target_branch or "main",
+                        ref_string=f"refs/heads/{rule.target_branch}",
+                        installation_id="repo_obj.installation_id", #work
+                        user_requested_rules=rule.strategies
+                    )
+                )
+            except GitHubRepository.DoesNotExist:
+                pass
+
+    # 🚀 BULK TRIGGER: Fire all task pipelines concurrently in microseconds!
+    if pipeline_tasks:
+        group(pipeline_tasks).apply_async()
+
+
+
+@shared_task
+def async_handle_workspace_creation_task(result_data, user_id, parent_repo_list):
+    """
+    Runs in parallel with zero cache lag hooks.
+    """
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return
+
+    cached_repos_set = set(parent_repo_list['repo_names'])
+    print("result_data", result_data)
+
+    workspaces = result_data.get("workspaces_to_create", [])
+    if workspaces:
+        # Since workspaces_to_create is an array list of objects, we grab the first target row
+        workspace_details = workspaces[0] if isinstance(workspaces, list) else workspaces
+        
+        repos_found = []
+        for item in workspace_details.get("repositories", []):
+            sanitized_item = item.lower().replace(" ", "-").strip()
+            if sanitized_item in cached_repos_set:
+                repos_found.append(sanitized_item)
+                
+        # Fire your database workspace creation code logic natively!
+        create_workspace_with_repos(user, workspace_details.get("new_workspace_name"), repos_found)
+    else:
+        pass
+
 
 
 

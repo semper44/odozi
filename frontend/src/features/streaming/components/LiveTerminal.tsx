@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
+import { useSocketStore } from "@/features/store/selectionStore";
 import { Terminal, Shield, Trash2, ArrowDown, Loader2 } from "lucide-react";
 
 export default function LiveTerminal() {
@@ -17,12 +17,15 @@ export default function LiveTerminal() {
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
   const engineTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Bind the callback directly to your streaming web hook layout
-  useStreamingSocket((packet) => {
-    if (packet?.message?.stream_type === "live_logs") {
-      const lineBatch = packet.message.data;
-      const currentRunningTool = packet.message.tool;
-      const executionDoneMarker = packet.message.is_complete;
+  // ✅ Listen to global streaming data from store
+  const streamingMessage = useSocketStore((state) => state.streamingMessage);
+
+  useEffect(() => {
+    console.log("🎯 Dashboard caught streaming packet:", streamingMessage);
+    if (streamingMessage?.message?.stream_type === "live_logs") {
+      const lineBatch = streamingMessage.message.data;
+      const currentRunningTool = streamingMessage.message.tool;
+      const executionDoneMarker = streamingMessage.message.is_complete;
 
       if (currentRunningTool) {
         setActiveTool(currentRunningTool);
@@ -34,7 +37,7 @@ export default function LiveTerminal() {
         if (!isTyping) setIsTyping(true);
       }
     }
-  });
+  }, [streamingMessage]);
 
   // Typewriter Loop Engine Block
   useEffect(() => {

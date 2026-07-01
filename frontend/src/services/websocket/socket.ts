@@ -78,27 +78,45 @@ class SocketService {
 
     this.socket.onmessage = (event) => {
       try {
-        // const parsed = JSON.parse(event.data);
         const packet = JSON.parse(event.data);
-        console.log("packet", packet)
-        // if (this.messageCallback) {
-        //   this.messageCallback(parsed);
-        // }
+        console.log("📥 Raw Network Packet Received:", packet);
+
         if (packet.type === "status") {
-          alert("june")
           useSocketStore.getState().setProcessingStatus(true, packet.message);
+           if (this.messageCallback) {
+            this.messageCallback(packet);
+          }
         } 
         else if (packet.type === "error") {
           useSocketStore.getState().setSocketError(packet.message);
         } 
         else if (packet.type === "orchestration_result") {
-          useSocketStore.getState().setProcessingStatus(false); // Done computing!
-          if (this.messageCallback) this.messageCallback(packet);
+          useSocketStore.getState().setProcessingStatus(false);
+
+          let cleanPayload = packet;
+
+          // 🌟 SENIOR FIX: If the engine wraps the output as a stringified string, unpack it here
+          if (packet.raw_output && typeof packet.raw_output === "string") {
+            try {
+              cleanPayload = JSON.parse(packet.raw_output);
+            } catch (parseErr) {
+              console.error("🚨 Failed unpacking nested raw_output string payload frame:", parseErr);
+            }
+          }
+
+          // ✅ Dispatch to global store so ANY component can access it
+          useSocketStore.getState().setStreamingMessage(cleanPayload);
+          
+          // ✅ Also fire callback if listener exists (for backward compatibility)
+          if (this.messageCallback) {
+            this.messageCallback(cleanPayload);
+          }
         }
       } catch (err) {
         console.error("⚠️ Failed parsing incoming WebSocket JSON data frame payload:", err);
       }
     };
+
   }
 
   private scheduleReconnect() {
