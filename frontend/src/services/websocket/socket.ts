@@ -2,6 +2,7 @@
 import type { StreamingMessage } from "./types";
 import { useSocketStore } from "@/features/store/selectionStore"
 import { toast } from 'react-toastify';
+import TestRepoEndpoint from "../../features/dashboard/components/ui/TestRepoEndpoint";
 
 interface SocketConfig {
   baseUrl: string;
@@ -82,12 +83,12 @@ class SocketService {
         console.log("📥 Raw Network Packet Received:", packet);
 
         if (packet.type === "status") {
-          useSocketStore.getState().setProcessingStatus(true, packet.message);
-           if (this.messageCallback) {
-            this.messageCallback(packet);
-          }
+          // to output different stages of the llm chat and Test, whether its connecting to github or running pytest, etc
+          useSocketStore.getState().setProcessingStatus(true, packet.message || "Processing...");
         } 
+
         else if (packet.type === "error") {
+          useSocketStore.getState().setProcessingStatus(false); // Stop loading 
           useSocketStore.getState().setSocketError(packet.message);
         } 
         else if (packet.type === "orchestration_result") {

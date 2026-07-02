@@ -535,6 +535,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
     # -------------------------------------------------------------------------
     # PHASE 1: FAST DATABASE READ (Get past records instantly)
     # -------------------------------------------------------------------------
+    if 
     with transaction.atomic():
         user = User.objects.get(pk=user_id)
         session, _ = ChatSession.objects.get_or_create(pk=session_id, defaults={"user": user})
@@ -614,7 +615,8 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         # -------------------------------------------------------------------------
         # PHASE 3: CONTEXT CONVERSATION OVERHAUL & BASELINE SEEDING
         # -------------------------------------------------------------------------
-        clean_payload_json = result.model_dump_json()
+        ui_layout_route = result.ui_layout_route
+        chat_response = result.chat_response
 
         with transaction.atomic():
             if result.evict_prior_history:
@@ -669,7 +671,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_static_analysis_task",
-                    args=(result, user_id, cached_repos) # 📥 Pass your variables as an ordered tuple
+                    args=(result, repo_owner, cached_repos) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -739,7 +741,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         # -------------------------------------------------------------------------
         # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
         # -------------------------------------------------------------------------
-        print("coat", channel_name, "swaaaaa")
+        print("coat", "swaaaaa")
         
         # 🚀 FIXED: Swapped from .send to .group_send to connect to group_user_room static strings safely!
         async_to_sync(channel_layer.group_send)(
@@ -748,7 +750,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
                 "type": "chat_message",
                 "payload": {
                     "type": "orchestration_result",
-                    "raw_output": clean_payload_json,
+                    "raw_output": {"ui_layout_route":ui_layout_route, "chat_response":chat_response},
                     "usage": {
                         "input_tokens": prompt_tokens,
                         "output_tokens": completion_tokens,
@@ -777,7 +779,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
 
 
 @shared_task
-def async_handle_static_analysis_task(result_data, user_id, repo_owner, parent_repo_list):
+def async_handle_static_analysis_task(result_data, repo_owner, parent_repo_list):
     """
     Runs in parallel. Reads the repo list straight out of RAM memory parameters,
     requiring ZERO outbound network connections to Redis!

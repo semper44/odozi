@@ -36,8 +36,6 @@ export default function Dashboard() {
     const [showLlmModal, setShowLlmModal] = useState(false);
     const [prompt, setPrompt] = useState("");
     const [messages, setMessages] = useState<ChatMessage[]>([]);
-    // const isProcessing = useSocketStore((state) => state.isProcessing);
-    // const statusMessage = useSocketStore((state) => state.statusMessage);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedWorkspace, setSelectedWorkspace] = useState(""); // "" means "All Workspaces"
     const [isModalOpen, setIsModalOpen] = useState(false)
@@ -47,7 +45,22 @@ export default function Dashboard() {
     const useCreateEnv = useCreateEnvKeysMutation();
     const socketError = useSocketStore((state) => state.socketError);
     const streamingMessage = useSocketStore((state) => state.streamingMessage);  // ✅ Access from store
-    const { sendMessage } = useStreamingSocket();
+    const isProcessing = useSocketStore((state) => state.isProcessing);
+    // const statusMessage = useSocketStore((state) => state.statusMessage);
+    const { sendMessage } = useStreamingSocket((packet) => {
+        console.log(packet.raw_output.chat_response, "🎯 Caught incoming orchestration block payload:", packet);
+        
+        if (packet.raw_output.chat_response) {
+        // Create and append the AI reply text frame
+        const newAiMessage: ChatMessage = {
+            id: crypto.randomUUID(),
+            sender: "ai",
+            text: packet.raw_output.chat_response,
+        };
+        
+        setMessages((prev) => [...prev, newAiMessage]);
+        }
+    });
 
     console.log(selected, "selected repos in dashboard")
     
@@ -197,29 +210,47 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 };
 
 
- const handleSendRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
+ const handleSendRequest = async (textInput: string) => {
      console.log(activeToast !== null,"activetoast", activeToast)
+     console.log({"yyyyyyyyyyy":activeProvider, "activeModel":activeModel})
      if(activeProvider === '' || activeModel === ''){
          toast.error("Please fill in the LLM details first", {
-                position: "top-right",
+             position: "top-right",
                 autoClose: 4000,
                 theme: "colored"
             });
 
             return
-     }   
-     if (activeToast !== null){
-                toast.error(activeToast.message || "Gateway terminated connection: Reconnecting", {
-                position: "top-right",
-                autoClose: 4000,
-                theme: "colored"
-            });
+        }  
+    if (activeToast !== null){
+            alert(9999999)
+            toast.error(activeToast.message || "Gateway terminated connection: Reconnecting", {
+            position: "top-right",
+            autoClose: 4000,
+            theme: "colored"
+        });
 
-            return
-        }
-    const cleanedInput = prompt.trim();
-    if (!cleanedInput) return;
+        return
+    }
+
+
+    let cleanedInput;
+    if (prompt && !textInput){
+         cleanedInput = prompt.trim();
+        
+    }
+    else if(!prompt && textInput){
+         cleanedInput = textInput;
+
+    }
+    else if(!prompt && !textInput){
+        return
+    }
+
+    // alert(textInput) 
+
+    useSocketStore.getState().setProcessingStatus(true, "AI is spinning up orchestration jobs...");
+
 
     setIsPending(true);
     setIsProcessingRequest(true);
@@ -262,18 +293,6 @@ const createEnvVar = (keyList: string[], workspace:string) => {
     // }
     console.log(error, "h1osana",data)
 
-    // function SolveSendIconTasks(){
-        
-
-    //     // sending message to the websocket
-    //     sendMessage({
-    //         type: "start_processing",
-    //         repos: Array.from(selected),
-    //         prompt,
-    //     });
-    //     // clearing the input prompt
-    //     setPrompt("")
-    // }
 
     function ClickBackIconTasks(){
         if (isProcessingRequest) {
@@ -418,7 +437,6 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                             </div>
                             {/* ai-chat-placeholder */}
                             <div id="ai-chat-placeholder" className=" h-[100%] w-full justify-center items-center">
-                            <p>Request status: {isAiOpen ? "aipageon..." : "Idle"}</p>
                                 {/* chat panel */}
                                 {(isAiOpen && !isProcessingRequest) && <div className="w-full h-[80%] flex flex-col items-center">
                                     <h1 className="text-black"><span id="gradient-text" className="bg-gradient-to-r from-[#be9ee2] to-white bg-clip-text text-transparent font-bold">Hy Dear</span> This is an AI assited chat</h1>
@@ -429,43 +447,71 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                         <div className="relative w-[90%] h-[60%]">
                                                 {isPending ? (
 
-                                                    <form onSubmit={handleSendRequest} className="relative w-full">
+                                                    <div className="relative w-full">
                                                         <input 
-                                                        type="text"
-                                                        value={prompt}
-                                                        onChange={(e) => setPrompt(e.target.value)}
-                                                        placeholder="Type a message..."
-                                                        className={`pl-4 rounded-xl border w-full h-full ${isProcessingRequest ? "hidden" : ""}`} style={{borderColor: "black"}}
+                                                            type="text"
+                                                            value={prompt}
+                                                            onChange={(e) => setPrompt(e.target.value)}
+                                                            // 🌟 Captures the Enter key natively and fires the clean string text
+                                                            onKeyDown={(e) => {
+                                                            if (e.key === "Enter" && !isPending && prompt.trim()) {
+                                                                handleSendRequest(prompt);
+                                                                setPrompt(""); // Instantly clear the inline input field state
+                                                            }
+                                                            }}
+                                                            placeholder="Type a message..."
+                                                            className={`pl-4 rounded-xl border w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
+                                                            style={{ borderColor: "black" }}
                                                         />
                                                         
                                                         <button 
-                                                        type="submit" 
-                                                        id="send-icon" 
-                                                        className="animate-spin absolute top-[30%] right-[5%] cursor-pointer"
-                                                        disabled={isPending || !prompt.trim()}
+                                                            type="button" // 🌟 Changed from "submit" to "button" to avoid form triggers
+                                                            onClick={() => {
+                                                            if (!isPending && prompt.trim()) {
+                                                                handleSendRequest(prompt);
+                                                                setPrompt(""); // Clear input state on mouse click
+                                                            }
+                                                            }}
+                                                            id="send-icon" 
+                                                            className="animate-spin absolute top-[30%] right-[5%] cursor-pointer flex items-center justify-center"
+                                                            disabled={isPending || !prompt.trim()}
                                                         >
-                                                        <SendHorizontal />            
+                                                            <SendHorizontal />            
                                                         </button>
-                                                    </form>
+                                                    </div>
+
                                                     
                                                 ) : (
-                                                    <form onSubmit={handleSendRequest} className="relative w-full">
+                                                   <div className="relative w-full">
                                                         <input 
-                                                        type="text"
-                                                        value={prompt}
-                                                        onChange={(e) => setPrompt(e.target.value)}
-                                                        placeholder="Type a message..."
+                                                            type="text"
+                                                            value={prompt}
+                                                            onChange={(e) => setPrompt(e.target.value)}
+                                                            // 🌟 Capture the keyboard Enter key manually without page-reload events
+                                                            onKeyDown={(e) => {
+                                                            if (e.key === "Enter" && prompt.trim()) {
+                                                                handleSendRequest(prompt);
+                                                                setPrompt(""); // Clear out your local input box state text
+                                                            }
+                                                            }}
+                                                            placeholder="Type a message..."
                                                         />
                                                         
-                                                        {/* 🌟 Icon turned into a submit button. NO onClick handler needed! */}
                                                         <button 
-                                                        type="submit" 
-                                                        id="send-icon" 
-                                                        className="absolute top-[30%] right-[5%] cursor-pointer bg-transparent border-none p-0"
+                                                            type="button" // Changed from "submit" to "button"
+                                                            onClick={() => {
+                                                            if (prompt.trim()) {
+                                                                handleSendRequest(prompt);
+                                                                setPrompt(""); // Clear input state on mouse click
+                                                            }
+                                                            }}
+                                                            id="send-icon" 
+                                                            className="absolute top-[30%] right-[5%] cursor-pointer bg-transparent border-none p-0 flex items-center justify-center"
                                                         >
-                                                        <SendHorizontal />            
+                                                            <SendHorizontal />            
                                                         </button>
-                                                    </form>
+                                                    </div>
+
                                                 )}
                                             
                                         </div>
@@ -474,14 +520,15 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
                                 {/* live terminal component */}
                                 {(isProcessingRequest && !isAiOpen ) && (
-                                    streamingMessage?.ui_layout_route === "TERM"?
+                                    streamingMessage?.raw_output?.ui_layout_route === "TERM"?
                                     <div className="w-full h-[80%]">
                                         <LiveTerminal />
                                     </div> : 
                                     <div className="w-full h-[80%]">
                                         <AIChat 
-                                            onSendMessage={handleSendRequest} 
-                                            isAiLoading={false} 
+                                            messages={messages}
+                                            onSendMessage={(text) => handleSendRequest(text)}
+                                            isAiLoading={isProcessing} 
                                         />
                                     </div>
                                     
