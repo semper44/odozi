@@ -25,7 +25,8 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
    console.log(socketError, "🎯 Chat message:");
  
   useEffect(() => {
-    if (socketError) {
+    if (socketError && !inputValue) {
+      setInputValue(socketError)
       toast.error(socketError, {
         position: "top-right",
           autoClose: 4000,

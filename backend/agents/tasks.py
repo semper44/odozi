@@ -783,7 +783,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             channel_name,
             {
                 "type": "chat_message",
-                "payload": {"type": "error", "message": f"Background Worker Crash: {str(e)}"}
+                "payload": {"type": "error", "message": str(e)}
             }
         )
 

@@ -88,8 +88,28 @@ class SocketService {
 
         else if (packet.type === "error") {
           useSocketStore.getState().setProcessingStatus(false); // Stop loading 
-          useSocketStore.getState().setSocketError(packet.message);
-        } 
+          console.log("eche", packet);
+
+          let displayMessage = packet.message;
+
+          if (typeof displayMessage === "string") {
+            const lowerMessage = displayMessage.toLowerCase();
+            
+            // Catch-all keywords for Gemini, OpenAI, and Anthropic quota/rate errors
+            const isQuotaError = 
+              lowerMessage.includes("resource_exhausted") || 
+              lowerMessage.includes("insufficient_quota") || 
+              lowerMessage.includes("rate_limit") || 
+              lowerMessage.includes("exceeded your current quota");
+
+            if (isQuotaError) {
+              displayMessage = "⚠️ You have exceeded your LLM API daily quota limit. Please try again tomorrow or upgrade your plan.";
+            }
+          }
+
+          useSocketStore.getState().setSocketError(displayMessage);
+        }
+
         else if (packet.type === "orchestration_result") {
           useSocketStore.getState().setProcessingStatus(false);
 

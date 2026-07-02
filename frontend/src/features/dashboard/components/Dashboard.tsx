@@ -50,16 +50,18 @@ export default function Dashboard() {
         console.log(socketError, "🎯 Caught incoming orchestration block payload:", packet);
         
         if (packet.raw_output.chat_response) {
-        // Create and append the AI reply text frame
-        const newAiMessage: ChatMessage = {
-            id: crypto.randomUUID(),
-            sender: "ai",
-            text: packet.raw_output.chat_response,
-        };
-        
-        setMessages((prev) => [...prev, newAiMessage]);
+            // Create and append the AI reply text frame
+            const newAiMessage: ChatMessage = {
+                id: crypto.randomUUID(),
+                sender: "ai",
+                text: packet.raw_output.chat_response,
+            };
+            
+            setMessages((prev) => [...prev, newAiMessage]);
         }
     });
+
+
 
     console.log(selected, "selected repos in dashboard")
     
