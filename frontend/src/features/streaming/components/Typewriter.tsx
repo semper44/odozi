@@ -1,9 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import {SendHorizontal} from "lucide-react";
-import { toast } from 'react-toastify';
-import { useSocketStore  } from "../../store/selectionStore";
-
-
+import { Typewriter } from "./Typewriter";
 
 export interface ChatMessage {
   id: string;
@@ -21,23 +18,7 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
   const [inputValue, setInputValue] = useState<string>("");
   const chatBodyRef = useRef<HTMLDivElement>(null);
 
-   const socketError = useSocketStore((state) => state.socketError);
-   console.log(socketError, "🎯 Chat message:");
- 
-  useEffect(() => {
-    if (socketError) {
-      toast.error(socketError, {
-        position: "top-right",
-          autoClose: 4000,
-          theme: "colored"
-      });
-
-      return;
-    }
-}, [socketError]);
-
-
-  const scrollToBottom = () => {
+ const scrollToBottom = () => {
     if (chatBodyRef.current) {
       chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
     }
@@ -47,16 +28,20 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
     scrollToBottom();
   }, [messages, isAiLoading]);
 
-  const handleSend = () => {
-    const trimmedMessage = inputValue.trim();
-    if (!trimmedMessage) return;
+  
+ const handleSend = () => {
+    if (!inputValue) return;
 
-    onSendMessage(trimmedMessage);
-    setInputValue(""); 
+    // 🌟 Route ONLY the string payload up to the dashboard page
+    // alert(trimmedMessage)
+    onSendMessage(inputValue);
+    setInputValue(""); // Instantly clear the text box layout state
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") handleSend();
+    if (e.key === "Enter") {
+      handleSend(); // Fires your text sender logic smoothly
+    }
   };
 
 
@@ -75,7 +60,7 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
               <div className="flex gap-3 mt-2 items-center max-w-[75%]">
                 <img src="images/gradient.jpg" alt="AI Avatar" className="rounded-full w-[35px] h-[35px] object-cover" />
                 <div className="bg-blue-50 border border-blue-100 text-sm p-3 rounded-lg text-gray-800">
-                  {msg.text}
+                  <Typewriter text={msg.text} speed={15} />
                 </div>
               </div>
             )}
@@ -96,7 +81,7 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
       <div className="relative w-[70%] h-[10%] justify-self-center mx-auto">
         <input
           type="text"
-          placeholder="Chat"
+          placeholder="Ask Odozi to compile workspaces, inject keys, or run AST rules..."
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}

@@ -535,6 +535,9 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
     # -------------------------------------------------------------------------
     # PHASE 1: FAST DATABASE READ (Get past records instantly)
     # -------------------------------------------------------------------------
+    if not prompt_text:
+        return
+    
     with transaction.atomic():
         user = User.objects.get(pk=user_id)
         session, _ = ChatSession.objects.get_or_create(pk=session_id, defaults={"user": user})
@@ -614,7 +617,8 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         # -------------------------------------------------------------------------
         # PHASE 3: CONTEXT CONVERSATION OVERHAUL & BASELINE SEEDING
         # -------------------------------------------------------------------------
-        clean_payload_json = result.model_dump_json()
+        ui_layout_route = result.ui_layout_route
+        chat_response = result.chat_response
 
         with transaction.atomic():
             if result.evict_prior_history:
@@ -651,10 +655,15 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         print(result.intents, "and", result.active_rules)
         details_cache_key = f"user:repos:{user_id}"
         cached_details = cache.get(details_cache_key)
-        if not cached_details or not isinstance(cached_details, dict):
-            print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
-            cached_details = {}
-        cached_repos = cached_details.get("repositories", {})
+        print("cached_repos", 44444444444, cached_details)
+        # Check if data exists and is the correct format (list or dict of repos)
+        if cached_details is not None:
+            print(f"⚡ [CACHE HIT] Celery successfully loaded repositories for key: {details_cache_key}")
+            # Process your cached_repos directly here
+            cached_repos = cached_details.get("repositories", {})
+        else:
+            print(f"⚠️ Cache Miss for key: {details_cache_key}. Falling back to standard processing.")
+            cached_repos = {}
         
         # 2. BuildIing concurrent execution canvas signature list array
         intent_signatures = []
@@ -666,10 +675,11 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
+            serializable_rules = [rule.model_dump() for rule in result.active_rules]
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_static_analysis_task",
-                    args=(result, user_id, cached_repos) # 📥 Pass your variables as an ordered tuple
+                    args=(serializable_rules, repo_owner, cached_repos) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -679,12 +689,15 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
+            serializable_workspaces = [ws.model_dump() for ws in result.workspaces_to_create]
+
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_workspace_creation_task",
-                    args=(result, user_id, cached_repos) # 📥 Pass your variables as an ordered tuple
+                    args=(serializable_workspaces, user_id, cached_repos) # 📥 Pass your variables as an ordered tuple
                 )
             )
+
 
         # Fire both intent tasks concurrently in microseconds
         if intent_signatures:
@@ -739,7 +752,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         # -------------------------------------------------------------------------
         # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
         # -------------------------------------------------------------------------
-        print("coat", channel_name, "swaaaaa")
+        print("coat", "swaaaaa")
         
         # 🚀 FIXED: Swapped from .send to .group_send to connect to group_user_room static strings safely!
         async_to_sync(channel_layer.group_send)(
@@ -748,7 +761,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
                 "type": "chat_message",
                 "payload": {
                     "type": "orchestration_result",
-                    "raw_output": clean_payload_json,
+                    "raw_output": {"ui_layout_route":ui_layout_route, "chat_response":chat_response},
                     "usage": {
                         "input_tokens": prompt_tokens,
                         "output_tokens": completion_tokens,
@@ -777,12 +790,14 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
 
 
 @shared_task
-def async_handle_static_analysis_task(result_data, user_id, repo_owner, parent_repo_list):
+def async_handle_static_analysis_task(active_rules, repo_owner, parent_repo_list):
     """
     Runs in parallel. Reads the repo list straight out of RAM memory parameters,
     requiring ZERO outbound network connections to Redis!
     """
     # Convert the passed parameter directly into a lookup set array
+    # print(,"parent_repo_list", parent_repo_list)
+    print("active_rules", active_rules,"saure", parent_repo_list)
     cached_repos_set = set(parent_repo_list['repo_names'])
 
     pipeline_tasks = []
@@ -825,7 +840,7 @@ def async_handle_static_analysis_task(result_data, user_id, repo_owner, parent_r
 
 
 
-    for rule in result_data.active_rules:
+    for rule in active_rules:
         if rule.repo_name in cached_repos_set:
             print("rule.repo_name", rule.repo_name)
             sanitized_name = rule.repo_name.lower().replace(" ", "-").strip()
@@ -855,7 +870,7 @@ def async_handle_static_analysis_task(result_data, user_id, repo_owner, parent_r
 
 
 @shared_task
-def async_handle_workspace_creation_task(result_data, user_id, parent_repo_list):
+def async_handle_workspace_creation_task(workspaces, user_id, parent_repo_list):
     """
     Runs in parallel with zero cache lag hooks.
     """
@@ -865,9 +880,9 @@ def async_handle_workspace_creation_task(result_data, user_id, parent_repo_list)
         return
 
     cached_repos_set = set(parent_repo_list['repo_names'])
-    print("result_data", result_data)
+    print(workspaces[0],"result_data", workspaces)
 
-    workspaces = result_data.get("workspaces_to_create", [])
+    
     if workspaces:
         # Since workspaces_to_create is an array list of objects, we grab the first target row
         workspace_details = workspaces[0] if isinstance(workspaces, list) else workspaces
