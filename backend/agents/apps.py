@@ -1,1 +1,0 @@
-# Standard Django app config

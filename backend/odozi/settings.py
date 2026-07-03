@@ -73,6 +73,7 @@ INSTALLED_APPS = [
     # apps
     'account_profile',
     'django_python',
+    'general',
 
     # 3rd party
     'rest_framework',
