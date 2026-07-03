@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import {SendHorizontal} from "lucide-react";
+import { SendHorizontal } from "lucide-react"; // Adjust path to match your layout icon pack
 import { Typewriter } from "./Typewriter";
 
 export interface ChatMessage {
@@ -9,7 +9,7 @@ export interface ChatMessage {
 }
 
 interface AIChatProps {
-  messages: ChatMessage[]; // for the conversation history down
+  messages: ChatMessage[]; 
   onSendMessage: (message: string) => void;
   isAiLoading: boolean;
 }
@@ -18,7 +18,7 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
   const [inputValue, setInputValue] = useState<string>("");
   const chatBodyRef = useRef<HTMLDivElement>(null);
 
- const scrollToBottom = () => {
+  const scrollToBottom = () => {
     if (chatBodyRef.current) {
       chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
     }
@@ -28,28 +28,22 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
     scrollToBottom();
   }, [messages, isAiLoading]);
 
-  
- const handleSend = () => {
+  const handleSend = () => {
     if (!inputValue) return;
-
-    // 🌟 Route ONLY the string payload up to the dashboard page
-    // alert(trimmedMessage)
     onSendMessage(inputValue);
-    setInputValue(""); // Instantly clear the text box layout state
+    setInputValue(""); 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
-      handleSend(); // Fires your text sender logic smoothly
+      handleSend(); 
     }
   };
-
 
   return (
     <div id="ai-chat-body-parent" className="flex flex-col w-full" style={{ height: "100vh" }}>
       <div ref={chatBodyRef} className="h-[55%] mt-4 md:px-4 w-full flex flex-col gap-2 overflow-y-auto">
         
-        {/* Render both user messages and incoming packets smoothly */}
         {messages?.map((msg) => (
           <div key={msg.id} className={`flex w-full ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
             {msg.sender === "user" ? (
@@ -60,7 +54,9 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
               <div className="flex gap-3 mt-2 items-center max-w-[75%]">
                 <img src="images/gradient.jpg" alt="AI Avatar" className="rounded-full w-[35px] h-[35px] object-cover" />
                 <div className="bg-blue-50 border border-blue-100 text-sm p-3 rounded-lg text-gray-800">
-                  <Typewriter text={msg.text} speed={15} />
+                  
+                  {/* 🌟 PASS THE SCROLL LOGIC IN HERE */}
+                  <Typewriter text={msg.text} speed={15} onCharacterTyped={scrollToBottom} />
                 </div>
               </div>
             )}

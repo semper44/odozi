@@ -91,10 +91,11 @@ export const useSocketStore = create<SocketState>((set) => ({
 
   setConnectionStatus: (status) => set({ isConnected: status }),
   
-  setProcessingStatus: (isProcessing, message = '') =>
-    set((state) => ({ isProcessing, statusMessage: message, socketError: isProcessing ? null : state.socketError })),
+ setProcessingStatus: (isProcessing, message = '') =>
+    set({ isProcessing, statusMessage: message }),
     
-  setSocketError: (error) => set({ socketError: error, isProcessing: false, statusMessage: '' }),
+  setSocketError: (error) => 
+    set({ socketError: error, isProcessing: false, statusMessage: '' }),
     
   clearSocketStatus: () => set({ isProcessing: false, statusMessage: '', socketError: null }),
 

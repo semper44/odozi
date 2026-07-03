@@ -106,8 +106,10 @@ class SocketService {
               displayMessage = "⚠️ You have exceeded your LLM API daily quota limit. Please try again tomorrow or upgrade your plan.";
             }
           }
+          console.log(displayMessage, "🎯 Chat message:");
 
           useSocketStore.getState().setSocketError(displayMessage);
+            console.log("🟢 STEP 2: Zustand global store has been set to:", useSocketStore.getState().socketError)
         }
 
         else if (packet.type === "orchestration_result") {

@@ -1,8 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
 import {SendHorizontal} from "lucide-react";
-import { toast } from 'react-toastify';
-import { useSocketStore  } from "../../store/selectionStore";
-
 
 
 export interface ChatMessage {
@@ -20,23 +17,6 @@ interface AIChatProps {
 export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoading }) => {
   const [inputValue, setInputValue] = useState<string>("");
   const chatBodyRef = useRef<HTMLDivElement>(null);
-
-   const socketError = useSocketStore((state) => state.socketError);
-   console.log(socketError, "🎯 Chat message:");
- 
-  useEffect(() => {
-    if (socketError && !inputValue) {
-      setInputValue(socketError)
-      toast.error(socketError, {
-        position: "top-right",
-          autoClose: 4000,
-          theme: "colored"
-      });
-
-      return;
-    }
-}, [socketError]);
-
 
   const scrollToBottom = () => {
     if (chatBodyRef.current) {

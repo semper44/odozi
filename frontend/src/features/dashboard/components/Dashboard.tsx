@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { Bot, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, Plus } from "lucide-react";
+import { Bot,House, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, Plus } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
@@ -61,7 +61,20 @@ export default function Dashboard() {
         }
     });
 
-
+    useEffect(() => {
+        if (socketError) {
+            console.log("🚨 Dashboard caught background worker crash or API block:", socketError);
+            
+            // Append a system or error message to your chat interface display window
+            const errorSystemMessage: ChatMessage = {
+                id: crypto.randomUUID(),
+                sender: "ai", // or "system" depending on your layout style
+                text: socketError, 
+            };
+            
+            setMessages((prev) => [...prev, errorSystemMessage]);
+        }
+    }, [socketError]);
 
     console.log(selected, "selected repos in dashboard")
     
@@ -290,27 +303,19 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                     <div
                         style={{ backgroundColor: '#be9ee2' }}
                         className="cursor-pointer w-full px-3 py-2 mt-[27px] rounded-lg  hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
-                        <CheckCheck className="cursor-pointer" />
-                        <p >My Task</p>
-                    </div>
-
-                    <div
-                        className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
-                        <i className="material-icons-outlined">group</i>
-                        <p>Team</p>
+                        <House className="cursor-pointer" />
+                        <p >Home</p>
                     </div>
                 </div>
 
                 {/* <!-- second tab  --> */}
                 <div className="top-tabs w-full grid xl:hidden">
+                    <House className="cursor-pointer" />
                     <p
                         className="cursor-pointer w-full px-3 py-2 mt-[27px] rounded-lg hover:bg-purple-200 bg-purple-300 hover:text-black flex items-center justify-start gap-3">
-                        My Task</p>
-                    <p
-                        className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
-                        Team</p>
-                    <p
-                        className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
+                        Home</p>
+
+                    <p className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
                         History</p>
                 </div>
             </div>
@@ -484,21 +489,26 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                 </div>}
 
                                 {/* live terminal component */}
-                                {(isProcessingRequest && !isAiOpen ) && (
-                                    streamingMessage?.raw_output?.ui_layout_route === "TERM"?
+                                {/* 🌟 FIX: Remove 'isProcessingRequest' from the outer mounting gate rule */}
+                                {!isAiOpen && (
+                                streamingMessage?.raw_output?.ui_layout_route === "TERM" ? (
                                     <div className="w-full h-[80%]">
-                                        <LiveTerminal />
-                                    </div> : 
-                                    <div className="w-full h-[80%]">
-                                        <AIChat 
-                                            messages={messages}
-                                            onSendMessage={(text) => handleSendRequest(text)}
-                                            isAiLoading={isProcessing} 
-                                        />
+                                    <LiveTerminal />
                                     </div>
-                                    
+                                ) : (
+                                    <div className="w-full h-[80%]">
+                                    {/* The Chat box stays mounted on your dashboard screen layout permanently */}
+                                    <AIChat 
+                                        messages={messages}
+                                        onSendMessage={(text) => handleSendRequest(text)}
+                                        // The loader spinner itself handles turning on/off cleanly inside the file
+                                        isAiLoading={isProcessing} 
+                                    />
+                                    </div>
+                                )
                                 )}
 
+                                    
                             </div>
                             
                         </div>

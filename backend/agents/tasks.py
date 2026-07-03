@@ -863,6 +863,7 @@ def async_handle_static_analysis_task(active_rules, repo_owner, parent_repo_list
             except GitHubRepository.DoesNotExist:
                 pass
 
+
     # 🚀 BULK TRIGGER: Fire all task pipelines concurrently in microseconds!
     if pipeline_tasks:
         group(pipeline_tasks).apply_async()
