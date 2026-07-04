@@ -1,10 +1,11 @@
-from django.db import models
 import uuid
+from django.db import models
+from account_profile.models import Workspace
 
 class AuditWorkflow(models.Model):
     """Tracks the master execution run containing multiple test runner tools."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    workspace = models.ForeignKey('Workspace', on_delete=models.CASCADE)
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
     repository_name = models.CharField(max_length=255)
     branch = models.CharField(max_length=100, default="master")
     commit_sha = models.CharField(max_length=40, blank=True, null=True)

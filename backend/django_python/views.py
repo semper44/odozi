@@ -268,7 +268,7 @@ def dashboard_view(request):
 
         # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
         if github_res_status == 200:
-            cache.set(details_cache_key, user_details, timeout=3600)
+            cache.set(details_cache_key, user_details, timeout=28800)
             print(f"💾 [REDIS] Successfully cached repository state array for user '{user_details}'.")
 
         details_cache_key = f"user:repos:{user_id}"
