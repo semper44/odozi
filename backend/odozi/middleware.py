@@ -53,6 +53,7 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
                 
                 # 5. Look up user inside database
                 scope["user"] = await get_user_from_db(user_id) # type: ignore
+                scope["github_token"] = encrypted_jwt
                 
             except Exception as e:
                 print(f"💥 [WS-AUTH] CRITICAL REJECTION: Parsing/Decryption exploded! Error: {str(e)}")

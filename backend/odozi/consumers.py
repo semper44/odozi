@@ -6,7 +6,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         self.user = self.scope.get("user")
-        print("consumer_user", self.user)
+        self.token  = self.scope.get("github_token")
+        print("kante",self.user.username, "consumer_user", self.user)
 
         # Check if the user object is anonymous or completely unassigned
         if not self.user or self.user.is_anonymous:
@@ -45,7 +46,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
             data = json.loads(text_data)
             print(data)
             msg_type = data.get('type')
-
+            self.token  = self.scope.get("github_token")
+            print("")
+            print("WWWWWWWWWWWWWWWWWWWWW")
 
             if msg_type == "start_processing":
                 # 🚀 INSTANTLY OFFLOAD EVERYTHING TO CELERY
@@ -55,6 +58,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     kwargs={
                         "channel_name": self.user_group,
                         "user_id": self.user.pk,
+                        "username": self.user.username,
+                        "token": self.token,
                         "session_id": data.get('session_id', 1),
                         "prompt_text": data.get('prompt', ''),
                         "repos": data.get('repos', []),

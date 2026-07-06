@@ -460,77 +460,8 @@ Set 'ui_layout_route' to:
 
 
 
-
 @shared_task
-def parallel_handle_static_analysis_task(result_data, user_id, repo_owner):
-    """
-    🚀 TRUE INTENT PARALLELISM: This block now runs on its own independent worker thread.
-    It handles all repository signature gathering and concurrent cloud dispatches
-    without causing any lag to your database workspace creation steps!
-    """
-    pipeline_tasks = []
-
-    # 1. Fetch and secure your repository cache guardrails layers defensively
-    print(user_id)
-    details_cache_key = f"user:repos:{user_id}"
-    cached_details = cache.get(details_cache_key)
-    
-    if not cached_details or not isinstance(cached_details, dict):
-        print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
-        cached_details = {}
-        
-    cached_repos = cached_details.get("repositories", {})
-    cached_repos_set = set(cached_repos.get('repo_names', []))
-
-    # 2. Extract tools and match parameters exactly as your stitching machine reads
-    user_rules_payload = []
-    for rule in result_data.get("active_rules", []):
-        strategy = rule.get("strategy")
-        if strategy not in ["pytest", "bandit", "pip_audit", "ruff"]:
-            rule_params = getattr(rule, "params", {}) or {}
-            user_rules_payload.append({
-                "rule_key": strategy,
-                "params": rule_params     
-            })
-
-    # 3. Loop through your rules list to build the parallel execution signature arrays
-    for rule in result_data.get("active_rules", []):
-        # Handle rule formatting checks securely
-        rule_repo_name = rule.get("repo_name")
-        
-        if rule_repo_name in cached_repos_set:
-            print("rule.repo_name", rule_repo_name)
-            sanitized_name = rule_repo_name.lower().replace(" ", "-").strip()
-            print("sanitized_name", sanitized_name)
-            
-            try:
-                # Append the task signature context blocks to the array list
-                pipeline_tasks.append(
-                    run_agentic_pipeline.s( 
-                        repo_owner=repo_owner,
-                        repo_name=sanitized_name,
-                        default_branch="main",
-                        repo_data={},
-                        commit_sha="main", 
-                        target_branch=rule.get("target_branch") or "main",
-                        ref_string=f"refs/heads/{rule.get('target_branch') or 'main'}",
-                        installation_id="repo_obj.installation_id", 
-                        user_requested_rules=user_rules_payload
-                    )
-                )
-            except Exception:
-                pass
-
-    # 4. Fire all repository pipelines concurrently across your servers
-    if pipeline_tasks:
-        group(pipeline_tasks).apply_async()
-        print(f"🎉 Bulk signature queue launched concurrently for {len(pipeline_tasks)} targets.")
-
-
-
-
-@shared_task
-def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_text, repos, provider, model_name, api_key):
+def process_agentic_chat_turn_task(channel_name, user_id, username, token, session_id, prompt_text, repos, provider, model_name, api_key):
     channel_layer = get_channel_layer()
     
     # -------------------------------------------------------------------------
@@ -663,11 +594,66 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             cached_repos = cached_details.get("repo_names", {})
             print(f"⚡ [CACHE HIT] Celery successfully loaded repositories for key: {cached_repos}")
         else:
-            print(f"⚠️ Cache Miss for key: {details_cache_key}. Falling back to standard processing.")
-            cached_repos = {}
+            print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
+         
+            repos_url = f"https://api.github.com/users/{username}/repos"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "Django-Application-Gateway" # GitHub drops headers lacking identifiers
+            }
+
+            try:
+                github_res = requests.get(repos_url, headers=headers, params={"per_page": 100, "sort": "updated"}, timeout=5.0)
+                print(f"📊 [GITHUB API] External status responded: {github_res.status_code}")
+                repositories_data = github_res.json() if github_res.status_code == 200 else []
+                github_res_status = github_res.status_code
+                repositories_data = []
+            
+                cleaned_repos = []
+                # for easy access in tasks.py
+                repo_names = []
+
+                for r in repositories_data:
+                    # 1. Defensive type check
+                    if not isinstance(r, dict):
+                        continue
+                        
+                    name = r.get("name")
+                    
+                    # 2. Append to full structured list
+                    cleaned_repos.append({
+                        "id": r.get("id"),
+                        "name": name,
+                        "full_name": r.get("full_name")
+                    })
+                    
+                    # 3. Simultaneously append to the flat name list
+                    if name:
+                        repo_names.append(name)
+
+
+                # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
+                if github_res_status == 200:
+                    cached_details["repositories"] = cleaned_repos
+                    cache.set(details_cache_key, cached_details, timeout=28800)
+
+            except requests.RequestException as e:
+                async_to_sync(channel_layer.group_send)(
+                    channel_name,
+                    {
+                        "type": "chat_message",
+                        "payload": {"type": "error", "message": f"❌ [GITHUB API] Error occurred while fetching repositories: {e}"}
+                    }
+                )
+                
+                return
+
         
         # 2. BuildIing concurrent execution canvas signature list array
         intent_signatures = []
+        cached_repositories = cached_details.get("repositories", [])
+
 
 
         if "run_static_analysis" in result.intents:
@@ -677,10 +663,11 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
             serializable_rules = [rule.model_dump() for rule in result.active_rules]
+            
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_static_analysis_task",
-                    args=(serializable_rules, repo_owner, cached_repos) # 📥 Pass your variables as an ordered tuple
+                    args=(serializable_rules, repo_owner, cached_repositories) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -746,6 +733,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
 
 
 
+
 @shared_task
 def async_handle_static_analysis_task(active_rules, repo_owner, parent_repo_list):
     """
@@ -755,16 +743,22 @@ def async_handle_static_analysis_task(active_rules, repo_owner, parent_repo_list
     # Convert the passed parameter directly into a lookup set array
     # print(,"parent_repo_list", parent_repo_list)
     print("active", active_rules,"saure", parent_repo_list)
-    cached_repos_set = set(parent_repo_list)
+    cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
+
 
     pipeline_tasks = []
+
+
+    # active_rules=[RepoExecutionRule(repo_name='Taskmaster', target_branch='master', strategies=['check_transaction_atomic', 'check_docstrings']), RepoExecutionRule(repo_name='interview', target_branch='test', strategies=['check_transaction_atomic', 'check_docstrings', 'bandit', 'pii_leakage', 'pytest'])]
     
     for rule in active_rules:
-        print(f"rule.repo_name - {rule}")
-        if rule.get('repo_name') in cached_repos_set:
-            sanitized_name = rule.repo_name.lower().replace(" ", "-").strip()
-            print(f"sanitized_name - {sanitized_name}")
+        print(f"rule.repo_name - {rule.get('repo_name')}")
+        sanitized_name = rule.get('repo_name').lower().replace(" ", "-").strip()
+        print(f"sanitized_name - {sanitized_name}")
+        matched_repo_dict = next((repo for low_name, repo in cached_pairs if sanitized_name in low_name), None)
+        if matched_repo_dict:
             try:
+                print("appending")
                 # Append the task signature context blocks to the array list
                 pipeline_tasks.append(
                     run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
@@ -773,10 +767,10 @@ def async_handle_static_analysis_task(active_rules, repo_owner, parent_repo_list
                         default_branch="main",
                         repo_data = {},
                         commit_sha="main", #work
-                        target_branch=rule.target_branch or "main",
-                        ref_string=f"refs/heads/{rule.target_branch}",
+                        target_branch=rule.get("target_branch") or "main",
+                        ref_string=f"refs/heads/{rule.get("target_branch")}",
                         installation_id="repo_obj.installation_id", #work
-                        user_requested_rules=rule.strategies
+                        user_requested_rules=rule.get("strategies")
                     )
                 )
             except GitHubRepository.DoesNotExist:

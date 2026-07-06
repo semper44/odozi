@@ -286,7 +286,7 @@ class GitHubRefreshView(View):
                         cached_repos["github_refresh_token"] = github_new_refresh
                         cached_repos["expires_at"] = expires_in
 
-                        cache.set(details_cache_key, cached_repos, timeout=3600)
+                        cache.set(details_cache_key, cached_repos, timeout=28800)
 
                 except httpx.RequestError:
                     return JsonResponse(
