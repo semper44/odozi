@@ -433,13 +433,14 @@ When a user requests analysis, you must cross-reference their keywords to popula
 Example Summary Output:
 "User verified platform capabilities for pytest/bandit. Consolidated active workflow initiated for repo-b running strategy models: bandit, pytest."
 
-### MANDATORY BRANCH CONFIGURATION & CLARIFICATION RULES:
-- Whenever a user commands a live tool run or execution suite ("run_static_analysis"), you MUST check if they explicitly specified WHICH branch to target for each involved repository.
-- If the user omitted branch names (e.g., they just said "run pytest on repo-a" without specifying a branch context), you MUST:
-  1. Classify the intent as a "technical_query" instead of "run_static_analysis".
-  2. Leave the active_rules array list completely empty [].
-  3. Set your 'chat_response' to a clear, helpful text reply asking the user which branch context they want to target (e.g., "I see you want to run pytest on repo-a. Which branch context should I look into? 'main', 'dev', or another branch?").
-- Only select "run_static_analysis" and populate active_rules if the branch name is explicitly provided in the text or clearly inherited from previous session baseline memory logs.
+### MANDATORY BRANCH CONFIGURATION & INTELLECTUAL MAPPING RULES:
+1. When a user requests a tool execution run, look for branch context names in the text (e.g., 'main', 'master', 'test', 'new').
+2. If the user provides a list of branches and repositories (e.g., repositories 'X and Y' and branches 'master, test, and new' or uses the word 'respectively'), use advanced contextual deduction to map the branches to the repositories sequentially. 
+   - If 3 branches are provided for 2 active execution repositories, assign the first matching logical branches (e.g., Repository 1 -> 'master', Repository 2 -> 'test') or fallback intelligently.
+3. If, and ONLY if, the user provides absolutely zero branch keywords anywhere in their message or historical context session baseline memory logs, you must:
+   - Assign the smart engineering default branch "master" to the 'target_branch' field inside the Pydantic schema. 
+   - Do NOT stop the pipeline or ask for clarification if a fallback default can keep the automation moving forward.
+4. If a list of branches is completely incomprehensible and cannot be safely deduced, your 'chat_response' must intelligently ask for exact mapping layout structures (e.g., "I see you listed the branches 'master, test, and new'. To ensure exact execution, which branch applies to 'Taskmaster' and which applies to 'interview'?").
 
 ### INTENT PARSING AND MAPPING BOUNDARY RULES
 - "create_workspace": Select this if the user wants to group fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts (e.g., "repo-a").
@@ -658,9 +659,9 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
         print("cached_repos", 44444444444, cached_details)
         # Check if data exists and is the correct format (list or dict of repos)
         if cached_details is not None:
-            print(f"⚡ [CACHE HIT] Celery successfully loaded repositories for key: {details_cache_key}")
             # Process your cached_repos directly here
-            cached_repos = cached_details.get("repositories", {})
+            cached_repos = cached_details.get("repo_names", {})
+            print(f"⚡ [CACHE HIT] Celery successfully loaded repositories for key: {cached_repos}")
         else:
             print(f"⚠️ Cache Miss for key: {details_cache_key}. Falling back to standard processing.")
             cached_repos = {}
@@ -689,12 +690,13 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
-            serializable_workspaces = [ws.model_dump() for ws in result.workspaces_to_create]
-
+            result_dict = result.model_dump()
+            serializable_workspaces = result_dict.get('workspaces_to_create', [])
+            cached_repositories = cached_details.get("repositories", [])
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_workspace_creation_task",
-                    args=(serializable_workspaces, user_id, cached_repos) # 📥 Pass your variables as an ordered tuple
+                    args=(serializable_workspaces, user_id, cached_repositories) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -704,51 +706,6 @@ def process_agentic_chat_turn_task(channel_name, user_id, session_id, prompt_tex
             group(intent_signatures).apply_async()
 
 
-
-        # if "run_static_analysis" in result.intents:
-        #     # Gather the tool names that map directly to standard runners
-        #     pipeline_tasks= []
-
-        #     # Triggering existing pipeline task for every repository target the AI extracted
-        #     print(user_id)
-            
-        #     for rule in result.active_rules:
-        #         if rule.repo_name in cached_repos_set:
-        #             print("rule.repo_name", rule.repo_name)
-        #             sanitized_name = rule.repo_name.lower().replace(" ", "-").strip()
-        #             print("sanitized_name", sanitized_name)
-        #             try:
-        #                 # Append the task signature context blocks to the array list
-        #                 pipeline_tasks.append(
-        #                     run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
-        #                         repo_owner=repo_owner,
-        #                         repo_name=sanitized_name,
-        #                         default_branch="main",
-        #                         repo_data = {},
-        #                         commit_sha="main", #work
-        #                         target_branch=rule.target_branch or "main",
-        #                         ref_string=f"refs/heads/{rule.target_branch}",
-        #                         installation_id="repo_obj.installation_id", #work
-        #                         user_requested_rules=rule.strategies
-        #                     )
-        #                 )
-        #             except GitHubRepository.DoesNotExist:
-        #                 pass
-
-        #     # 🚀 BULK TRIGGER: Fire all task pipelines concurrently in microseconds!
-        #     if pipeline_tasks:
-        #         group(pipeline_tasks).apply_async()
-        #         print(f"🎉 Bulk signature queue launched concurrently for {len(pipeline_tasks)} targets.")
-
-        # if "create_workspace" in result.intents:
-        #     repos_found=[]
-        #     workspace_details = result.workspaces_to_create[0]
-        #     for item in workspace_details.repositories:
-        #         if item in cached_repos_set:
-        #             repos_found.append(item)
-        #     create_workspace_with_repos(user, workspace_details.new_workspace_name, repos_found)
-
-       
         # -------------------------------------------------------------------------
         # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
         # -------------------------------------------------------------------------
@@ -797,54 +754,16 @@ def async_handle_static_analysis_task(active_rules, repo_owner, parent_repo_list
     """
     # Convert the passed parameter directly into a lookup set array
     # print(,"parent_repo_list", parent_repo_list)
-    print("active_rules", active_rules,"saure", parent_repo_list)
-    cached_repos_set = set(parent_repo_list['repo_names'])
+    print("active", active_rules,"saure", parent_repo_list)
+    cached_repos_set = set(parent_repo_list)
 
     pipeline_tasks = []
     
-    # Process your rules...
-    # user_rules_payload = []
-    # for rule in result_data.get("active_rules", []):
-    #     strategy = rule.get("strategy")
-    #     if strategy not in ["pytest", "bandit", "pip_audit", "ruff"]:
-    #         user_rules_payload.append({
-    #             "rule_key": strategy,
-    #             "params": rule.get("params", {}) or {}
-    #         })
-
-    # Build repository signature queues
-    # for rule in result_data.get("active_rules", []):
-    #     for target_repo in rule.get("target_repo_names", []):
-    #         sanitized_name = target_repo.lower().replace(" ", "-").strip()
-            
-    #         if sanitized_name in cached_repos_set:
-    #             try:
-    #                 repo_obj = GitHubRepository.objects.get(repo_name=f"{repo_owner}/{sanitized_name}")
-    #                 target_branch = rule.get("target_branch") or repo_obj.default_branch or "main"
-                    
-    #                 pipeline_tasks.append(
-    #                     run_agentic_pipeline.s(
-    #                         repo_owner=repo_owner,
-    #                         repo_name=sanitized_name,
-    #                         default_branch=repo_obj.default_branch or "main",
-    #                         repo_data={},
-    #                         commit_sha=repo_obj.latest_commit_sha or "main",
-    #                         target_branch=target_branch,
-    #                         ref_string=f"refs/heads/{target_branch}",
-    #                         installation_id=repo_obj.installation_id,
-    #                         user_requested_rules=user_rules_payload
-    #                     )
-    #                 )
-    #             except GitHubRepository.DoesNotExist:
-    #                 pass
-
-
-
     for rule in active_rules:
-        if rule.repo_name in cached_repos_set:
-            print("rule.repo_name", rule.repo_name)
+        print(f"rule.repo_name - {rule}")
+        if rule.get('repo_name') in cached_repos_set:
             sanitized_name = rule.repo_name.lower().replace(" ", "-").strip()
-            print("sanitized_name", sanitized_name)
+            print(f"sanitized_name - {sanitized_name}")
             try:
                 # Append the task signature context blocks to the array list
                 pipeline_tasks.append(
@@ -880,25 +799,53 @@ def async_handle_workspace_creation_task(workspaces, user_id, parent_repo_list):
     except User.DoesNotExist:
         return
 
-    cached_repos_set = set(parent_repo_list['repo_names'])
-    print(workspaces[0],"result_data", workspaces)
+    if not workspaces:
+        return
+
+    # 1. 🚀 FIX: Store the whole raw repo dict tied to its lowercase matching key
+    # If parent_repo_list is just a list of strings, match the string directly
+    print(type(parent_repo_list),"parent_repo_list", parent_repo_list)
+    cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
     
-    if workspaces:
-        # Since workspaces_to_create is an array list of objects, we grab the first target row
-        workspace_details = workspaces[0] if isinstance(workspaces, list) else workspaces
+    workspace_list = workspaces if isinstance(workspaces, list) else [workspaces]
+
+    for ws in workspace_list:
+        ws_name = ws.get("new_workspace_name")
+        raw_repos = ws.get("repositories", [])
         
         repos_found = []
-        for item in workspace_details.get("repositories", []):
-            sanitized_item = item.lower().replace(" ", "-").strip()
-            if sanitized_item in cached_repos_set:
-                repos_found.append(sanitized_item)
-                
-        # Fire your database workspace creation code logic natively!
-        create_workspace_with_repos(user, workspace_details.get("new_workspace_name"), repos_found)
-    else:
-        pass
+        repos_not_found = []
 
+        for raw_repo in raw_repos:
+            user_input = raw_repo.lower().replace(" ", "-").strip()
+            
+            # Find the full repository dictionary payload match from Redis cache
+            matched_repo_dict = next((repo for low_name, repo in cached_pairs if user_input in low_name), None)
+            
+            if matched_repo_dict:
+                # 2. 🚀 FIX: Structure the exact schema fields your Serializer expects!
+                # Adjust these keys ('repo_id', 'repo_name', etc.) to match your actual serializer fields
+                full_name = matched_repo_dict.get("full_name", "")
+                repo_owner = full_name.split("/")[0] if "/" in full_name else user.username
+
+                serializer_ready_data = {
+                    "repo_id": matched_repo_dict.get("id"),
+                    "repo_name": matched_repo_dict.get("name"),
+                    "repo_full_name": full_name,
+                    "repo_owner": repo_owner
+                }
+                repos_found.append(serializer_ready_data)
+            else:
+                repos_not_found.append(raw_repo)
+
+        # 3. Safe validation pass execution
+        if len(repos_found) > 0:
+            create_workspace_with_repos(user, ws_name, repos_found)
+        else:
+            print(f"ogbemudia - No repos found for workspace: {ws_name}")
+            
+    return "Workspace processing completed"
 
 
 

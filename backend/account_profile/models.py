@@ -47,17 +47,16 @@ class GitHubRepository(models.Model):
     """
     Represents an actual code repository.
     """
-    workspace = models.ForeignKey(
+    workspace = models.ManyToManyField(
         Workspace, 
-        on_delete=models.CASCADE, 
         related_name="repositories",
         db_index=True
     )
     
     repo_name = models.CharField(max_length=255, db_index=True)        # e.g., "Taskmaster"
     repo_owner = models.CharField(max_length=255, db_index=True)       # e.g., "OdoziEngine"
-    repo_id = models.BigIntegerField(unique=True, db_index=True)
-    repo_full_name = models.CharField(max_length=255, unique=True, db_index=True) # e.g., "OdoziEngine/Taskmaster"
+    repo_id = models.BigIntegerField(db_index=True)
+    repo_full_name = models.CharField(max_length=255, db_index=True) # e.g., "OdoziEngine/Taskmaster"
     
     # Settings for your app orchestrator
     is_active = models.BooleanField(default=False, db_index=True)
@@ -75,6 +74,8 @@ class GitHubRepository(models.Model):
         verbose_name_plural = "GitHub Repositories"
         ordering = ['-updated_at']
 
+        
+
     def __str__(self):
         return self.repo_full_name
 
@@ -82,6 +83,24 @@ class GitHubRepository(models.Model):
         # Automatically enforce the standard slug layout format on save
         self.repo_full_name = f"{self.repo_owner}/{self.repo_name}"
         super().save(*args, **kwargs)
+        
+
+class WorkspaceRepositoryBridge(models.Model):
+    """
+    Explicit intermediary table to map unique constraints safely.
+    """
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE)
+    repository = models.ForeignKey(GitHubRepository, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            # 🚀 THE FIXED SENIOR FIX: Enforce uniqueness per workspace on the link table
+            models.UniqueConstraint(
+                fields=['workspace', 'repository'], 
+                name='unique_workspace_repository_link'
+            )
+        ]
 
 
 
