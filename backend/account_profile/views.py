@@ -39,7 +39,6 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse
 from odozi.utils.auth import get_browser_family, get_client_ip
 from odozi.utils.crypto import encrypt_token, decrypt_token
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
-from odozi.utils.authentication import rotate_github_token
 from odozi.service import get_installation_access_token
 from agents.tasks import run_agentic_pipeline
 from .models import UserProfileModel, Workspace, WorkspaceMembership, GitHubRepository, UserLLMConfig
@@ -49,94 +48,20 @@ from channels.db import database_sync_to_async
 
 
 
+def github_login_view(request):
+    print("github_login_view called", settings.GITHUB_CLIENT_ID)
 
+    state = secrets.token_urlsafe(32)
 
+    request.session["github_oauth_state"] = state
 
-
-
-def is_input_safe(user_text):
-    # Block common shell injection characters
-    forbidden_chars = [";", "&&", "||", ">", "<", "|", "$(", "{"]
-    if any(char in user_text for char in forbidden_chars):
-        return True
-    return False
-
-
-
-class SaveLLMConfigView(APIView):
-    """Persist encrypted LLM provider settings for the application user."""
-
-    # authentication_classes = [HttpOnlyCookieJWTAuthentication]
-    # permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        summary="Save LLM configuration",
-        description="Store or update an LLM provider, model name, and encrypted API key.",
-        request={
-            "application/json": {
-                "type": "object",
-                "properties": {
-                    "provider": {"type": "string", "example": "openai"},
-                    "model_name": {"type": "string", "example": "gpt-4.1"},
-                    "api_key": {"type": "string", "format": "password", "example": "sk-test"},
-                },
-                "required": ["provider", "model_name", "api_key"],
-            }
-        },
-        responses={
-            200: OpenApiResponse(description="Configuration stored successfully"),
-            400: OpenApiResponse(description="Incomplete payload"),
-            500: OpenApiResponse(description="Storage failure"),
-        },
+    github_url = (
+        "https://github.com/login/oauth/authorize"
+        f"?client_id={settings.GITHUB_CLIENT_ID}"
+        f"&state={state}"
     )
-    def post(self, request, *args, **kwargs):
-        provider = request.data.get("provider")
-        model_name = request.data.get("model_name")
-        api_key = request.data.get("api_key")
-        user = User.objects.get(pk=1)
-        print("sense",request.data)
 
-        # Basic Parameter Boundaries Protection
-        if not provider or not model_name or not str(api_key).strip():
-            return Response(
-                {"error": "Incomplete configuration payload. All fields are mandatory."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        print("build-up")
-        try:
-            with transaction.atomic():
-                print("keduuu")
-                # Locate an existing record or provision a clean row instance for this user
-                config, created = UserLLMConfig.objects.get_or_create(
-                    user=user,
-                    defaults={
-                        "provider": provider.lower().strip(),
-                        "model_name": model_name.strip()
-                    }
-                )
-                print(22222)
-
-                # If it already existed, update the non-sensitive parameters
-                if not created:
-                    config.provider = provider.lower().strip()
-                    config.model_name = model_name.strip()
-
-                print(9999888)
-                # Encrypt the raw token text using our custom model method!
-                config.set_api_key(api_key)
-                config.save()
-
-            return Response({
-                "status": "success",
-                "message": "LLM credentials stored and encrypted successfully."
-            }, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response(
-                {"error": f"Internal storage transaction failure: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
+    return redirect(github_url)
 
 
 
@@ -157,6 +82,250 @@ def verify_github_signature(request):
     
     # Use hmac.compare_digest to prevent timing attacks
     return hmac.compare_digest(expected_signature, signature_header)
+
+
+
+
+
+@extend_schema(
+    summary="GitHub OAuth callback",
+    description="Exchange the GitHub OAuth code for an access token and finalize the user session.",
+    responses={
+        200: OpenApiResponse(description="OAuth flow completed and redirect issued"),
+        400: OpenApiResponse(description="Missing or invalid callback data"),
+        500: OpenApiResponse(description="Platform misconfiguration"),
+    },
+)
+def github_callback_view(request):
+    # 1. Catch the 'code' parameter sent by GitHub in the URL query string
+    code = request.GET.get('code')
+    if not code:
+        return JsonResponse({"error": "No authorization code returned from GitHub"}, status=400)
+    installation_id = request.GET.get('installation_id')
+
+    returned_state = request.GET.get("state")
+
+    stored_state = request.session.get(
+        "github_oauth_state"
+    )
+
+    if not stored_state:
+        return JsonResponse(
+            {"error": "Missing OAuth state"},
+            status=400
+        )
+
+    if returned_state != stored_state:
+        return JsonResponse(
+            {"error": "Invalid OAuth state"},
+            status=400
+        )
+    print(request.GET, "jesu")
+    # 2. Prepare the background request to trade the code for an Access Token
+    # OAuth configuration credentials (keep your Client Secret in your settings.py env)
+    client_id = "Iv23liUEbKH7D09scRIZ"
+    # Read the variable safely from settings.py. If it's missing, default to an empty string.
+    client_secret = getattr(settings, "GITHUB_APP_CLIENT_SECRET", "")
+    print("client_secret", client_secret)  # Debugging line to confirm the value is being read correctly
+
+    if not client_secret:
+        return JsonResponse({"error": "Platform misconfiguration: GITHUB_APP_CLIENT_SECRET is missing from settings."}, status=500)
+        
+    token_url = "https://github.com/login/oauth/access_token"
+    token_headers = {"Accept": "application/json"}
+    token_payload = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "code": code,
+        "redirect_uri": "http://127.0.0.1:8000/account/api/auth/github/callback/"
+    }
+
+    # Make the HTTP POST call to GitHub's token engine
+    token_response = requests.post(token_url, json=token_payload, headers=token_headers)
+    print(token_response.status_code)
+    print(token_response.text)
+    if token_response.status_code != 200:
+        return JsonResponse({"error": "SOMETHING IS WRONG WITH gITHUB"})
+    token_data = token_response.json()
+
+    print("token_data", token_data)  # Debugging line to inspect the response from GitHub's token endpoint
+
+    # Extract the token string
+    github_access_token = token_data.get("access_token")
+    if not github_access_token:
+        return JsonResponse({"error": "Failed to exchange code for access token", "details": token_data}, status=400)
+
+    # 3. Use the fresh token to fetch the user's basic profile details
+    user_url = "https://api.github.com/user"
+    user_headers = {
+        "Authorization": f"Bearer {github_access_token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    user_profile = requests.get(user_url, headers=user_headers).json()
+    
+    github_username = user_profile.get("login")
+    github_email = user_profile.get("email")
+    print("user_profile", user_profile)  # Debugging line to inspect the user profile data returned by GitHub
+
+    # 4. Fallback if user's email is private (GitHub returns empty email if hidden)
+    if not github_email:
+        emails_url = "https://api.github.com/user/emails"
+        emails_profile = requests.get(emails_url, headers=user_headers).json()
+        # Find the primary verified email address from their list
+                # ✅ DEFENSIVE FIX: Ensure emails_profile is an actual list before looping
+        if isinstance(emails_profile, list):
+            for email_entry in emails_profile:
+                # ✅ DEFENSIVE FIX: Verify each item is a dict object, not a plain string error
+                if isinstance(email_entry, dict):
+                    if email_entry.get("primary") and email_entry.get("verified"):
+                        github_email = email_entry.get("email")
+                        break
+        else:
+            print(f"Warning: GitHub emails API did not return a valid list. Payload: {emails_profile}")
+
+
+    if not github_username:
+        return JsonResponse({"error": "Could not extract user details from profile"}, status=400)
+
+    workspace, created = Workspace.objects.get_or_create(
+        name = github_username,
+            # Django searches the DB using these lookup fields:
+        
+        # If not found, Django creates it using lookup fields + these defaults:
+        defaults={
+            "owner": request.user,
+            "github_account_name": github_username,
+        }
+    )
+    print("wahala", request.user)
+    # workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
+    if created:
+        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
+
+    # 5. DB MANAGEMENT: Locate or create the user record in Django
+
+    user, created = User.objects.get_or_create(
+        username=github_username,
+        defaults={
+            "email": github_email or ""
+        }
+    )
+    refresh = RefreshToken.for_user(user)
+    access = refresh.access_token
+    access['username'] = str(github_username)
+    access['id'] = user.pk
+    my_jwt_access_token = str(access)
+    my_jwt_refresh_token = str(refresh)
+
+    print("breakpoint", installation_id)
+
+    profile, _ = UserProfileModel.objects.get_or_create(
+        user=user,
+    )
+
+    print("installation_id", profile)
+
+    raw_access_token = token_data.get("access_token")
+    raw_refresh_token = token_data.get("refresh_token")
+    expires_in_seconds = int(token_data.get("expires_in", 28800)) # 8 Hours default
+
+     # 2. CAPTURE DUAL-LOCK FINGERPRINT MATRIX Parameters
+    browser_family = get_browser_family(request)
+
+    expiration_time = timezone.now() + datetime.timedelta(seconds=expires_in_seconds)
+    expires_at_iso = expiration_time.isoformat() # Looks like: "2026-06-02T23:57:00.000Z"
+    
+    
+
+    profile.encrypted_refresh_token = encrypt_token(raw_refresh_token)
+    profile.encrypted_jwt_access_token = encrypt_token(my_jwt_access_token)
+    profile.encrypted_jwt_refresh_token = encrypt_token(my_jwt_refresh_token)
+    profile.browser_family = browser_family
+    profile.expires_at_iso = expires_at_iso
+    profile.save()
+    
+     # Log the user into the active Django session layer
+    login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+
+    print("Tokens encrypted and saved to database successfully.", encrypt_token(my_jwt_access_token))
+    # SEAL DATA PACKAGE INSIDE REDIS FOR EXACTLY 60 SECONDS, GENERATE THE SHORT-LIVED 60-SECOND TRANSIT TICKET
+    ticket_id = str(uuid.uuid4())
+    redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
+    if my_jwt_refresh_token and my_jwt_access_token and raw_access_token:
+        ticket_payload = {
+            "jwt_access_token": encrypt_token(my_jwt_access_token),
+            "jwt_refresh_token": encrypt_token(my_jwt_refresh_token),
+            "github_access_token": encrypt_token(raw_access_token),
+            "browser_family": browser_family,
+            "expires_at": expires_at_iso
+        }
+        cache.set(f"redis_auth_{redis_ticket_key}", ticket_payload, timeout=60)
+
+        print("PPPPPPPPPP")
+    else:
+        return JsonResponse({"error": "Key Token missing"}, status=500)
+    
+    details_cache_key = f"user:repos:{user.pk}"
+
+    # This deletes the entire key from Redis RAM instantly
+    cache.delete(details_cache_key)
+    # 5. SECURE FRAGMENT REDIRECT
+    # We use a URL Hash Fragment '#' so network routing nodes/logs can NEVER read it
+    react_app_url = "http://localhost:5173/"
+
+    response = HttpResponseRedirect(react_app_url)
+
+    response.set_cookie(
+        "ticket_id",
+        str(ticket_id),  # Placeholder token value for testing
+        max_age=28800,       
+        httponly=True,       
+        secure=True,         # <--- FORCE TO TRUE! Browser drops SameSite="None" if Secure is False over HTTPS
+        samesite="None",     # <--- Keep this on None for cross-origin flights
+        path="/"
+    )
+    response.set_cookie(
+        "expires_at",
+        str(expires_at_iso),  # Placeholder token value for testing
+        max_age=28800,       
+        httponly=True,       
+        secure=True,         # <--- FORCE TO TRUE! Browser drops SameSite="None" if Secure is False over HTTPS
+        samesite="None",     # <--- Keep this on None for cross-origin flights
+        path="/"
+    )
+    # react_app_url = f"https://spicy-flowers-scream.loca.lt/"
+    
+    return response
+
+
+
+
+class InstallGithubApp(View):
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    def get (self,request, *args, **kwargs):
+        installation_id = request.GET.get("installation_id")
+        setup_action = request.GET.get("setup_action")
+
+        print(
+            installation_id,
+            setup_action
+        )
+
+        if not installation_id:
+            return Response(
+                {"error": "Missing installation_id"},
+                status=400
+            )
+
+        cache_key = f"github:token:{installation_id}"
+        cache.set(cache_key, installation_id, timeout=55 * 60)
+
+        return Response({
+            "message": "GitHub installation linked",
+            "installation_id": installation_id,
+            "setup_action": setup_action
+        })
 
 
 
@@ -351,8 +520,6 @@ class GitHubRefreshView(View):
 
 
  
-
-
 # ✅ FIX A: Restrict the endpoint securely to POST requests only
 @csrf_exempt
 @require_POST
@@ -485,248 +652,81 @@ def github_push_webhook(request):
 
 
 
-@extend_schema(
-    summary="GitHub OAuth callback",
-    description="Exchange the GitHub OAuth code for an access token and finalize the user session.",
-    responses={
-        200: OpenApiResponse(description="OAuth flow completed and redirect issued"),
-        400: OpenApiResponse(description="Missing or invalid callback data"),
-        500: OpenApiResponse(description="Platform misconfiguration"),
-    },
-)
-def github_callback_view(request):
-    # 1. Catch the 'code' parameter sent by GitHub in the URL query string
-    code = request.GET.get('code')
-    if not code:
-        return JsonResponse({"error": "No authorization code returned from GitHub"}, status=400)
-    installation_id = request.GET.get('installation_id')
-    print(request.GET, "jesu")
-    # 2. Prepare the background request to trade the code for an Access Token
-    # OAuth configuration credentials (keep your Client Secret in your settings.py env)
-    client_id = "Iv23liUEbKH7D09scRIZ"
-    # Read the variable safely from settings.py. If it's missing, default to an empty string.
-    client_secret = getattr(settings, "GITHUB_APP_CLIENT_SECRET", "")
-    print("client_secret", client_secret)  # Debugging line to confirm the value is being read correctly
 
-    if not client_secret:
-        return JsonResponse({"error": "Platform misconfiguration: GITHUB_APP_CLIENT_SECRET is missing from settings."}, status=500)
-        
-    token_url = "https://github.com/login/oauth/access_token"
-    token_headers = {"Accept": "application/json"}
-    token_payload = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "code": code,
-        "redirect_uri": "http://127.0.0.1:8000/account/api/auth/github/callback/"
-    }
+class SaveLLMConfigView(APIView):
+    """Persist encrypted LLM provider settings for the application user."""
 
-    # Make the HTTP POST call to GitHub's token engine
-    token_response = requests.post(token_url, json=token_payload, headers=token_headers)
-    print(token_response.status_code)
-    print(token_response.text)
-    if token_response.status_code != 200:
-        return JsonResponse({"error": "SOMETHING IS WRONG WITH gITHUB"})
-    token_data = token_response.json()
+    # authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    # permission_classes = [IsAuthenticated]
 
-    print("token_data", token_data)  # Debugging line to inspect the response from GitHub's token endpoint
-
-    # Extract the token string
-    github_access_token = token_data.get("access_token")
-    if not github_access_token:
-        return JsonResponse({"error": "Failed to exchange code for access token", "details": token_data}, status=400)
-
-    # 3. Use the fresh token to fetch the user's basic profile details
-    user_url = "https://api.github.com/user"
-    user_headers = {
-        "Authorization": f"Bearer {github_access_token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    user_profile = requests.get(user_url, headers=user_headers).json()
-    
-    github_username = user_profile.get("login")
-    github_email = user_profile.get("email")
-    print("user_profile", user_profile)  # Debugging line to inspect the user profile data returned by GitHub
-
-    # 4. Fallback if user's email is private (GitHub returns empty email if hidden)
-    if not github_email:
-        emails_url = "https://api.github.com/user/emails"
-        emails_profile = requests.get(emails_url, headers=user_headers).json()
-        # Find the primary verified email address from their list
-                # ✅ DEFENSIVE FIX: Ensure emails_profile is an actual list before looping
-        if isinstance(emails_profile, list):
-            for email_entry in emails_profile:
-                # ✅ DEFENSIVE FIX: Verify each item is a dict object, not a plain string error
-                if isinstance(email_entry, dict):
-                    if email_entry.get("primary") and email_entry.get("verified"):
-                        github_email = email_entry.get("email")
-                        break
-        else:
-            print(f"Warning: GitHub emails API did not return a valid list. Payload: {emails_profile}")
-
-
-    if not github_username:
-        return JsonResponse({"error": "Could not extract user details from profile"}, status=400)
-
-    workspace, created = Workspace.objects.get_or_create(
-        name = github_username,
-            # Django searches the DB using these lookup fields:
-        
-        # If not found, Django creates it using lookup fields + these defaults:
-        defaults={
-            "owner": request.user,
-            "github_account_name": github_username,
-        }
+    @extend_schema(
+        summary="Save LLM configuration",
+        description="Store or update an LLM provider, model name, and encrypted API key.",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "example": "openai"},
+                    "model_name": {"type": "string", "example": "gpt-4.1"},
+                    "api_key": {"type": "string", "format": "password", "example": "sk-test"},
+                },
+                "required": ["provider", "model_name", "api_key"],
+            }
+        },
+        responses={
+            200: OpenApiResponse(description="Configuration stored successfully"),
+            400: OpenApiResponse(description="Incomplete payload"),
+            500: OpenApiResponse(description="Storage failure"),
+        },
     )
-    print("wahala", request.user)
-    # workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
-    if created:
-        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
+    def post(self, request, *args, **kwargs):
+        provider = request.data.get("provider")
+        model_name = request.data.get("model_name")
+        api_key = request.data.get("api_key")
+        user = User.objects.get(pk=1)
+        print("sense",request.data)
 
-    # 5. DB MANAGEMENT: Locate or create the user record in Django
+        # Basic Parameter Boundaries Protection
+        if not provider or not model_name or not str(api_key).strip():
+            return Response(
+                {"error": "Incomplete configuration payload. All fields are mandatory."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        print("build-up")
+        try:
+            with transaction.atomic():
+                print("keduuu")
+                # Locate an existing record or provision a clean row instance for this user
+                config, created = UserLLMConfig.objects.get_or_create(
+                    user=user,
+                    defaults={
+                        "provider": provider.lower().strip(),
+                        "model_name": model_name.strip()
+                    }
+                )
+                print(22222)
 
-    user, created = User.objects.get_or_create(
-        username=github_username,
-        defaults={
-            "email": github_email or ""
-        }
-    )
-    refresh = RefreshToken.for_user(user)
-    access = refresh.access_token
-    access['username'] = str(github_username)
-    access['id'] = user.pk
-    my_jwt_access_token = str(access)
-    my_jwt_refresh_token = str(refresh)
+                # If it already existed, update the non-sensitive parameters
+                if not created:
+                    config.provider = provider.lower().strip()
+                    config.model_name = model_name.strip()
 
-    print("breakpoint", installation_id)
+                print(9999888)
+                # Encrypt the raw token text using our custom model method!
+                config.set_api_key(api_key)
+                config.save()
 
-    profile, _ = UserProfileModel.objects.get_or_create(
-        user=user,
-    )
+            return Response({
+                "status": "success",
+                "message": "LLM credentials stored and encrypted successfully."
+            }, status=status.HTTP_200_OK)
 
-    print("installation_id", profile)
+        except Exception as e:
+            return Response(
+                {"error": f"Internal storage transaction failure: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-    raw_access_token = token_data.get("access_token")
-    raw_refresh_token = token_data.get("refresh_token")
-    expires_in_seconds = int(token_data.get("expires_in", 28800)) # 8 Hours default
-
-     # 2. CAPTURE DUAL-LOCK FINGERPRINT MATRIX Parameters
-    browser_family = get_browser_family(request)
-
-    expiration_time = timezone.now() + datetime.timedelta(seconds=expires_in_seconds)
-    expires_at_iso = expiration_time.isoformat() # Looks like: "2026-06-02T23:57:00.000Z"
-    
-    
-    profile.encrypted_refresh_token = encrypt_token(raw_refresh_token)
-    profile.encrypted_jwt_access_token = encrypt_token(my_jwt_access_token)
-    profile.encrypted_jwt_refresh_token = encrypt_token(my_jwt_refresh_token)
-    profile.browser_family = browser_family
-    profile.expires_at_iso = expires_at_iso
-    profile.save()
-    
-     # Log the user into the active Django session layer
-    login(request, user, backend='django.contrib.auth.backends.ModelBackend')
-
-    print("Tokens encrypted and saved to database successfully.", encrypt_token(my_jwt_access_token))
-    # 3. SEAL DATA PACKAGE INSIDE REDIS FOR EXACTLY 60 SECONDS
-    if my_jwt_refresh_token and my_jwt_access_token and raw_access_token:
-        ticket_payload = {
-            "jwt_access_token": encrypt_token(my_jwt_access_token),
-            "jwt_refresh_token": encrypt_token(my_jwt_refresh_token),
-            "github_access_token": encrypt_token(raw_access_token),
-            "browser_family": browser_family,
-            "expires_at": expires_at_iso
-        }
-        cache.set(f"redis_auth_{redis_ticket_key}", ticket_payload, timeout=60)
-
-        print("PPPPPPPPPP")
-    else:
-        return JsonResponse({"error": "Key Token missing"}, status=500)
-    
-    details_cache_key = f"user:repos:{user.pk}"
-
-    # This deletes the entire key from Redis RAM instantly
-    cache.delete(details_cache_key)
-    # 5. SECURE FRAGMENT REDIRECT
-    # We use a URL Hash Fragment '#' so network routing nodes/logs can NEVER read it
-    react_app_url = "http://localhost:5173/"
-
-    response = HttpResponseRedirect(react_app_url)
-
-    response.set_cookie(
-        "ticket_id",
-        str(ticket_id),  # Placeholder token value for testing
-        max_age=28800,       
-        httponly=True,       
-        secure=True,         # <--- FORCE TO TRUE! Browser drops SameSite="None" if Secure is False over HTTPS
-        samesite="None",     # <--- Keep this on None for cross-origin flights
-        path="/"
-    )
-    response.set_cookie(
-        "expires_at",
-        str(expires_at_iso),  # Placeholder token value for testing
-        max_age=28800,       
-        httponly=True,       
-        secure=True,         # <--- FORCE TO TRUE! Browser drops SameSite="None" if Secure is False over HTTPS
-        samesite="None",     # <--- Keep this on None for cross-origin flights
-        path="/"
-    )
-    # react_app_url = f"https://spicy-flowers-scream.loca.lt/"
-    
-    return response
-
-
-
-@csrf_exempt
-@extend_schema(
-    summary="Fetch short-lived auth ticket",
-    description="Return a one-time transit ticket that the frontend uses to continue authentication.",
-    responses={
-        200: OpenApiResponse(description="Ticket returned successfully"),
-        401: OpenApiResponse(description="Missing ticket cookie"),
-        403: OpenApiResponse(description="Ticket expired or missing"),
-        409: OpenApiResponse(description="Ticket already served"),
-    },
-)
-def github_ticket(request):
-    # This endpoint is used by the frontend websocket bootstrapper to
-    # retrieve the short-lived ticket identifier stored in an HttpOnly cookie.
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-
-    ticket_id = request.COOKIES.get('ticket_id')
-    if not ticket_id:
-        return JsonResponse({'error': 'Missing ticket cookie'}, status=401)
-
-    redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
-    cache_key = f"redis_auth_{redis_ticket_key}"
-    served_key = f"redis_auth_served_{redis_ticket_key}"
-
-    payload = cache.get(cache_key)
-    if not payload:
-        return JsonResponse({'error': 'Ticket not found or expired'}, status=403)
-
-    # Prevent serving the same ticket repeatedly
-    if cache.get(served_key):
-        return JsonResponse({'error': 'Ticket already served'}, status=409)
-
-    # Mark as served for the lifetime of the ticket to avoid duplicate frontend retries
-    cache.set(served_key, True, timeout=60)
-
-    # Return the raw ticket string the websocket service expects
-    return JsonResponse({'ticket': ticket_id})
-
-
-
-
-class InstallGithubApp(view):
-    def post (request, *args, **kwargs):
-            # 1. GENERATE THE SHORT-LIVED 60-SECOND TRANSIT TICKET
-        ticket_id = str(uuid.uuid4())
-        redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
-        if installation_id:
-            profile.installation_id = installation_id
-            cache_key = f"github:token:{installation_id}"
-            cache.set(cache_key, installation_id, timeout=55 * 60)
 
 
 

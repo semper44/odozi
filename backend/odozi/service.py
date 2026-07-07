@@ -10,6 +10,16 @@ from rest_framework.exceptions import ValidationError
 from account_profile.models import Workspace, WorkspaceMembership, GitHubRepository
 from django_python.serializer import GitHubRepositorySerializer
 
+
+
+def is_input_safe(user_text):
+    # Block common shell injection characters
+    forbidden_chars = [";", "&&", "||", ">", "<", "|", "$(", "{"]
+    if any(char in user_text for char in forbidden_chars):
+        return True
+    return False
+
+
 def create_workspace_with_repos(user, workspace_name: str, repositories_data: list) -> dict:
     if not workspace_name or not str(workspace_name).strip():
         raise ValidationError("Must provide a workspace name.")

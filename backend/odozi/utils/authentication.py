@@ -6,38 +6,6 @@ from channels.db import database_sync_to_async
 
 User = get_user_model()
 
-def rotate_github_token(refresh_token):
-    """
-    Synchronous background call to GitHub to swap an expired or old
-    access token for a fresh token pair.
-    """
-    payload = {
-        "client_id": settings.GITHUB_CLIENT_ID,
-        "client_secret": settings.GITHUB_CLIENT_SECRET,
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-    }
-    headers = {"Accept": "application/json"}
-    
-    try:
-        with httpx.Client() as client:
-            response = client.post(
-                "https://github.com",
-                data=payload,
-                headers=headers,
-                timeout=5.0
-            )
-        if response.status_code != 200:
-            return None
-            
-        data = response.json()
-        if "error" in data:
-            return None
-            
-        return data  # Contains: access_token, refresh_token, expires_in...
-    except httpx.RequestError:
-        return None
-
 
 @database_sync_to_async
 def get_user_from_github_token(access_token):
