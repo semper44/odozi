@@ -176,6 +176,8 @@ def dashboard_view(request):
 
     details_cache_key = f"user:repos:{user_id}"
     cached_repos = cache.get(details_cache_key)
+    user = User.objects.get(pk=user_id)
+    installed_github = UserProfileModel.objects.get(user=user).installed_github
 
     if cached_repos:
         print("")
@@ -253,6 +255,7 @@ def dashboard_view(request):
             "repositories": cleaned_repos,
             "repo_selection":serialized_repo_selection,
             "repo_names":repo_names,
+            "installed_github": installed_github,
             # "my_jwt_access_token": token_string,
             # "my_jwt_access_refresh": token_refresh_string,
             "github_access_token": github_access_token,
@@ -277,6 +280,7 @@ def dashboard_view(request):
             "repositories": cleaned_repos,
             "repo_selection":serialized_repo_selection,
             "my_jwt_access_token": token_string,
+            "installed_github": installed_github,
             "my_jwt_access_refresh": token_refresh_string,
             "username": username,
             "user_id": user_id,

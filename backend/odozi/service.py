@@ -69,10 +69,10 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
                 workspace.repositories.add(*repos_to_link) # type: ignore
 
         return {
-            "workspace_id": workspace.id,
             "workspace_name": workspace.name,
             "total_processed": len(repositories_data)
         }
+
 
 
 def get_installation_access_token(installation_id):

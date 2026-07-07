@@ -15,6 +15,7 @@ class UserProfileModel(models.Model):
     encrypted_access_token = models.BinaryField(blank=True, null=True)
     encrypted_refresh_token = models.BinaryField(blank=True, null=True)
     installation_id = models.BigIntegerField(unique=True, db_index=True, blank=True, null=True)    
+    installed_github = models.BooleanField(default=False)
     encrypted_jwt_access_token = models.BinaryField(blank=True, null=True)
     encrypted_jwt_refresh_token = models.BinaryField(blank=True, null=True)
     browser_family = models.CharField(max_length=500, blank=True, null=True)

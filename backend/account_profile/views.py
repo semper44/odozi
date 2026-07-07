@@ -300,15 +300,20 @@ def github_callback_view(request):
 
 
 
-class InstallGithubApp(View):
+class InstallGithubApp(APIView):
     authentication_classes = [HttpOnlyCookieJWTAuthentication]
     permission_classes = [IsAuthenticated]
     def get (self,request, *args, **kwargs):
         installation_id = request.GET.get("installation_id")
         setup_action = request.GET.get("setup_action")
+        cookies = request.COOKIES.get("jwt_access_token")
+        print("cookies", cookies, "bro")
 
+        print("")
         print(
+            "messi",
             installation_id,
+            "omo",
             setup_action
         )
 
@@ -318,20 +323,24 @@ class InstallGithubApp(View):
                 status=400
             )
 
+
+        UserProfileModel.objects.filter(user=request.user).update(
+                    installed_github=True,
+                    installation_id=installation_id
+        )
+
         cache_key = f"github:token:{installation_id}"
         cache.set(cache_key, installation_id, timeout=55 * 60)
+        
+        react_app_url = "http://localhost:5173/"
 
-        return Response({
-            "message": "GitHub installation linked",
-            "installation_id": installation_id,
-            "setup_action": setup_action
-        })
+        return HttpResponseRedirect(react_app_url)
 
 
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class GitHubRefreshView(View):
+class GitHubRefreshView(APIView):
     """Refresh GitHub access tokens using the stored refresh token and cookie state."""
 
     authentication_classes = [HttpOnlyCookieJWTAuthentication]
@@ -350,10 +359,6 @@ class GitHubRefreshView(View):
     def post(self, request):
 
         github_new_tokens = {}
-
-        if request.user.is_authenticated:
-            print("shantelllllllll")
-            print("")
 
         # if request.method != "POST":
         #     return JsonResponse({"error": "Method not allowed"}, status=405)

@@ -20,7 +20,7 @@ from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
 
-from account_profile.models import GitHubRepository, Workspace
+from account_profile.models import GitHubRepository, UserProfileModel, Workspace
 from django_python.schema import OrchestratorAction 
 
 from odozi.service import create_workspace_with_repos, get_installation_access_token
@@ -624,11 +624,12 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
             serializable_rules = [rule.model_dump() for rule in result.active_rules]
-            
+            installed_github_code = UserProfileModel.objects.get(user=user).installation_id
+
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_static_analysis_task",
-                    args=(serializable_rules,channel_name, repo_owner, cached_repositories) # 📥 Pass your variables as an ordered tuple
+                    args=(serializable_rules,channel_name, repo_owner, cached_repositories, installed_github_code) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -640,11 +641,12 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
             # You pass the task path name string and your parameters directly inside signature()
             result_dict = result.model_dump()
             serializable_workspaces = result_dict.get('workspaces_to_create', [])
+            ui_layout = result_dict.get('ui_layout', [])
             cached_repositories = cached_details.get("repositories", [])
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_workspace_creation_task",
-                    args=(serializable_workspaces, channel_name,user_id, cached_repositories) # 📥 Pass your variables as an ordered tuple
+                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -696,14 +698,14 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
 
 
 @shared_task
-def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, parent_repo_list):
+def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, parent_repo_list, installed_github_code):
     """
     Runs in parallel. Reads the repo list straight out of RAM memory parameters,
     requiring ZERO outbound network connections to Redis!
     """
     # Convert the passed parameter directly into a lookup set array
     # print(,"parent_repo_list", parent_repo_list)
-    print("active", active_rules,"saure", parent_repo_list)
+    print("active", installed_github_code,"saure", parent_repo_list)
     cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
 
@@ -730,7 +732,7 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
                         commit_sha="main", #work
                         target_branch=rule.get("target_branch") or "main",
                         ref_string=f"refs/heads/{rule.get("target_branch")}",
-                        installation_id="repo_obj.installation_id", #work
+                        installation_id=installed_github_code, 
                         user_requested_rules=rule.get("strategies")
                     )
                 )
@@ -745,7 +747,7 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
 
 
 @shared_task
-def async_handle_workspace_creation_task(workspaces,channel_name, user_id, parent_repo_list):
+def async_handle_workspace_creation_task(workspaces,channel_name, user_id, parent_repo_list, ui_layout):
     """
     Runs in parallel with zero cache lag hooks.
     """
@@ -805,12 +807,7 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
                 "type": "chat_message",
                 "payload": {
                     "type": "orchestration_result",
-                    "raw_output": {"ui_layout_route":ui_layout_route, "chat_response":chat_response},
-                    "usage": {
-                        "input_tokens": prompt_tokens,
-                        "output_tokens": completion_tokens,
-                        "cost": total_cost
-                    }
+                    "raw_output": {"ui_layout_route":ui_layout, "chat_response":str(workspace_and_repo_result)},
                 }
             }
         )
@@ -830,6 +827,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     # =========================================================================
     # ✅ STEP 0: GENERATE DYNAMIC 1-HOUR TOKEN VIA PRIVATE KEY
     # =========================================================================
+    print("installation_id", installation_id)
     try:
         # Trade installation_id + private key file for an active execution token
         git_token = get_installation_access_token(installation_id)

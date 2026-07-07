@@ -18,6 +18,7 @@ import { useCreateReposMutation, useCreateEnvKeysMutation } from "@/features/odo
 import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefresh";
 import { EnvVarModal } from "./ui/ENV vars/EnvVarModal"; 
 import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
+import { GitHubInstallation } from "../../../pages/registrationorlogin/install_github";
 // import {AgenticChatConsole} from "@features/streaming/api/AiChat.tsx"
 // import { EnvVariableCard } from "./ui/ENV vars/EnvVariableCard";
 
@@ -38,6 +39,8 @@ export default function Dashboard() {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedWorkspace, setSelectedWorkspace] = useState(""); // "" means "All Workspaces"
     const [isModalOpen, setIsModalOpen] = useState(false)
+    const [showInstallModal, setShowInstallModal] = useState(true);
+    const [hasCheckedInstallPrompt, setHasCheckedInstallPrompt] = useState(false);
 
     const selected = useSelectionStore((state) => state.selected);
     const useCreateRepos = useCreateReposMutation();
@@ -84,6 +87,19 @@ export default function Dashboard() {
         error,
     } = useRepos();
 
+    // useEffect(() => {
+    //     if (isLoading) return;
+
+    //     if (data?.installGithub === true) {
+    //         setShowInstallModal(true);
+    //         setHasCheckedInstallPrompt(true);
+    //         return;
+    //     }
+
+    //     if (data?.installGithub === false) {
+    //         setHasCheckedInstallPrompt(true);
+    //     }
+    // }, [data?.installGithub, hasCheckedInstallPrompt, isLoading]);
 
     
     // ✅ Console log streaming messages in Dashboard
@@ -93,7 +109,7 @@ export default function Dashboard() {
         }
     }, [streamingMessage]);
 
-    console.log( "alagbara", data?.expires_at)
+    console.log( "alagbara", error)
     localStorage.setItem("gh_token_expires_at", data?.expires_at);
     const get_time_obj = localStorage.getItem("jwt_token_expires_at");
     if (!get_time_obj && !get_time_obj["token"]) {
@@ -291,291 +307,298 @@ const createEnvVar = (keyList: string[], workspace:string) => {
     // }
 
 
-    return (<div>
-
+    return (
+        <>
         <div className="w-full flex pr-4 pl-2">
 
-        {/* left bar */}
-        <div className=" xl:mr-0 w-[11.5%] h-full flex flex-col hidden md:block">
+            {/* left bar */}
+            <div className=" xl:mr-0 w-[11.5%] h-full flex flex-col hidden md:block">
 
-            <div className="tabs flex flex-col h-full">
-                <div id="project-tabs" className="hidden xl:block">
-                    <div
-                        style={{ backgroundColor: '#be9ee2' }}
-                        className="cursor-pointer w-full px-3 py-2 mt-[27px] rounded-lg  hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
+                <div className="tabs flex flex-col h-full">
+                    <div id="project-tabs" className="hidden xl:block">
+                        <div
+                            style={{ backgroundColor: '#be9ee2' }}
+                            className="cursor-pointer w-full px-3 py-2 mt-[27px] rounded-lg  hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
+                            <House className="cursor-pointer" />
+                            <p >Home</p>
+                        </div>
+                    </div>
+
+                    {/* <!-- second tab  --> */}
+                    <div className="top-tabs w-full grid xl:hidden">
                         <House className="cursor-pointer" />
-                        <p >Home</p>
+                        <p
+                            className="cursor-pointer w-full px-3 py-2 mt-[27px] rounded-lg hover:bg-purple-200 bg-purple-300 hover:text-black flex items-center justify-start gap-3">
+                            Home</p>
+
+                        <p className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
+                            History</p>
                     </div>
                 </div>
-
-                {/* <!-- second tab  --> */}
-                <div className="top-tabs w-full grid xl:hidden">
-                    <House className="cursor-pointer" />
-                    <p
-                        className="cursor-pointer w-full px-3 py-2 mt-[27px] rounded-lg hover:bg-purple-200 bg-purple-300 hover:text-black flex items-center justify-start gap-3">
-                        Home</p>
-
-                    <p className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
-                        History</p>
-                </div>
-            </div>
-            
-        </div>
-
-        {/* center, topbar and right bar  */}
-        <div className="w-[80%] left-right-container flex-grow">
-            {/* topbar */}
-            <div className="w-full pt-[10px]">
-                <div className="w-full flex items-center gap-6 pl-2 pr-4">
-
-                    {/*  my proj */}
-                    <div className="my-proj w-fit hidden md:flex items-center gap-2">
-                        <p className="font-bold text-black">Welcome, John</p>
-                    </div>
-
-                    {/* <!-- input box parent --> */}
-                    <div className="flex justify-between items-center flex-grow">
-                        {/* <!-- input box --> */}
-                        <div className="w-[60%] xl:w-[72%] relative">
-                            <input 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                id="input-search" 
-                                type="text" 
-                                placeholder="Search Repos & Workspace"
-                                className="pl-4 rounded-xl h-[25px] w-full shadow-lg" />
-                            <div id="search-icon" className="absolute top-[25%] right-3">
-                                <Search className="w-4 h-4 text-gray-500" />
-                            </div>
-
-                        </div>
-
-                        {/* <!-- chat support icon --> */}
-                        <div onClick={() => {setIsAiOpen(!isAiOpen)}} id="ai-chat-support" className="md:w-[100px] w-fit p-4 mt-auto shadow-md rounded-full cursor-pointer grid items-center justify-center ">
-                            <div className="w-full flex justify-center">
-                                <Bot className="material-icons-outlined text-[12px]" />
-                            </div>
-                                <p className="text-[12px] hidden md:flex">Support</p>
-                        </div>
-                    </div>
-                </div>
+                
             </div>
 
-            {/* parent of right nd center bar */}
-            <div className="flex mt-4 h-[80vh]">
-                {/* ceenter menu */}
-                <div className="h-full w-[72%] flex-grow pr-4 pl-2">               
-                    {/* repo menu */}                 
-                    
-                    {(!isAiOpen && !isProcessingRequest) && (<div className="px-10 py-3">
-                        <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} filteredRepos={filteredRepositories} />
+            {/* center, topbar and right bar  */}
+            <div className="w-[80%] left-right-container flex-grow">
+                {/* topbar */}
+                <div className="w-full pt-[10px]">
+                    <div className="w-full flex items-center gap-6 pl-2 pr-4">
 
-                       {/* repo List */}
-                        <div className="space-y-4">
-                            {items.map((repo) => {
-                            // It is "ticked" if all are shown (no single match) OR if it is the single match
-                            const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
-
-                            return (
-                                <RepoCard
-                                    key={repo.id}
-                                    id={String(repo.id)}
-                                    name={repo.full_name}
-                                    image={"repo.avatar_url"}
-                                    isActive={isActive} // Pass the tick/active state to your card
-                                    workspaceName={"repo.workspaceName"}
-                                />
-                            );
-                            })}
-
-                            {/* Fallback for empty results */}
-                            {filteredRepositories.length === 0 && (
-                            <p className="text-gray-500 text-sm flex justify-center mt-4">No Workspace or Repositories found.</p>
-                            )}
+                        {/*  my proj */}
+                        <div className="my-proj w-fit hidden md:flex items-center gap-2">
+                            <p className="font-bold text-black">Welcome, John</p>
                         </div>
-                    </div>)}
 
-                    {/* AI menu */}
-                    {(isAiOpen || isProcessingRequest) && (<div className="AI-menu w-full h-full flex flex-col items-center justify-center gap-4">
-                                                <div className="w-full md:w-[75%] px-3 py-4 h-full">
-                            <div className="flex items-center justify-between">
-                                <div className="md:hidden">
-                                    <Menu id="expand-history" className="cursor-pointer"/>
+                        {/* <!-- input box parent --> */}
+                        <div className="flex justify-between items-center flex-grow">
+                            {/* <!-- input box --> */}
+                            <div className="w-[60%] xl:w-[72%] relative">
+                                <input 
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    id="input-search" 
+                                    type="text" 
+                                    placeholder="Search Repos & Workspace"
+                                    className="pl-4 rounded-xl h-[25px] w-full shadow-lg" />
+                                <div id="search-icon" className="absolute top-[25%] right-3">
+                                    <Search className="w-4 h-4 text-gray-500" />
                                 </div>
-                                <ChevronLeft onClick={() => ClickBackIconTasks()} className="cursor-pointer"/>
+
                             </div>
-                            {/* ai-chat-placeholder */}
-                            <div id="ai-chat-placeholder" className=" h-[100%] w-full justify-center items-center">
-                                {/* chat panel */}
-                                {(isAiOpen && !isProcessingRequest) && <div className="w-full h-[80%] flex flex-col items-center">
-                                    <h1 className="text-black"><span id="gradient-text" className="bg-gradient-to-r from-[#be9ee2] to-white bg-clip-text text-transparent font-bold">Hy Dear</span> This is an AI assited chat</h1>
-                                    <img src={gradientBg } alt="Robot AI" className="w-[35%]" style={{ width : "35%"}} />
-                                    <p className="text-black pt-3">How can i help?</p>
-                                    {/* input */}
-                                    <div className="w-[70%] h-[20%] justify-self-center">
-                                        <div className="relative w-[90%] h-[60%]">
-                                                {isPending ? (
 
-                                                    <div className="relative w-full">
-                                                        <input 
-                                                            type="text"
-                                                            value={prompt}
-                                                            onChange={(e) => setPrompt(e.target.value)}
-                                                            // 🌟 Captures the Enter key natively and fires the clean string text
-                                                            onKeyDown={(e) => {
-                                                            if (e.key === "Enter" && !isPending && prompt.trim()) {
-                                                                handleSendRequest(prompt);
-                                                                setPrompt(""); // Instantly clear the inline input field state
-                                                            }
-                                                            }}
-                                                            placeholder="Type a message..."
-                                                            className={`pl-4 rounded-xl border w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
-                                                            style={{ borderColor: "black" }}
-                                                        />
-                                                        
-                                                        <button 
-                                                            type="button" // 🌟 Changed from "submit" to "button" to avoid form triggers
-                                                            onClick={() => {
-                                                            if (!isPending && prompt.trim()) {
-                                                                handleSendRequest(prompt);
-                                                                setPrompt(""); // Clear input state on mouse click
-                                                            }
-                                                            }}
-                                                            id="send-icon" 
-                                                            className="animate-spin absolute top-[30%] right-[5%] cursor-pointer flex items-center justify-center"
-                                                            disabled={isPending || !prompt.trim()}
-                                                        >
-                                                            bbb
-                                                            <SendHorizontal />            
-                                                        </button>
-                                                    </div>
-
-                                                    
-                                                ) : (
-                                                   <div className="relative w-full">
-                                                        <input 
-                                                            type="text"
-                                                            value={prompt}
-                                                            onChange={(e) => setPrompt(e.target.value)}
-                                                            // 🌟 Capture the keyboard Enter key manually without page-reload events
-                                                            onKeyDown={(e) => {
-                                                            if (e.key === "Enter" && prompt.trim()) {
-                                                                handleSendRequest(prompt);
-                                                                setPrompt(""); // Clear out your local input box state text
-                                                            }
-                                                            }}
-                                                            placeholder="Type a message..."
-                                                        />
-                                                        
-                                                        <button 
-                                                            type="button" // Changed from "submit" to "button"
-                                                            onClick={() => {
-                                                            if (prompt.trim()) {
-                                                                handleSendRequest(prompt);
-                                                                setPrompt(""); // Clear input state on mouse click
-                                                            }
-                                                            }}
-                                                            id="send-icon" 
-                                                            className="absolute top-[30%] right-[5%] cursor-pointer bg-transparent border-none p-0 flex items-center justify-center"
-                                                        >
-                                                            <SendHorizontal />            
-                                                        </button>
-                                                    </div>
-
-                                                )}
-                                            
-                                        </div>
-                                    </div>
-                                </div>}
-
-                                {/* live terminal component */}
-                                {/* 🌟 FIX: Remove 'isProcessingRequest' from the outer mounting gate rule */}
-                                {!isAiOpen && (
-                                streamingMessage?.raw_output?.ui_layout_route === "TERM" ? (
-                                    <div className="w-full h-[80%]">
-                                    <LiveTerminal />
-                                    </div>
-                                ) : (
-                                    <div className="w-full h-[80%]">
-                                    {/* The Chat box stays mounted on your dashboard screen layout permanently */}
-                                    <AIChat 
-                                        messages={messages}
-                                        onSendMessage={(text) => handleSendRequest(text)}
-                                        // The loader spinner itself handles turning on/off cleanly inside the file
-                                        isAiLoading={isProcessing} 
-                                    />
-                                    </div>
-                                )
-                                )}
-
-                                    
+                            {/* <!-- chat support icon --> */}
+                            <div onClick={() => {setIsAiOpen(!isAiOpen)}} id="ai-chat-support" className="md:w-[100px] w-fit p-4 mt-auto shadow-md rounded-full cursor-pointer grid items-center justify-center ">
+                                <div className="w-full flex justify-center">
+                                    <Bot className="material-icons-outlined text-[12px]" />
+                                </div>
+                                    <p className="text-[12px] hidden md:flex">Support</p>
                             </div>
-                            
                         </div>
-                    </div>)}
+                    </div>
                 </div>
 
-                {/* right bar */}
-                <div className="w-[25%] h-full pt-3 items-center gap-4 pl-4 hidden lg:flex flex-col justify-start">
+                {/* parent of right nd center bar */}
+                <div className="flex mt-4 h-[80vh]">
+                    {/* ceenter menu */}
+                    <div className="h-full w-[72%] flex-grow pr-4 pl-2">               
+                        {/* repo menu */}                 
+                        
+                        {(!isAiOpen && !isProcessingRequest) && (<div className="px-10 py-3">
+                            <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} filteredRepos={filteredRepositories} />
 
-                    {/* Include your absolute rendering portal layer down at the bottom of the node string tree */}
-                    <WorkspaceModal
-                        isOpen={isModalOpen}
-                        onClose={() => setIsModalOpen(false)}
-                        allRepositories={items || []} // ✅ Feed the entire collection into the modal!
-                        selectedIds={selectedIdsSet}               // ✅ Pass the store selection tracker reference
-                        onToggleSelect={toggleSelect}               // ✅ Pass the action selection click modifier handler
-                        onSubmit={handleCreateWorkspace}
-                        isPending={useCreateRepos.isPending}
-                    />
-                    
-                    <div className="w-full space-y-4 flex items-center">
-                        <button 
-                            onClick={() => setIsModalOpen(true)}
-                            className="p-1 mt-2 bg-green-500 hover:bg-green-700 text-white rounded-full shadow-sm transition-colors cursor-pointer mr-4"
-                            >
-                            <Plus className="w-5 h-5" />
-                        </button>
-                        {/* workspace List */}
-                        <div className="space-y-4">
-                            <WorkspaceDropdown
-                                workspaces={data?.uniqueWorkspaces || ["olive corp"]}
-                                selectedWorkspace={selectedWorkspace}
-                                onSelectWorkspace={setSelectedWorkspace}
-                            />
+                        {/* repo List */}
+                            <div className="space-y-4">
+                                {items.map((repo) => {
+                                // It is "ticked" if all are shown (no single match) OR if it is the single match
+                                const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
+
+                                return (
+                                    <RepoCard
+                                        key={repo.id}
+                                        id={String(repo.id)}
+                                        name={repo.full_name}
+                                        image={"repo.avatar_url"}
+                                        isActive={isActive} // Pass the tick/active state to your card
+                                        workspaceName={"repo.workspaceName"}
+                                    />
+                                );
+                                })}
+
+                                {/* Fallback for empty results */}
+                                {filteredRepositories.length === 0 && (
+                                <p className="text-gray-500 text-sm flex justify-center mt-4">No Workspace or Repositories found.</p>
+                                )}
+                            </div>
+                        </div>)}
+
+                        {/* AI menu */}
+                        {(isAiOpen || isProcessingRequest) && (<div className="AI-menu w-full h-full flex flex-col items-center justify-center gap-4">
+                                                    <div className="w-full md:w-[75%] px-3 py-4 h-full">
+                                <div className="flex items-center justify-between">
+                                    <div className="md:hidden">
+                                        <Menu id="expand-history" className="cursor-pointer"/>
+                                    </div>
+                                    <ChevronLeft onClick={() => ClickBackIconTasks()} className="cursor-pointer"/>
+                                </div>
+                                {/* ai-chat-placeholder */}
+                                <div id="ai-chat-placeholder" className=" h-[100%] w-full justify-center items-center">
+                                    {/* chat panel */}
+                                    {(isAiOpen && !isProcessingRequest) && <div className="w-full h-[80%] flex flex-col items-center">
+                                        <h1 className="text-black"><span id="gradient-text" className="bg-gradient-to-r from-[#be9ee2] to-white bg-clip-text text-transparent font-bold">Hy Dear</span> This is an AI assited chat</h1>
+                                        <img src={gradientBg } alt="Robot AI" className="w-[35%]" style={{ width : "35%"}} />
+                                        <p className="text-black pt-3">How can i help?</p>
+                                        {/* input */}
+                                        <div className="w-[70%] h-[20%] justify-self-center">
+                                            <div className="relative w-[90%] h-[60%]">
+                                                    {isPending ? (
+
+                                                        <div className="relative w-full">
+                                                            <input 
+                                                                type="text"
+                                                                value={prompt}
+                                                                onChange={(e) => setPrompt(e.target.value)}
+                                                                // 🌟 Captures the Enter key natively and fires the clean string text
+                                                                onKeyDown={(e) => {
+                                                                if (e.key === "Enter" && !isPending && prompt.trim()) {
+                                                                    handleSendRequest(prompt);
+                                                                    setPrompt(""); // Instantly clear the inline input field state
+                                                                }
+                                                                }}
+                                                                placeholder="Type a message..."
+                                                                className={`pl-4 rounded-xl border w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
+                                                                style={{ borderColor: "black" }}
+                                                            />
+                                                            
+                                                            <button 
+                                                                type="button" // 🌟 Changed from "submit" to "button" to avoid form triggers
+                                                                onClick={() => {
+                                                                if (!isPending && prompt.trim()) {
+                                                                    handleSendRequest(prompt);
+                                                                    setPrompt(""); // Clear input state on mouse click
+                                                                }
+                                                                }}
+                                                                id="send-icon" 
+                                                                className="animate-spin absolute top-[30%] right-[5%] cursor-pointer flex items-center justify-center"
+                                                                disabled={isPending || !prompt.trim()}
+                                                            >
+                                                                bbb
+                                                                <SendHorizontal />            
+                                                            </button>
+                                                        </div>
+
+                                                        
+                                                    ) : (
+                                                    <div className="relative w-full">
+                                                            <input 
+                                                                type="text"
+                                                                value={prompt}
+                                                                onChange={(e) => setPrompt(e.target.value)}
+                                                                // 🌟 Capture the keyboard Enter key manually without page-reload events
+                                                                onKeyDown={(e) => {
+                                                                if (e.key === "Enter" && prompt.trim()) {
+                                                                    handleSendRequest(prompt);
+                                                                    setPrompt(""); // Clear out your local input box state text
+                                                                }
+                                                                }}
+                                                                placeholder="Type a message..."
+                                                            />
+                                                            
+                                                            <button 
+                                                                type="button" // Changed from "submit" to "button"
+                                                                onClick={() => {
+                                                                if (prompt.trim()) {
+                                                                    handleSendRequest(prompt);
+                                                                    setPrompt(""); // Clear input state on mouse click
+                                                                }
+                                                                }}
+                                                                id="send-icon" 
+                                                                className="absolute top-[30%] right-[5%] cursor-pointer bg-transparent border-none p-0 flex items-center justify-center"
+                                                            >
+                                                                <SendHorizontal />            
+                                                            </button>
+                                                        </div>
+
+                                                    )}
+                                                
+                                            </div>
+                                        </div>
+                                    </div>}
+
+                                    {/* live terminal component */}
+                                    {/* 🌟 FIX: Remove 'isProcessingRequest' from the outer mounting gate rule */}
+                                    {!isAiOpen && (
+                                    streamingMessage?.raw_output?.ui_layout_route === "TERM" ? (
+                                        <div className="w-full h-[80%]">
+                                        <LiveTerminal />
+                                        </div>
+                                    ) : (
+                                        <div className="w-full h-[80%]">
+                                        {/* The Chat box stays mounted on your dashboard screen layout permanently */}
+                                        <AIChat 
+                                            messages={messages}
+                                            onSendMessage={(text) => handleSendRequest(text)}
+                                            // The loader spinner itself handles turning on/off cleanly inside the file
+                                            isAiLoading={isProcessing} 
+                                        />
+                                        </div>
+                                    )
+                                    )}
+
+                                        
+                                </div>
+                                
+                            </div>
+                        </div>)}
+                    </div>
+
+                    {/* right bar */}
+                    <div className="w-[25%] h-full pt-3 items-center gap-4 pl-4 hidden lg:flex flex-col justify-start">
+
+                        {/* Include your absolute rendering portal layer down at the bottom of the node string tree */}
+                        <WorkspaceModal
+                            isOpen={isModalOpen}
+                            onClose={() => setIsModalOpen(false)}
+                            allRepositories={items || []} // ✅ Feed the entire collection into the modal!
+                            selectedIds={selectedIdsSet}               // ✅ Pass the store selection tracker reference
+                            onToggleSelect={toggleSelect}               // ✅ Pass the action selection click modifier handler
+                            onSubmit={handleCreateWorkspace}
+                            isPending={useCreateRepos.isPending}
+                        />
+                        
+                        <div className="w-full space-y-4 flex items-center">
+                            <button 
+                                onClick={() => setIsModalOpen(true)}
+                                className="p-1 mt-2 bg-green-500 hover:bg-green-700 text-white rounded-full shadow-sm transition-colors cursor-pointer mr-4"
+                                >
+                                <Plus className="w-5 h-5" />
+                            </button>
+                            {/* workspace List */}
+                            <div className="space-y-4">
+                                <WorkspaceDropdown
+                                    workspaces={data?.uniqueWorkspaces || ["olive corp"]}
+                                    selectedWorkspace={selectedWorkspace}
+                                    onSelectWorkspace={setSelectedWorkspace}
+                                />
+                            </div>
                         </div>
-                    </div>
-                    {/* create env variables */}
-                    <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
-                        onClick={() => setEnvShowModal(!envShowModal)}
-                    >
-                        <span className="text-sm font-semibold text-gray-700">
-                        Create env vars
-                        </span>
-                    </div>
-                    {envShowModal &&<EnvVarModal 
-                    isOpen={envShowModal} 
-                    onClose={() => setEnvShowModal(false)} 
-                    selected={selected}
-                    workspace = {selectedWorkspace} 
-                    onSubmit={createEnvVar}
-                    isPending={useCreateEnv.isPending}
-                    
-                    />} 
-                    {/* select LLM */}
-                    <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
-                        onClick={() => setShowLlmModal(!showLlmModal)}
-                    >
-                        <span className="text-sm font-semibold text-gray-700">
-                        Select LLM
-                        </span>
-                    </div> 
-                    {showLlmModal &&<LLMConfigModal isOpen={showLlmModal} onClose={() => setShowLlmModal(false)}/> }
+                        {/* create env variables */}
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
+                            onClick={() => setEnvShowModal(!envShowModal)}
+                        >
+                            <span className="text-sm font-semibold text-gray-700">
+                            Create env vars
+                            </span>
+                        </div>
+                        {envShowModal &&<EnvVarModal 
+                        isOpen={envShowModal} 
+                        onClose={() => setEnvShowModal(false)} 
+                        selected={selected}
+                        workspace = {selectedWorkspace} 
+                        onSubmit={createEnvVar}
+                        isPending={useCreateEnv.isPending}
+                        
+                        />} 
+                        {/* select LLM */}
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
+                            onClick={() => setShowLlmModal(!showLlmModal)}
+                        >
+                            <span className="text-sm font-semibold text-gray-700">
+                            Select LLM
+                            </span>
+                        </div> 
+                        {showLlmModal &&<LLMConfigModal isOpen={showLlmModal} onClose={() => setShowLlmModal(false)}/> }
 
-                </div>  
-    </div>
+                    </div>  
         </div>
             </div>
-        </div>);
         
+        </div>
+
+        <GitHubInstallation
+            isOpen={showInstallModal}
+            onClose={() => setShowInstallModal(false)}
+        />
+        </>
+    );
+    
 }
