@@ -40,6 +40,7 @@ from odozi.utils.auth import get_browser_family, get_client_ip
 from odozi.utils.crypto import encrypt_token, decrypt_token
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.authentication import rotate_github_token
+from odozi.service import get_installation_access_token
 from agents.tasks import run_agentic_pipeline
 from .models import UserProfileModel, Workspace, WorkspaceMembership, GitHubRepository, UserLLMConfig
 from .serializers import OdoziCustomRefreshToken
@@ -185,8 +186,8 @@ class GitHubRefreshView(View):
             print("shantelllllllll")
             print("")
 
-        if request.method != "POST":
-            return JsonResponse({"error": "Method not allowed"}, status=405)
+        # if request.method != "POST":
+        #     return JsonResponse({"error": "Method not allowed"}, status=405)
 
         try:
             print("Refresh token request body:", request.COOKIES)
@@ -211,6 +212,19 @@ class GitHubRefreshView(View):
 
         expires_at = isoparse(expires_at)
         elapsed = timezone.now() - expires_at
+
+        profile = UserProfileModel.objects.get(user = request.user)
+        installation_id = profile.installation_id
+        cache_key = f"github:token:{installation_id}"
+        token = cache.get(cache_key)
+
+        if not token:
+            print(f"⚡ [TOKEN CACHE HIT] Reusing cached GitHub token for installation {installation_id}")
+            print(f"⏳ [TOKEN CACHE MISS] Generating a fresh GitHub token...")
+            # Call your original dynamic function to mint a fresh 1-hour token
+            fresh_token = get_installation_access_token(installation_id)
+            cache.set(cache_key, fresh_token, timeout=55 * 60)
+                
 
         # check if its necessary to poll github
         if elapsed is not None and elapsed >= timedelta(hours=7):
@@ -600,13 +614,6 @@ def github_callback_view(request):
 
     expiration_time = timezone.now() + datetime.timedelta(seconds=expires_in_seconds)
     expires_at_iso = expiration_time.isoformat() # Looks like: "2026-06-02T23:57:00.000Z"
-
-    
-    # 1. GENERATE THE SHORT-LIVED 60-SECOND TRANSIT TICKET
-    ticket_id = str(uuid.uuid4())
-    redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
-    if not installation_id:
-        profile.installation_id = installation_id
     
     
     profile.encrypted_refresh_token = encrypt_token(raw_refresh_token)
@@ -709,6 +716,17 @@ def github_ticket(request):
     return JsonResponse({'ticket': ticket_id})
 
 
+
+
+class InstallGithubApp(view):
+    def post (request, *args, **kwargs):
+            # 1. GENERATE THE SHORT-LIVED 60-SECOND TRANSIT TICKET
+        ticket_id = str(uuid.uuid4())
+        redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
+        if installation_id:
+            profile.installation_id = installation_id
+            cache_key = f"github:token:{installation_id}"
+            cache.set(cache_key, installation_id, timeout=55 * 60)
 
 
 

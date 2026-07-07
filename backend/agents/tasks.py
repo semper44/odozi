@@ -4,13 +4,13 @@ import subprocess
 import textwrap
 import os
 import re
-import requests
 import uuid
 import json
 import time
 import jwt
 import base64
 import inspect
+import requests
 from toon import encode
 from typing import cast
 
@@ -23,7 +23,7 @@ from .custom_functions import rule_classes
 from account_profile.models import GitHubRepository, Workspace
 from django_python.schema import OrchestratorAction 
 
-from odozi.service import create_workspace_with_repos
+from odozi.service import create_workspace_with_repos, get_installation_access_token
 
 
 from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage
@@ -356,46 +356,6 @@ def ensure_orchestrator_yaml_is_online(
 
 
 
-def get_installation_access_token(installation_id):
-    """
-    Uses your Private Key to mint a JWT, then exchanges it for a 
-    short-lived 1-hour installation access token from GitHub.
-    """
-    # 1. Prepare the cryptographic JWT claims payload
-    issued_at = int(time.time()) - 60  # Account for minor clock drifts (1 min ago)
-    expires_at = issued_at + (10 * 60) # JWTs have a maximum lifetime limit of 10 minutes
-    
-    payload = {
-        "iss": settings.ODOZI_APP_ID,  # Your GitHub App's unique identifier
-        "iat": issued_at,
-        "exp": expires_at,
-    }
-    
-
-    # 2. Encode and sign the JWT using your multi-line RSA Private Key
-    encoded_jwt = jwt.encode(payload, settings.GITHUB_APP_PRIVATE_KEY, algorithm="RS256")
-    
-    # 3. Request the temporary installation token from GitHub
-    url = (
-        f"https://api.github.com/app/installations/{installation_id}/access_tokens"
-    )
-    headers = {
-            "Authorization": f"Bearer {encoded_jwt}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-
-        }
-    
-    response = requests.post(url, headers=headers)
-    print("Status:", response.status_code)
-    print("Response:", response.text)
-    
-    if response.status_code == 201:
-        # Success: Returns a dictionary containing your temporary token string
-        return response.json().get("token")
-    else:
-        raise Exception(f"Failed to generate installation token: {response.text}")
-
 
 
 system_instruction_text = """
@@ -639,6 +599,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
                     cache.set(details_cache_key, cached_details, timeout=28800)
 
             except requests.RequestException as e:
+                print(f"Error occurred while fetching repositories: {e}")
                 async_to_sync(channel_layer.group_send)(
                     channel_name,
                     {
@@ -667,7 +628,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_static_analysis_task",
-                    args=(serializable_rules, repo_owner, cached_repositories) # 📥 Pass your variables as an ordered tuple
+                    args=(serializable_rules,channel_name, repo_owner, cached_repositories) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -683,7 +644,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
             intent_signatures.append(
                 signature(
                     "agents.tasks.async_handle_workspace_creation_task",
-                    args=(serializable_workspaces, user_id, cached_repositories) # 📥 Pass your variables as an ordered tuple
+                    args=(serializable_workspaces, channel_name,user_id, cached_repositories) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -735,7 +696,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
 
 
 @shared_task
-def async_handle_static_analysis_task(active_rules, repo_owner, parent_repo_list):
+def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, parent_repo_list):
     """
     Runs in parallel. Reads the repo list straight out of RAM memory parameters,
     requiring ZERO outbound network connections to Redis!
@@ -784,7 +745,7 @@ def async_handle_static_analysis_task(active_rules, repo_owner, parent_repo_list
 
 
 @shared_task
-def async_handle_workspace_creation_task(workspaces, user_id, parent_repo_list):
+def async_handle_workspace_creation_task(workspaces,channel_name, user_id, parent_repo_list):
     """
     Runs in parallel with zero cache lag hooks.
     """
@@ -795,6 +756,8 @@ def async_handle_workspace_creation_task(workspaces, user_id, parent_repo_list):
 
     if not workspaces:
         return
+    
+    channel_layer = get_channel_layer()
 
     # 1. 🚀 FIX: Store the whole raw repo dict tied to its lowercase matching key
     # If parent_repo_list is just a list of strings, match the string directly
@@ -835,7 +798,22 @@ def async_handle_workspace_creation_task(workspaces, user_id, parent_repo_list):
 
         # 3. Safe validation pass execution
         if len(repos_found) > 0:
-            create_workspace_with_repos(user, ws_name, repos_found)
+            workspace_and_repo_result = create_workspace_with_repos(user, ws_name, repos_found)
+            async_to_sync(channel_layer.group_send)(
+            channel_name, # Targets the static room name string
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {"ui_layout_route":ui_layout_route, "chat_response":chat_response},
+                    "usage": {
+                        "input_tokens": prompt_tokens,
+                        "output_tokens": completion_tokens,
+                        "cost": total_cost
+                    }
+                }
+            }
+        )
         else:
             print(f"ogbemudia - No repos found for workspace: {ws_name}")
             

@@ -91,7 +91,7 @@ def dashboard_view(request):
         redis_ticket_key = f"redis_auth_ws_transit_ticket:{ticket_id}" if ticket_id else None
         raw_payload = cache.get(redis_ticket_key) if redis_ticket_key else None
         
-        print(f"📡 [DASHBOARD] Transit execution path. Redis Payload resolved")
+        print(f"📡 [DASHBOARD] Transit - {raw_payload}")
         
         if not raw_payload:
             return JsonResponse({"error": "Transit ticket expired or already consumed."}, status=403)
@@ -138,17 +138,14 @@ def dashboard_view(request):
     # --- PATH B: SUBSEQUENT PAGE REFRESHES (HttpOnly Cookie Token Present) ---
     
     elif stored_jwt_access_token and stored_jwt_access_token != None and stored_jwt_access_token != "None":
-        print("🍪 [DASHBOARD] Recycled cookie execution path. Authenticating via token string payload...")
-        # print(cached_repos)
-        print("idri111111111")
-        print("idrisss")
+        print("idri111111111", stored_jwt_access_token)
         print(stored_jwt_access_token != None)
         print(stored_jwt_access_token != "None")
         print("")
         try:
             # If your cookie stores raw unencrypted text, read directly; if encrypted, run decrypt_token()
             github_access_token = stored_jwt_access_token.decode("utf-8") if isinstance(stored_jwt_access_token, bytes) else stored_jwt_access_token
-            token_refresh_string = request.COOKIES.get("jwt_refresh_token")
+            # token_refresh_string = request.COOKIES.get("jwt_refresh_token")
 
             print("22222",stored_jwt_access_token)
             parsed_jwt = AccessToken(stored_jwt_access_token) # type: ignore
@@ -188,7 +185,7 @@ def dashboard_view(request):
         # cleaned_repos = json.loads(cached_repos) if isinstance(cached_repos, str) else cached_repos
         response = JsonResponse(cached_repos, status=200)
     else:
-        print(f"🌐 [CACHE MISS] Querying fresh data arrays from GitHub REST API for user '{username}'...")
+        print(f"🌐 [CACHE MISS] Querying fresh data'{github_access_token}'...")
         repos_url = f"https://api.github.com/users/{username}/repos"
         headers = {
             "Authorization": f"Bearer {github_access_token}",
