@@ -16,7 +16,6 @@ from typing import cast
 
 from celery import shared_task, group, chord
 
-from .custom_functions.rules_library import LIBRARY
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
 
@@ -705,7 +704,6 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
     """
     # Convert the passed parameter directly into a lookup set array
     # print(,"parent_repo_list", parent_repo_list)
-    print("active", installed_github_code,"saure", parent_repo_list)
     cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
 
@@ -717,11 +715,9 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
     for rule in active_rules:
         print(f"rule.repo_name - {rule.get('repo_name')}")
         sanitized_name = rule.get('repo_name').lower().replace(" ", "-").strip()
-        print(f"sanitized_name - {sanitized_name}")
         matched_repo_dict = next((repo for low_name, repo in cached_pairs if sanitized_name in low_name), None)
         if matched_repo_dict:
             try:
-                print("appending")
                 # Append the task signature context blocks to the array list
                 pipeline_tasks.append(
                     run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
@@ -763,7 +759,6 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
 
     # 1. 🚀 FIX: Store the whole raw repo dict tied to its lowercase matching key
     # If parent_repo_list is just a list of strings, match the string directly
-    print(type(parent_repo_list),"parent_repo_list", parent_repo_list)
     cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
     
@@ -827,11 +822,9 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     # =========================================================================
     # ✅ STEP 0: GENERATE DYNAMIC 1-HOUR TOKEN VIA PRIVATE KEY
     # =========================================================================
-    print("installation_id", installation_id)
     try:
         # Trade installation_id + private key file for an active execution token
         git_token = get_installation_access_token(installation_id)
-        print("SUCCESS: Fresh 1-hour installation token generated safely.")
     except Exception as e:
         print(f"CRITICAL: Token generation failed: {str(e)}")
         return {"status": "error", "message": "Authentication token exchange failure"}
@@ -841,7 +834,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
     # =========================================================================
     ensure_orchestrator_yaml_is_online(repo_owner, repo_name, default_branch, target_branch, git_token)
     print("")
-    print({"default_branch": default_branch, "commit_sha": commit_sha, "target_branch": target_branch, "ref_string": ref_string})
+    print({"default_branch": user_requested_rules})
     base_classes_text = inspect.getsource(rule_classes)
     
     # Strip any local manual __main__ loop if it exists in your file text

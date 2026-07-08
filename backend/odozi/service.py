@@ -69,7 +69,7 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
                 workspace.repositories.add(*repos_to_link) # type: ignore
 
         return {
-            "workspace_name": workspace.name,
+            "workspace_name": f"created {workspace.name} for {repositories_data}",
             "total_processed": len(repositories_data)
         }
 
