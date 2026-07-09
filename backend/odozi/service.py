@@ -266,6 +266,51 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
 
 
 
+
+def delete_repo_env_keys_service(user, key_names: list, selected_repo_ids: list) -> dict:
+    """
+    Business service to find and bulk-delete specified environment variable keys 
+    across selected repositories belonging to the requesting user.
+    """
+    if not key_names or not selected_repo_ids:
+        raise ValidationError("Must provide both non-empty key names and repository targets.")
+
+    # Clean and uppercase input query keys to ensure exact case matching bounds
+    cleaned_keys = list(set([str(name).strip().upper() for name in key_names if str(name).strip()]))
+
+    with transaction.atomic():
+        # Verify the target repositories exist and are owned by the workspace user context
+        # This prevents security leakage across tenant workspaces
+        target_repos = GitHubRepository.objects.filter(
+            repo_id__in=selected_repo_ids,
+            workspace__owner=user
+        )
+        
+        if not target_repos.exists():
+            return {
+                "status": "success",
+                "message": "No matching repositories found to delete keys from.",
+                "deleted_count": 0
+            }
+
+        # 🚀 BULK PURGE: Delete all matching keys in a single query
+        delete_query = RepoEnvKey.objects.filter(
+            repo__in=target_repos,
+            key_name__in=cleaned_keys
+        )
+        
+        deleted_count, _ = delete_query.delete()
+
+        return {
+            "status": "success",
+            "message": f"Successfully deleted {deleted_count} environment variables.",
+            "deleted_count": deleted_count,
+            "targeted_keys": cleaned_keys,
+            "affected_repositories_count": target_repos.count()
+        }
+
+
+
 def get_installation_access_token(installation_id):
     """
     Uses your Private Key to mint a JWT, then exchanges it for a 

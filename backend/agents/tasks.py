@@ -22,7 +22,10 @@ from .custom_functions import rule_classes
 from account_profile.models import GitHubRepository, UserProfileModel, Workspace
 from django_python.schema import OrchestratorAction 
 
-from odozi.service import create_workspace_with_repos, get_installation_access_token
+from odozi.service import (create_workspace_with_repos, get_installation_access_token, 
+                           create_repo_env_keys_service,delete_repo_env_keys_service,  
+                           delete_workspace_with_repos
+)
 
 
 from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage
@@ -853,7 +856,7 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
 
         try:
             # 1. Fire your decoupled service processing transaction logic block
-            execution_result = delete_workspace_and_orphan_repos(
+            execution_result = delete_workspace_with_repos(
                 user=user,
                 workspace_id=int(workspace_id)
             )
@@ -893,6 +896,173 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
 
 
 @shared_task
+def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
+    """
+    Asynchronously processes environment key mapping and repository linking.
+    Fires real-time success stats straight down the user's WebSocket pipe.
+    """
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return "User context verification failure"
+
+    if not env_key_requests:
+        return "No configuration data provided"
+
+    channel_layer = get_channel_layer()
+    
+    # Ensure list type checking compliance even if a single dict object lands from the LLM
+    requests_list = env_key_requests if isinstance(env_key_requests, list) else [env_key_requests]
+
+    # Map the full repository array cache list natively for safe matching bounds
+    cached_map = {repo.get('name', '').lower().strip(): repo for repo in parent_repo_list if isinstance(repo, dict)}
+
+    for req in requests_list:
+        workspace_name = req.get("workspace_name") or req.get("workspace", "")
+        raw_key_names = req.get("key_names", [])
+        raw_target_repos = req.get("repositories", []) or req.get("repo_names", [])
+
+        selected_repo_ids = []
+
+        # 1. 🔍 SINGLE LINE LOOP: Match user inputs to your parent cached array list items
+        for raw_name in raw_target_repos:
+            user_input = str(raw_name).lower().replace(" ", "-").strip()
+            
+            if user_input in cached_map:
+                matched_id = cached_map[user_input].get("id")
+                if matched_id:
+                    selected_repo_ids.append(matched_id)
+
+        if not selected_repo_ids:
+            print(f"⚠️ Env Key Warning: No cached repository entries could be verified for inputs: {raw_target_repos}")
+            continue
+
+        try:
+            # 2. ⚡ FIRE TRANSACTION: Invoke your business service function natively inside the worker
+            service_result = create_repo_env_keys_service(
+                user=user,
+                repositories_data=parent_repo_list, # Passes cache list metadata for bulk-creation processing fallback
+                key_names=raw_key_names,
+                workspace_name=workspace_name,
+                selected_repo_ids=selected_repo_ids
+            )
+
+            # 3. 🚀 IMMEDIATE BROADCAST: Push the success summary metrics right out to the client browser
+            chat_confirmation_text = (
+                f"Successfully injected {service_result['environment_keys_created_count']} new environment keys "
+                f"across {len(selected_repo_ids)} repositories under the '{workspace_name}' workspace environment profile context."
+            )
+
+            async_to_sync(channel_layer.group_send)(
+                channel_name,
+                {
+                    "type": "chat_message",
+                    "payload": {
+                        "type": "orchestration_result",
+                        "raw_output": {
+                            "ui_layout_route": ui_layout,
+                            "chat_response": chat_confirmation_text,
+                            "key_injection_details": service_result # Feeds rich summary metadata maps straight to React state
+                        },
+                    }
+                }
+            )
+
+        except Exception as service_error:
+            print(f"🚨 Background worker environmental key processing failure: {str(service_error)}")
+            continue
+
+    return "Environmental variable configuration pipeline loop complete"
+
+
+
+# agents/tasks.py
+from celery import shared_task
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from django.contrib.auth import get_user_model
+from .services import delete_repo_env_keys_service # 🌟 Import your new deletion service layer
+
+User = get_user_model()
+
+@shared_task
+def async_handle_env_key_deletion_task(env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
+    """
+    Asynchronously processes environment key deletion parameters.
+    Fires removal logs directly down the user's secure room WebSocket pipe.
+    """
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return "User context verification failure"
+
+    if not env_key_requests:
+        return "No configuration data provided for key deletion"
+
+    channel_layer = get_channel_layer()
+    requests_list = env_key_requests if isinstance(env_key_requests, list) else [env_key_requests]
+
+    # Map the full repository array cache list natively for safe matching bounds
+    cached_map = {repo.get('name', '').lower().strip(): repo for repo in parent_repo_list if isinstance(repo, dict)}
+
+    for req in requests_list:
+        raw_key_names = req.get("key_names", [])
+        raw_target_repos = req.get("repositories", []) or req.get("repo_names", [])
+
+        selected_repo_ids = []
+
+        # Match loose string inputs to your parent cached array list items to gather specific IDs
+        for raw_name in raw_target_repos:
+            user_input = str(raw_name).lower().replace(" ", "-").strip()
+            
+            if user_input in cached_map:
+                matched_id = cached_map[user_input].get("id")
+                if matched_id:
+                    selected_repo_ids.append(matched_id)
+
+        if not selected_repo_ids or not raw_key_names:
+            print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
+            continue
+
+        try:
+            # Execute the core transaction service function natively inside the background task loop
+            service_result = delete_repo_env_keys_service(
+                user=user,
+                key_names=raw_key_names,
+                selected_repo_ids=selected_repo_ids
+            )
+
+            # 🚀 IMMEDIATE BROADCAST: Inform the React frontend layout what keys were purged
+            chat_confirmation_text = (
+                f"Successfully wiped out {service_result['deleted_count']} environment keys "
+                f"across {service_result['affected_repositories_count']} repositories."
+            )
+
+            async_to_sync(channel_layer.group_send)(
+                channel_name,
+                {
+                    "type": "chat_message",
+                    "payload": {
+                        "type": "orchestration_result",
+                        "raw_output": {
+                            "ui_layout_route": ui_layout,
+                            "chat_response": chat_confirmation_text,
+                            "key_deletion_details": service_result
+                        },
+                    }
+                }
+            )
+
+        except Exception as service_error:
+            print(f"🚨 Background worker environmental key deletion failure: {str(service_error)}")
+            continue
+
+    return "Environmental variable removal pipeline loop complete"
+
+
+
+
+@shared_task
 def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
     """
     Asynchronous platform dispatcher.
@@ -921,7 +1091,7 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
 
     visitor_instances_lines = []
 
-    strategies_dict = user_requested_rules if isinstance(user_requested_rules, dict) 
+    strategies_dict = user_requested_rules if isinstance(user_requested_rules, dict) else {}
     
     for rule_key, rule_payload in strategies_dict.items():
         # Only process tools registered in our AST engine toolkit
