@@ -652,6 +652,59 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
                 )
             )
 
+        if "delete_workspace" in result.intents:
+            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
+            from celery import signature
+            
+            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
+            # You pass the task path name string and your parameters directly inside signature()
+            result_dict = result.model_dump()
+            serializable_workspaces = result_dict.get('workspaces_to_create', [])
+            ui_layout = result_dict.get('ui_layout', [])
+            cached_repositories = cached_details.get("repositories", [])
+            intent_signatures.append(
+                signature(
+                    "agents.tasks.async_handle_workspace_creation_task",
+                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout) # 📥 Pass your variables as an ordered tuple
+                )
+            )
+
+
+        if "create_repo_env" in result.intents:
+            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
+            from celery import signature
+            
+            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
+            # You pass the task path name string and your parameters directly inside signature()
+            result_dict = result.model_dump()
+            serializable_workspaces = result_dict.get('workspaces_to_create', [])
+            ui_layout = result_dict.get('ui_layout', [])
+            cached_repositories = cached_details.get("repositories", [])
+            intent_signatures.append(
+                signature(
+                    "agents.tasks.async_handle_workspace_creation_task",
+                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout) # 📥 Pass your variables as an ordered tuple
+                )
+            )
+
+        if "create_repo_env" in result.intents:
+            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
+            from celery import signature
+            
+            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
+            # You pass the task path name string and your parameters directly inside signature()
+            result_dict = result.model_dump()
+            serializable_workspaces = result_dict.get('workspaces_to_create', [])
+            ui_layout = result_dict.get('ui_layout', [])
+            cached_repositories = cached_details.get("repositories", [])
+            intent_signatures.append(
+                signature(
+                    "agents.tasks.async_handle_workspace_creation_task",
+                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout) # 📥 Pass your variables as an ordered tuple
+                )
+            )
+
+
 
         # Fire both intent tasks concurrently in microseconds
         if intent_signatures:
@@ -976,14 +1029,6 @@ def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, 
 
 
 
-# agents/tasks.py
-from celery import shared_task
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
-from django.contrib.auth import get_user_model
-from .services import delete_repo_env_keys_service # 🌟 Import your new deletion service layer
-
-User = get_user_model()
 
 @shared_task
 def async_handle_env_key_deletion_task(env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):

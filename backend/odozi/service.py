@@ -104,7 +104,6 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
         }
 
 
-
 def delete_workspace_with_repos(user, workspace_id: int) -> dict:
     """
     Deletes a specific workspace and completely purges any associated repositories 
@@ -263,7 +262,6 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
             "environment_keys_created_count": len(envs_to_create),
             "skipped_duplicates_count": skipped_duplicates_count
         }
-
 
 
 

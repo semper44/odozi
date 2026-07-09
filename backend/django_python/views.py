@@ -836,7 +836,7 @@ class AITestSummaryView(APIView):
         # 3. INITIALIZE THE BASE LLM USING THE GOOGLE DRIVER
         # We pass your API key and toggle temperature down to 0 for strict formatting adherence
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             temperature=0,
             google_api_key=settings.GEMINI_API_KEY
         )
