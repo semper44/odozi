@@ -19,7 +19,7 @@ from django.db import transaction
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace, WorkspaceMembership
 from .models import UserProfileModel, RepoEnvKey, WorkflowRunHistory, ChatSession, ChatMessage
-from odozi.service import create_workspace_with_repos  
+from odozi.service import create_workspace_with_repos, delete_workspace_and_orphan_repos, create_repo_env_keys_service  
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.security import verify_signature
@@ -46,6 +46,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.callbacks import get_openai_callback 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
+
 
 
 
@@ -326,7 +327,6 @@ def dashboard_view(request):
 
 
 
-
 class CreateWorkspaceView(APIView):
     """Create a workspace and attach selected repositories to it."""
 
@@ -389,60 +389,45 @@ class CreateWorkspaceView(APIView):
 
 
 
-class DeleteUserSelectedRepos(APIView):
-    """Delete selected repositories from the authenticated user's accessible workspaces."""
+class DeleteWorkspaceView(APIView):
+    """Secure endpoint to completely delete a workspace and clean up orphan repos."""
+    
     authentication_classes = [HttpOnlyCookieJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        summary="Delete selected repositories",
-        description="Remove one or more repository records from the authenticated user's workspaces.",
-        request={
-            "application/json": {
-                "type": "object",
-                "properties": {
-                    "repo_ids": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "example": [101, 102],
-                    }
-                },
-                "required": ["repo_ids"],
-            }
-        },
+        summary="Delete workspace",
+        description="Deletes a workspace by ID and removes repositories that are no longer used anywhere else.",
         responses={
-            200: OpenApiResponse(description="Deletion completed"),
-            400: OpenApiResponse(description="Missing or malformed payload"),
-            404: OpenApiResponse(description="No matching repositories found"),
+            200: OpenApiResponse(description="Workspace and orphan repositories deleted successfully"),
+            400: OpenApiResponse(description="Invalid request or workspace not found"),
+            403: OpenApiResponse(description="Permission denied"),
+            500: OpenApiResponse(description="Internal transaction failure"),
         },
     )
-    def post(self, request, *args, **kwargs):
-                # B. PARSE INPUT PAYLOAD 
-        # Support both: {"repo_ids": [123]} (single) or {"repo_ids": [123, 456, 789]} (bulk)
-        target_repo_ids = request.data.get("repo_ids")
-        
-        # Fallback safeguard in case your frontend accidentally sends a single integer instead of an array list
-        if isinstance(target_repo_ids, int):
-            target_repo_ids = [target_repo_ids]
+    def delete(self, request, workspace_id, *args, **kwargs):
+        try:
+            result = delete_workspace_and_orphan_repos(
+                user=request.user,
+                workspace_id=workspace_id
+            )
+            return Response(result, status=status.HTTP_200_OK)
 
-        if not target_repo_ids or not isinstance(target_repo_ids, list):
-            return Response({"error": "Missing or malformed 'repo_ids' array list parameter."}, status=status.HTTP_400_BAD_REQUEST)
+        except ValidationError as e:
+            return Response({"error": str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST)
+        except PermissionDenied as e:
+            return Response({"error": str(e.detail[0])}, status=status.HTTP_403_FORBIDDEN)
+        except Exception as e:
+            return Response({"error": f"Transaction failure: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # C. 🔒 HIGH-SPEED SECURE BULK DELETION (SINGLE SQL INNER JOIN OPERATION)
-        # Using __in translates to a high-speed SQL 'WHERE repo_id IN (123, 456)' query
-        deleted_count, _ = GitHubRepository.objects.filter(
-            repo_id__in=target_repo_ids,             # 👈 CHANGED: Handles lists of any size instantly!
-            workspace__members__members_id=request.user.pk,  # Strict tenant multi-ownership protection guard
-            workspace__members__is_active=True       
-        ).delete()
-
-        if deleted_count == 0:
-            return Response({"error": "No matching repositories found or access denied."}, status=404)
 
 
 
 class CreateRepoEnvKeys(APIView):
-    """Create environment variable key entries for the selected repositories."""
+    """Create environment variable key entries for the selected repositories securely."""
+    
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         summary="Create environment keys",
@@ -465,152 +450,31 @@ class CreateRepoEnvKeys(APIView):
             500: OpenApiResponse(description="Transaction mapping failure"),
         },
     )
+    
+    
+    
     def post(self, request, *args, **kwargs):
-        print("request.data", request.data)
-        
-        # 1. Safely extract values from request
         repositories_data = request.data.get('repositories', [])
         key_names = request.data.get('key_names', [])
-        workspace_name = request.data.get('workspace', '').strip()
-        selected_repo_ids = request.data.get('selected', []) # List of selected GitHub IDs
-        
-        user = User.objects.get(pk=1)
-
-        if not key_names or not isinstance(key_names, list):
-            return Response({"error": "'key_names' must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
+        workspace_name = request.data.get('workspace', '')
+        selected_repo_ids = request.data.get('selected', [])
 
         try:
-            with transaction.atomic():
-                # 2. Format environment keys cleanly
-                cleaned_keys = list(set([str(name).strip().upper() for name in key_names if str(name).strip()]))
+            result = create_repo_env_keys_service(
+                user=request.user, # 🛡️ Fixed: Uses the clean session user securely
+                repositories_data=repositories_data,
+                key_names=key_names,
+                workspace_name=workspace_name,
+                selected_repo_ids=selected_repo_ids
+            )
+            return Response(result, status=status.HTTP_201_CREATED)
 
-                # 3. Fetch or establish the targeted Workspace environment record
-                if workspace_name:
-                    repo_workspace = Workspace.objects.get(
-                        name=workspace_name, 
-                        owner=user
-                    )
-                else:
-                    workspace_name = "Default"
-                    repo_workspace, _ = Workspace.objects.get_or_create(
-                        name="default", 
-                        owner=user,
-                        defaults={"github_account_name": user.username}
-                    )
-
-                # 4. Map ALL incoming repository data objects into an active memory dictionary lookup
-                # Structure: { 102938471: { 'repo_name': 'odozi', ... } }
-                incoming_repos_map = {int(repo['repo_id']): repo for repo in repositories_data if 'repo_id' in repo}
-                print("")
-                print("eze yoyo", incoming_repos_map)
-                # 5. Look up which of the SELECTED repositories already exist inside our database
-                # Crucial step: We convert selected IDs to integers to ensure strict matching
-                
-                existing_repos = GitHubRepository.objects.filter(
-                    repo_id__in=selected_repo_ids,
-                    # workspace=repo_workspace
-                )
-                print("")
-                print("cheche", existing_repos)
-                # Create a set of IDs that are already present in the database
-                existing_repo_ids = set(existing_repos.values_list('repo_id', flat=True))
-                print(000)
-                existing_repos_list= list(existing_repos)
-
-
-                # 6. STEP A: Identify and mass-create missing repositories
-                repos_to_create = []
-                for github_id in selected_repo_ids:
-                    # If it's already in the DB, skip it!
-                    print("")
-                    print("created", github_id, type(github_id))
-                    if int(github_id) in existing_repo_ids:
-                        continue
-                    
-                    # Fetch its raw object parameters from our memory dictionary
-                    repo_info = incoming_repos_map.get(int(github_id))
-                    print("ttttt", repo_info, github_id)
-                    if not repo_info:
-                        print(5555, repo_info)
-                        continue # Skip if selection mismatch happens
-                        
-                    repos_to_create.append(
-                        GitHubRepository(
-                            workspace=repo_workspace,
-                            repo_id=github_id,
-                            repo_name=repo_info.get('repo_name', ''),
-                            repo_owner=repo_info.get('repo_owner', ''),
-                            repo_full_name=repo_info.get('repo_full_name', f"{repo_info.get('repo_owner')}/{repo_info.get('repo_name')}")
-                        )
-                    )
-
-                # Execute creation batch for missing repositories
-                if repos_to_create:
-                    print(2222)
-                    # Django returns the newly generated model rows complete with database auto-increment IDs!
-                    created_repos = GitHubRepository.objects.bulk_create(repos_to_create)
-                    # Merge our newly created records with our existing records list
-                    all_active_repos = existing_repos_list + list(created_repos)
-                    print("opppss,", all_active_repos, "oburu", "existing_repos_list", "ogaa", list(created_repos))
-                else:
-                    all_active_repos = list(existing_repos)
-                    print("opppss2222,22", all_active_repos)
-
-                # 7. STEP B: Pull existing environment keys for these repositories to prevent unique crashes
-                print(3333)
-
-                # 1. Pull existing environment keys using an explicit list of records
-                # values_list('repo_id', 'key_name') yields integers for primary keys: [(4, 'BHADGHAFDJ')]
-                existing_env_tuples = RepoEnvKey.objects.filter(
-                    repo__in=all_active_repos,
-                    key_name__in=cleaned_keys
-                ).values_list('repo_id', 'key_name')
-
-                print(cleaned_keys, "7777",all_active_repos)
-                
-                # Force conversion to integers to guarantee accurate lookups
-                existing_env_set = set(existing_env_tuples)
-                print("doris", existing_env_set)
-
-                envs_to_create = []
-                already_exists = False
-                for repo in all_active_repos:
-                    for key in cleaned_keys:
-                        # 🌟 FIX: repo.pk is an integer. Ensure your lookup matches the type in existing_env_set!
-                        lookup_tuple = (repo.pk, key)  
-                        
-                        # If this combination checklist match is found, skip it!
-                        if lookup_tuple in existing_env_set:
-                            already_exists = True
-                            print(f"Skipping duplicate: {repo.repo_name} already has {key}")
-                            continue
-                            
-                        print(existing_env_set,"lookup", lookup_tuple)
-                        already_exists = False
-                        envs_to_create.append(
-                            RepoEnvKey(repo=repo, key_name=key)
-                        )
-
-                # 2. Fire the bulk creation query safely
-                print("env 2create", already_exists)
-                if envs_to_create:
-                    RepoEnvKey.objects.bulk_create(envs_to_create)
-                else:
-                    if already_exists :
-                        return Response({
-                        "status": "success",
-                        "message": "Variables already exists.",
-                    }, status=status.HTTP_201_CREATED)
-
-                return Response({
-                    "status": "success",
-                    "message": f"{len(envs_to_create)} Variables Created for {len(all_active_repos)} repos in {workspace_name} workspace.",
-                    "repositories_created": len(repos_to_create),
-                    "environment_keys_created": len(envs_to_create)
-                }, status=status.HTTP_201_CREATED)
-
+        except ValidationError as e:
+            return Response({"error": e.detail}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": f"Transaction mapping failure: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 
 
 

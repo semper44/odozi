@@ -815,6 +815,84 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
 
 
 @shared_task
+def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, user_id, ui_layout):
+    """
+    Executes bulk workspace deletions and unlinking asynchronously.
+    Fires status updates back to the browser via WebSockets.
+    """
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return "User not found"
+
+    if not workspaces_to_delete:
+        return "No workspaces provided for deletion"
+
+    channel_layer = get_channel_layer()
+    
+    # Ensure standard list structure handling even if a singular dictionary lands
+    deletion_list = workspaces_to_delete if isinstance(workspaces_to_delete, list) else [workspaces_to_delete]
+    
+    deletion_summaries = []
+
+    for ws_task in deletion_list:
+        # Support lookups via 'workspace_id' integer keys, falling back to name parameters if required
+        # Adjust these parameter keys to match your exact Pydantic schema naming structure!
+        workspace_id = ws_task.get("workspace_id")
+        workspace_name = ws_task.get("workspace_name")
+
+        # Fallback tracking resolution step: If the LLM only gave a string name, look it up in the database
+        if not workspace_id and workspace_name:
+            db_workspace = Workspace.objects.filter(name=workspace_name.strip(), owner=user).first()
+            if db_workspace:
+                workspace_id = db_workspace.id
+
+        if not workspace_id:
+            print(f"⚠️ Deletion Skipped: Could not resolve a valid target ID for context: {ws_task}")
+            continue
+
+        try:
+            # 1. Fire your decoupled service processing transaction logic block
+            execution_result = delete_workspace_and_orphan_repos(
+                user=user,
+                workspace_id=int(workspace_id)
+            )
+            deletion_summaries.append(execution_result)
+
+        except Exception as deletion_error:
+            print(f"🚨 Failed processing deletion thread loop for ID {workspace_id}: {str(deletion_error)}")
+            continue
+
+    # 2. 🚀 BROADCAST RESULTS: Shoot the structured processing metrics back down the WebSocket pipe
+    if deletion_summaries:
+        # Build a neat string summary description or return raw payload arrays based on your layout requirement
+        chat_summary_text = (
+            f"Successfully purged {len(deletion_summaries)} workspace environments from your account registries. "
+            f"Any associated repositories that do not belong to other workflows have been unlinked globally."
+        )
+
+        async_to_sync(channel_layer.group_send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route": ui_layout,
+                        "chat_response": chat_summary_text,
+                        "deletion_details": deletion_summaries # Rich metrics payload data for your React UI components
+                    },
+                }
+            }
+        )
+        return "Workspace deletion and asset purging loops processed clean."
+        
+    return "No deletion signatures executed"
+
+
+
+
+@shared_task
 def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
     """
     Asynchronous platform dispatcher.
@@ -842,13 +920,26 @@ def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_
         base_classes_text = base_classes_text.split('if __name__ == "__main__":')[0].strip()
 
     visitor_instances_lines = []
-    for rule in user_requested_rules:
-        rule_key = rule["rule_key"]
-        params = rule["params"]
-        
+
+    strategies_dict = user_requested_rules if isinstance(user_requested_rules, dict) 
+    
+    for rule_key, rule_payload in strategies_dict.items():
+        # Only process tools registered in our AST engine toolkit
         if rule_key in AST_TOOL_REGISTRY:
             class_name = AST_TOOL_REGISTRY[rule_key].__name__
-            line = f"            {class_name}({json.dumps(params)}),"
+            
+            # DEFENSIVE ACCIDENT PROTECTION: Ensure rule_payload is a dictionary
+            payload_data = rule_payload if isinstance(rule_payload, dict) else {}
+            
+            # SAFE FALLBACK: Extract target and constraints safely using .get()
+            # If the user passed nothing (like for third-party scripts), it defaults to safe empty nodes
+            sanitised_payload = {
+                "target": payload_data.get("target", {}),
+                "constraints": payload_data.get("constraints", {})
+            }
+            
+            # Stitch the class initialization line safely using valid layout arguments
+            line = f"            {class_name}({json.dumps(sanitised_payload)}),"
             visitor_instances_lines.append(line)
             
     visitors_code_block = "\n".join(visitor_instances_lines)

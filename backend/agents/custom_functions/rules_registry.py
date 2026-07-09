@@ -1,20 +1,26 @@
-# agents/tools/registry.py
+# Import the updated, rule-first dynamic 'ast' classes
 from .rule_classes import (
-    AuthenticationVisitor,
-    RequiredCallVisitor,
+    APIAuthVisitor,
+    GeneralAuthenticationVisitor,
+    FunctionConstraintVisitor,
+    ClassLengthAndConstraintVisitor,
     FunctionLengthVisitor,
-    ClassLengthVisitor,
-    ErrorHandlingVisitor,
-    NPlusOneQueryVisitor,
-    PiiLeakageVisitor
+    DocstringConstraintVisitor,
+    ErrorHandlingConstraintVisitor,
+    NPlusOneQueryConstraintVisitor,
+    PiiLeakageConstraintVisitor
 )
 
+# Map your system configuration strings to the corrected 'ast' engines
 AST_TOOL_REGISTRY = {
-    "check_auth": AuthenticationVisitor,
-    "check_required_call": RequiredCallVisitor,
+    "check_api_auth": APIAuthVisitor,
+    "check_general_auth": GeneralAuthenticationVisitor,
+    "check_transaction_atomic": FunctionConstraintVisitor,  # Handled by function constraints now!
+    "check_required_call": FunctionConstraintVisitor,
+    "check_class_length": ClassLengthAndConstraintVisitor,
     "check_function_length": FunctionLengthVisitor,
-    "check_class_length": ClassLengthVisitor,
-    "check_error_handling": ErrorHandlingVisitor,
-    "check_n_plus_one": NPlusOneQueryVisitor,
-    "check_pii": PiiLeakageVisitor,
+    "check_docstrings": DocstringConstraintVisitor,         # Brand new engine option!
+    "check_error_handling": ErrorHandlingConstraintVisitor,
+    "check_n_plus_one": NPlusOneQueryConstraintVisitor,
+    "check_pii": PiiLeakageConstraintVisitor
 }

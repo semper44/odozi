@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 class RepositoryItem(BaseModel):
     repo_name: str = Field(description="Name of the repo (e.g., 'repo-a')")
@@ -10,6 +10,7 @@ class RepositoryItem(BaseModel):
         description="The specific branch requested (e.g., 'main', 'staging'). Set to null or 'unknown' if not specified."
     )
 
+
 class ToolStrategyMapping(BaseModel):
     strategy: str = Field(description="e.g., 'pytest', 'bandit', 'generate_django_tests'")
     target_repo_names: List[str] = Field(description="Target repos for this specific tool")
@@ -17,15 +18,28 @@ class ToolStrategyMapping(BaseModel):
         default=None, 
         description="The branch context requested for this tool execution run. Set to null if unprovided."
     )
+
+
 class WorkspaceCreationTask(BaseModel):
     new_workspace_name: str = Field(description="The workspace name to create (e.g., 'mom')")
     repositories: List[str] = Field(description="List of repo names to put in this workspace")
 
+
+
 class RepoExecutionRule(BaseModel):
     repo_name: str = Field(description="Name of the repository")
     target_branch: str = Field(default="master")
-    strategies: List[str] = Field(description="List of security strategies to run, e.g., ['bandit', 'pii_leakage']")
-
+    strategies: Dict[str, Dict[str, Any]] = Field(
+            default={},
+            description="""
+            A dictionary mapping the tool strategy name to its parameters.
+            Example: 
+            {
+            "check_transaction_atomic": {"target": {}, "constraints": {"must_call": "atomic"}},
+            "bandit": {}
+            }
+            """
+        )
 
 class OrchestratorAction(BaseModel):
     """
@@ -64,3 +78,5 @@ class OrchestratorAction(BaseModel):
         default=[],
         description="List of each repo and the specific strategies assigned to it."
     )
+
+
