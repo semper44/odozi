@@ -104,10 +104,11 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
         }
 
 
+
 def delete_workspace_with_repos(user, workspace_id: int) -> dict:
     """
     Deletes a specific workspace and completely purges any associated repositories 
-    that do not belong to any other workspace in the system.
+    that do not belong to any other workspace AND have no remaining environment variable keys.
     """
     try:
         workspace = Workspace.objects.get(pk=workspace_id)
@@ -121,33 +122,49 @@ def delete_workspace_with_repos(user, workspace_id: int) -> dict:
     workspace_name = workspace.name
     deleted_repos_info = []
 
+    print("celebrate")
+
     with transaction.atomic():
         # 1. Gather all repositories currently attached to this workspace
         associated_repositories = list(workspace.repositories.all())
 
-        # 2. Delete the workspace (This cascades and clears WorkspaceMembership automatically)
+        # 2. Delete the workspace (This cascades and unlinks the repos from this workspace)
         workspace.delete()
 
-        # 3. CRITICAL PURGE: Find and destroy orphan repositories
+        # 3. 🧹 UPGRADED GARBAGE COLLECTION ENGINE: Evaluate workspace-independent assets
         for repo in associated_repositories:
-            # If this repository is not linked to any remaining workspace, delete it globally
-            if not repo.workspaces.exists():
-                deleted_repos_info.append({
-                    "id": repo.repo_id,
-                    "name": repo.repo_name,
-                    "full_name": repo.repo_full_name,
-                    "purged_globally": True
-                })
-                repo.delete()
-            else:
-                # The repo is still used elsewhere, so it was only unlinked from this workspace
-                deleted_repos_info.append({
-                    "id": repo.repo_id,
-                    "name": repo.repo_name,
-                    "full_name": repo.repo_full_name,
-                    "purged_globally": False
-                })
+            
+            # Criterion 1: Is this repository linked to any remaining workspace?
+            is_linked_to_workspaces = repo.workspaces.exists() if hasattr(repo, 'workspaces') else (repo.workspace is not None)
+            
+            # Criterion 2: Does this repository have any standalone environment keys still assigned?
+            has_isolated_env_keys = RepoEnvKey.objects.filter(repo=repo).exists()
 
+            # 🌟 THE STRICT DOUBLE-LOCK PURGE CHECK: 
+            # Only wipe the repo from disk if it's completely unassociated with both structures!
+            if not is_linked_to_workspaces and not has_isolated_env_keys:
+                deleted_repos_info.append({
+                    "id": repo.repo_id,
+                    "name": repo.repo_name,
+                    "full_name": repo.repo_full_name,
+                    "purged_globally": True,
+                    "reason": "Orphaned from all workspaces and has zero remaining environment keys."
+                })
+                repo.delete() # 🔥 Physically erased from the database
+            else:
+                # The repo is preserved because it still has an active workspace link or variable dependency
+                preservation_reason = []
+                if is_linked_to_workspaces: preservation_reason.append("Linked to another workspace")
+                if has_isolated_env_keys: preservation_reason.append("Retains isolated environment keys")
+                
+                deleted_repos_info.append({
+                    "id": repo.repo_id,
+                    "name": repo.repo_name,
+                    "full_name": repo.repo_full_name,
+                    "purged_globally": False,
+                    "reason": "Preserved. " + " & ".join(preservation_reason)
+                })
+        print("ada")
         # 4. Evict user's repository state array from Redis cache so dashboard re-syncs instantly
         cache.delete(f"user:repos:{user.id}")
 
@@ -162,21 +179,25 @@ def delete_workspace_with_repos(user, workspace_id: int) -> dict:
 
 
 
-def create_repo_env_keys_service(user, repositories_data: list, key_names: list, workspace_name: str, selected_repo_ids: list) -> dict:
+def create_repo_env_keys_service(user, repositories_data: list, key_names: list, workspace_name: str, selected_repo_ids: list = None) -> dict:
     """
-    Business service to register missing selected repositories inside a workspace 
-    and bulk-inject environment variable keys defensively without duplicates.
+    Polymorphic business service to bulk-inject environment variables either:
+    1. Globally to a complete Workspace (if selected_repo_ids is empty/omitted).
+    2. Explicitly to specific Repositories inside that workspace (if selected_repo_ids is provided).
     """
     if not key_names or not isinstance(key_names, list):
         raise ValidationError("'key_names' must be a non-empty list.")
 
     workspace_name = workspace_name.strip() if workspace_name else "default"
+    selected_repo_ids = selected_repo_ids or []
+
+    print("ronus")
 
     with transaction.atomic():
-        # 1. Clean and deduplicate environmental key names
+        # 1. Clean and uppercase key names to enforce case sanity
         cleaned_keys = list(set([str(name).strip().upper() for name in key_names if str(name).strip()]))
 
-        # 2. Fetch or establish the targeted Workspace environment record
+        # 2. Securely resolve the Workspace context
         if workspace_name.lower() != "default":
             try:
                 repo_workspace = Workspace.objects.get(name=workspace_name, owner=user)
@@ -188,124 +209,245 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
                 owner=user,
                 defaults={"github_account_name": user.username}
             )
-
-        # 3. Map ALL incoming raw repository objects into an active memory lookup dictionary
-        incoming_repos_map = {int(repo['repo_id']): repo for repo in repositories_data if 'repo_id' in repo}
-        
-        # 4. Find which SELECTED repositories already exist inside our database
-        existing_repos = GitHubRepository.objects.filter(repo_id__in=selected_repo_ids)
-        existing_repo_ids = set(existing_repos.values_list('repo_id', flat=True))
-        existing_repos_list = list(existing_repos)
-
-        # 5. STEP A: Identify and track missing repositories for batch insertion
-        repos_to_create = []
-        for github_id in selected_repo_ids:
-            if int(github_id) in existing_repo_ids:
-                continue
-            
-            repo_info = incoming_repos_map.get(int(github_id))
-            if not repo_info:
-                continue # Skip if metadata is completely missing from cache
-                
-            repos_to_create.append(
-                GitHubRepository(
-                    workspace=repo_workspace,
-                    repo_id=github_id,
-                    repo_name=repo_info.get('repo_name', ''),
-                    repo_owner=repo_info.get('repo_owner', ''),
-                    repo_full_name=repo_info.get('repo_full_name', f"{repo_info.get('repo_owner')}/{repo_info.get('repo_name')}")
-                )
-            )
-
-        # Execute creation batch for missing repositories
-        if repos_to_create:
-            created_repos = GitHubRepository.objects.bulk_create(repos_to_create)
-            all_active_repos = existing_repos_list + list(created_repos)
-        else:
-            all_active_repos = existing_repos_list
-
-        # 6. STEP B: Pull existing environment keys for these repositories to prevent unique collisions
-        existing_env_tuples = RepoEnvKey.objects.filter(
-            repo__in=all_active_repos,
-            key_name__in=cleaned_keys
-        ).values_list('repo_id', 'key_name')
-        
-        existing_env_set = set(existing_env_tuples)
-
+        print("power")
         envs_to_create = []
         skipped_duplicates_count = 0
 
-        for repo in all_active_repos:
+        # =====================================================================
+        # 📂 CASE A: SCOPING WORKSPACE-WIDE REUSABLE VARIABLES (selected_repo_ids is empty)
+        # =====================================================================
+        if not selected_repo_ids:
+            # Check existing workspace keys to prevent database constraint failures
+            existing_workspace_keys = set(RepoEnvKey.objects.filter(
+                workspace=repo_workspace,
+                key_name__in=cleaned_keys
+            ).values_list('key_name', flat=True))
+
+            print("igbo")
+
             for key in cleaned_keys:
-                lookup_tuple = (repo.pk, key)  
-                
-                if lookup_tuple in existing_env_set:
+                if key in existing_workspace_keys:
                     skipped_duplicates_count += 1
                     continue
-                    
+                
                 envs_to_create.append(
-                    RepoEnvKey(repo=repo, key_name=key)
+                    RepoEnvKey(workspace=repo_workspace, repo=None, key_name=key)
                 )
+            print("okelezu")
+            if envs_to_create:
+                RepoEnvKey.objects.bulk_create(envs_to_create)
+                message = f"Successfully injected {len(envs_to_create)} reusable keys into workspace '{workspace_name}'."
+            else:
+                message = f"All requested keys already exist globally inside workspace '{workspace_name}'."
 
-        # 7. Execute variable key bulk insertion
-        if envs_to_create:
-            RepoEnvKey.objects.bulk_create(envs_to_create)
-            message = f"Successfully created {len(envs_to_create)} keys for {len(all_active_repos)} repos."
-        else:
-            message = "All requested variable keys already exist for these repositories."
-
-        return {
-            "status": "success",
-            "message": message,
-            "workspace_name": workspace_name,
-            "repositories_created_count": len(repos_to_create),
-            "environment_keys_created_count": len(envs_to_create),
-            "skipped_duplicates_count": skipped_duplicates_count
-        }
-
-
-
-def delete_repo_env_keys_service(user, key_names: list, selected_repo_ids: list) -> dict:
-    """
-    Business service to find and bulk-delete specified environment variable keys 
-    across selected repositories belonging to the requesting user.
-    """
-    if not key_names or not selected_repo_ids:
-        raise ValidationError("Must provide both non-empty key names and repository targets.")
-
-    # Clean and uppercase input query keys to ensure exact case matching bounds
-    cleaned_keys = list(set([str(name).strip().upper() for name in key_names if str(name).strip()]))
-
-    with transaction.atomic():
-        # Verify the target repositories exist and are owned by the workspace user context
-        # This prevents security leakage across tenant workspaces
-        target_repos = GitHubRepository.objects.filter(
-            repo_id__in=selected_repo_ids,
-            workspace__owner=user
-        )
-        
-        if not target_repos.exists():
             return {
                 "status": "success",
-                "message": "No matching repositories found to delete keys from.",
-                "deleted_count": 0
+                "scope": "workspace",
+                "message": message,
+                "workspace_name": workspace_name,
+                "repositories_processed": 0,
+                "environment_keys_created_count": len(envs_to_create),
+                "skipped_duplicates_count": skipped_duplicates_count
             }
 
-        # 🚀 BULK PURGE: Delete all matching keys in a single query
-        delete_query = RepoEnvKey.objects.filter(
-            repo__in=target_repos,
-            key_name__in=cleaned_keys
-        )
-        
-        deleted_count, _ = delete_query.delete()
+        # =====================================================================
+        # 💻 CASE B: SCOPING ISOLATED REPOSITORY VARIABLES (selected_repo_ids has entries)
+        # =====================================================================
+        else:
+            # Map raw input list items to an in-memory lookup map
+            incoming_repos_map = {int(repo['repo_id']): repo for repo in repositories_data if 'repo_id' in repo}
+            
+            # Identify missing metadata records on the fly
+            existing_repos = GitHubRepository.objects.filter(repo_id__in=selected_repo_ids)
+            existing_repo_ids = set(existing_repos.values_list('repo_id', flat=True))
+            existing_repos_list = list(existing_repos)
 
+            repos_to_create = []
+            for github_id in selected_repo_ids:
+                if int(github_id) in existing_repo_ids:
+                    continue
+                
+                repo_info = incoming_repos_map.get(int(github_id))
+                if not repo_info:
+                    continue
+                    
+                repos_to_create.append(
+                    GitHubRepository(
+                        workspace=repo_workspace,
+                        repo_id=github_id,
+                        repo_name=repo_info.get('repo_name', ''),
+                        repo_owner=repo_info.get('repo_owner', ''),
+                        repo_full_name=repo_info.get('repo_full_name', f"{repo_info.get('repo_owner')}/{repo_info.get('repo_name')}")
+                    )
+                )
+
+            if repos_to_create:
+                created_repos = GitHubRepository.objects.bulk_create(repos_to_create)
+                all_active_repos = existing_repos_list + list(created_repos)
+            else:
+                all_active_repos = existing_repos_list
+
+            # Read existing repo keys to block duplicate insertion actions
+            existing_env_set = set(RepoEnvKey.objects.filter(
+                repo__in=all_active_repos,
+                key_name__in=cleaned_keys
+            ).values_list('repo_id', 'key_name'))
+
+            for repo in all_active_repos:
+                for key in cleaned_keys:
+                    lookup_tuple = (repo.pk, key)  
+                    
+                    if lookup_tuple in existing_env_set:
+                        skipped_duplicates_count += 1
+                        continue
+                        
+                    envs_to_create.append(
+                        RepoEnvKey(workspace=None, repo=repo, key_name=key)
+                    )
+
+            if envs_to_create:
+                RepoEnvKey.objects.bulk_create(envs_to_create)
+                message = f"Successfully created {len(envs_to_create)} keys across {len(all_active_repos)} repositories."
+            else:
+                message = "All requested keys already exist for these specific repositories."
+
+            return {
+                "status": "success",
+                "scope": "repository",
+                "message": message,
+                "workspace_name": workspace_name,
+                "repositories_processed": len(all_active_repos),
+                "environment_keys_created_count": len(envs_to_create),
+                "skipped_duplicates_count": skipped_duplicates_count
+            }
+
+
+
+def delete_repo_env_keys_service(user, key_names: list, workspace_name: str = None, selected_repo_ids: list = None) -> dict:
+    """
+    Polymorphic deletion service to bulk-delete environment variables from either:
+    1. An entire Workspace globally (if selected_repo_ids is empty/omitted).
+    2. Specific Repositories (if selected_repo_ids has entries).
+    
+    🔥 CLEANUP RULE: If an affected repository ends up with ZERO remaining keys 
+    AND is not linked to any active workspace, it is purged globally to save space.
+    """
+    if not key_names:
+        raise ValidationError("Must provide a list of key names to delete.")
+
+    selected_repo_ids = selected_repo_ids or []
+    cleaned_keys = list(set([str(name).strip().upper() for name in key_names if str(name).strip()]))
+    
+    affected_repos = set()
+    purged_repos_info = []
+    deleted_count = 0
+    print("esther")
+
+    with transaction.atomic():
+        # =====================================================================
+        # 📂 CASE A: DELETING WORKSPACE-WIDE REUSABLE VARIABLES
+        # =====================================================================
+        if not selected_repo_ids and workspace_name:
+            try:
+                repo_workspace = Workspace.objects.get(name=workspace_name.strip(), owner=user)
+            except Workspace.DoesNotExist:
+                raise ValidationError(f"Workspace '{workspace_name}' does not exist.")
+
+            # Identify all repositories currently living in this workspace before unlinking variables
+            affected_repos = set(repo_workspace.repositories.all())
+
+            # Delete workspace-level variables matching the keys
+            delete_query = RepoEnvKey.objects.filter(
+                workspace=repo_workspace,
+                key_name__in=cleaned_keys
+            )
+            deleted_count, _ = delete_query.delete()
+
+        # =====================================================================
+        # 💻 CASE B: DELETING REPOSITORY-ISOLATED VARIABLES
+        # =====================================================================
+        elif selected_repo_ids:
+            # Gather target repositories owned by the user
+            target_repos = GitHubRepository.objects.filter(
+                repo_id__in=selected_repo_ids,
+                workspace__owner=user
+            )
+            affected_repos = set(target_repos)
+
+            if target_repos.exists():
+                # Bulk delete matching keys across these repositories
+                delete_query = RepoEnvKey.objects.filter(
+                    repo__in=target_repos,
+                    key_name__in=cleaned_keys
+                )
+                deleted_count, _ = delete_query.delete()
+
+            print("cry")
+
+
+        # =====================================================================
+        # 🧹 STEP C: THE SPACE-SAVING ORPHAN REPOSITORY PURGE ENGINE
+        # =====================================================================
+        for repo in affected_repos:
+            # 1. Check if the repo has ANY remaining keys left (either isolated or inherited)
+            has_remaining_keys = RepoEnvKey.objects.filter(
+                repo=repo
+            ).exists() or RepoEnvKey.objects.filter(
+                workspace=repo.workspace,
+                workspace__isnull=False
+            ).exists()
+
+            # 2. Check if the repo is linked to any active workspace membership list
+            is_in_any_workspace = repo.workspaces.exists() if hasattr(repo, 'workspaces') else (repo.workspace is not None)
+
+            # 🌟 THE CRITICAL HOOK: If it's completely orphaned and stripped of keys, wipe it!
+            if not has_remaining_keys and not is_in_any_workspace:
+                purged_repos_info.append({
+                    "id": repo.repo_id,
+                    "name": repo.repo_name,
+                    "full_name": repo.repo_full_name
+                })
+                repo.delete() # 🔥 Physically erased from database storage disk memory
+            print("feedd")
         return {
             "status": "success",
             "message": f"Successfully deleted {deleted_count} environment variables.",
-            "deleted_count": deleted_count,
-            "targeted_keys": cleaned_keys,
-            "affected_repositories_count": target_repos.count()
+            "metrics": {
+                "variables_deleted": deleted_count,
+                "repositories_evaluated": len(affected_repos),
+                "repositories_purged_globally_count": len(purged_repos_info)
+            },
+            "purged_repositories": purged_repos_info
         }
+
+
+def unlink_or_purge_single_repo(user, workspace_id: int, repo_id: int) -> dict:
+    """
+    Removes a single repository from a workspace. If the repo is no longer 
+    associated with any other workspace, it is deleted globally to free up space.
+    """
+    try:
+        workspace = Workspace.objects.get(pk=workspace_id, owner=user)
+        repo = GitHubRepository.objects.get(repo_id=repo_id)
+    except (Workspace.DoesNotExist, GitHubRepository.DoesNotExist):
+        raise ValidationError("Workspace or Repository mapping target not found.")
+
+    with transaction.atomic():
+        # 1. Break the association link
+        workspace.repositories.remove(repo)
+        
+        purged_globally = False
+        # 2. Check if it's an orphan now
+        if not repo.workspaces.exists():
+            repo.delete() # Purge to free up database rows
+            purged_globally = True
+            
+    return {
+        "status": "success",
+        "repo_name": repo.repo_name,
+        "unlinked_from_workspace": workspace.name,
+        "purged_globally": purged_globally
+    }
 
 
 

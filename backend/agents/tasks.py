@@ -28,13 +28,14 @@ from odozi.service import (create_workspace_with_repos, get_installation_access_
 )
 
 
-from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage
-from django.contrib.auth.models import User
-from django_python.schema import OrchestratorAction
-
 from django.conf import settings
 from django.db import transaction
 from django.core.cache import cache
+from django.contrib.auth.models import User
+from django.db.utils import OperationalError
+
+from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage
+from django_python.schema import OrchestratorAction
 
 from concurrent.futures import ThreadPoolExecutor
 from channels.layers import get_channel_layer
@@ -363,6 +364,14 @@ def ensure_orchestrator_yaml_is_online(
 system_instruction_text = """
 You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into structured configuration variables inside our Pydantic action schema.
 
+### CRITICAL ID HANDLING & PLACEHOLDER RULES (NEVER REQUEST INT IDS FROM USERS)
+1. End-users do not know database primary keys or integer backend tokens (like 'workspace_id' or 'repo_id'). You must NEVER ask the user to provide an integer ID in your chat response.
+2. For deletions or updates targeting existing items: Look for the target item by its string name (e.g., 'zugo', 'semper') in the text prompt or conversation history records. 
+3. If your structural schema requires a required integer ID (`int`) field but no specific ID is found in the background history:
+   - Natively manufacture a fallback default integer placeholder (e.g., `0`) for that ID field inside the JSON payload.
+   - Do NOT stop the process or complain about missing IDs. Let the backend service look up the record matching the provided string names instead.
+4. For creation requests (e.g., creating workspaces or repositories): You are establishing a fresh record. Set its integer ID tracking attributes to a placeholder default like `0` or omit them if optional. The user targets things strictly by their human-readable string names.
+
 ### REGISTERED SYSTEM TOOL STRATEGIES & CROSS-CUTTING BUNDLES
 
 When a user requests analysis, you must cross-reference their keywords to populate the 'active_rules' array with the exact matching strategies defined below. 
@@ -377,7 +386,7 @@ When a user requests analysis, you must cross-reference their keywords to popula
 
 3. PILLAR C: CODE QUALITY & MAINTENANCE COMPLEXITY
 - Keywords: "lint", "code smell", "clean code", "formatting", "complexity", "nested loops", "lines"
-- Trigger Rules: If the user wants to evaluate code smells or style, assign "ruff" (generic linting). If they mention specific boundaries, map them to your native AST validators: "check_function_length" or "check_class_length".
+- Trigger Rules: If the user wants to evaluate code smells or style, assign "ruff" (generic linter). If they mention specific boundaries, map them to your native AST validators: "check_function_length" or "check_class_length".
 
 4. PILLAR D: UNIT RUNNERS & CODE COVERAGE
 - Keywords: "test", "pytest", "run tests", "coverage", "test percentage"
@@ -386,6 +395,16 @@ When a user requests analysis, you must cross-reference their keywords to popula
 5. GENERIC AST HOOK COGNITIVE SCAVENGERS
 - Keywords: "transaction atomic", "db wrapper", "docstrings", "documentation comments"
 - Trigger Rules: Map these precisely to "check_transaction_atomic" or "check_docstrings" using your parameters interface setup mapping block.
+
+### ENVIRONMENT VARIABLE INJECTION & CONTEXT BOUNDARY RULES
+
+You must parse exactly where environment keys should be sourced from based on user specifications:
+
+1. WORKSPACE SCOPE: If the user explicitly commands to pull, load, or use environment keys from the "workspace tree", you must populate the 'workspace_name' in the creation/deletion task payloads to point to that specific workspace entity layout.
+2. REPOSITORY SCOPE: If the user explicitly asks to use environment keys from "individual repos", map the parameters precisely into the 'selected_repo_ids' or 'repositories_data' metadata scopes. If matching repository database IDs are requested by the schema payload but not explicitly provided in the chat text, look them up by their string names or manufacture placeholder integer defaults (like `0`) inside the ID field.
+3. CONTEXT OMISSION GUARD: If the user requests an environmental key operation but provides absolutely zero contextual details indicating whether they want it from the workspace tree or from individual repositories, you must:
+   - Check if the targeted strategy or execution engine run natively requires environment parameters to operate.
+   - If env keys are explicitly needed but the scope is missing, you MUST halt execution, switch 'ui_layout_route' to "CHAT", and cleanly prompt the user inside your 'chat_response' to clarify using their string names (e.g., "I see you want to configure environment variables. Would you like to map these keys across the entire workspace tree or target individual repositories?").
 
 ### CONTEXT EVOLUTION & HISTORY OVERHAUL PROTOCOL:
 - For standard casual chats or technical inquiries, leave 'evict_prior_history' as False and 'condensed_history_summary' as None.
@@ -406,6 +425,9 @@ Example Summary Output:
 
 ### INTENT PARSING AND MAPPING BOUNDARY RULES
 - "create_workspace": Select this if the user wants to group fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts (e.g., "repo-a").
+- "delete_workspace": Select this intent if the user commands you to drop, remove, clear, or delete a workspace container. Populate the 'workspaces_to_delete' object array using name parameters from text and temporary integer placeholders for required numerical fields.
+- "create_repo_env": Select this intent if the user wants to append, create, or bulk-inject environment variable keys across workspace contexts or repository boundaries.
+- "delete_repo_env": Select this intent if the user requests the removal, dropping, stripping, or deletion of keys from environment lists.
 - "run_static_analysis": Select this intent ONLY if the user uses explicit, active commands ordering you to kick off, launch, run, or execute a test block run immediately (e.g., "Run pytest now", "Execute security audit"). You MUST populate the active_rules array mapping strategies to their target repositories.
 - "technical_query": Select this intent if the user is asking a general question about options, capabilities, configurations, or checking what is possible without explicitly ordering a live execution run right now (e.g., "Can you run tests?", "How do I check types?"). When this intent is selected, the active_rules list MUST remain empty.
 - Deduce smart engineering defaults if specific parameters or repository targets are omitted from the request context.
@@ -417,8 +439,6 @@ Set 'ui_layout_route' to:
 - "TERM": Active CI/CD test runner pipelines (pytest, bandit, pip_audit, ruff, AST) are triggered.
 
 """
-
-
 
 
 
@@ -496,10 +516,6 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
             completion_tokens = cb.completion_tokens
             total_cost = cb.total_cost
 
-            print("\n🤖 ================== LLM FEEDBACK OBJECT ==================")
-            print(f"🎯 DETECTED INTENTS: {result.intents}")
-            if hasattr(result, 'chat_response') and result.chat_response:
-                print(f"💬 CASUAL CHAT REPLY: {result.chat_response}")
             print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
             print(result.active_rules)
             # print(json.dumps(result.model_dump(), indent=2)) 
@@ -517,9 +533,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
         with transaction.atomic():
             if result.evict_prior_history:
                 # 1. 🧹 THE OVERHAUL: Instantly wipe out all past messages for this session
-                session.messages.all().delete()
-                print(f"🔄 Database Overhaul Triggered: Purged casual history fluff for Session {session_id}.")
-                
+                session.messages.all().delete()                
                 # 2. Save the current user text prompt as the first record of the new era
                 ChatMessage.objects.create(session=session, role="user", content=prompt_text)
                 
@@ -531,8 +545,6 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
                     {result.condensed_history_summary}
                 """
                 ChatMessage.objects.create(session=session, role="ai", content=summary_marker)
-                
-                print("🌱 New memory baseline seed successfully planted in PostgreSQL history logs.")
             else:
                 # 📥 STANDARD WORKING MEMORY: Save strings sequentially during casual Q&A phases
                 ChatMessage.objects.create(session=session, role="user", content=prompt_text)
@@ -652,6 +664,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
                 )
             )
 
+        
         if "delete_workspace" in result.intents:
             # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
             from celery import signature
@@ -659,13 +672,14 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
             result_dict = result.model_dump()
-            serializable_workspaces = result_dict.get('workspaces_to_create', [])
+            serializable_workspaces = result_dict.get('workspaces_to_delete', [])
+            print("serializable_workspaces", serializable_workspaces)
             ui_layout = result_dict.get('ui_layout', [])
             cached_repositories = cached_details.get("repositories", [])
             intent_signatures.append(
                 signature(
-                    "agents.tasks.async_handle_workspace_creation_task",
-                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout) # 📥 Pass your variables as an ordered tuple
+                    "agents.tasks.async_handle_workspace_deletion_task",
+                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout)
                 )
             )
 
@@ -677,30 +691,31 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
             result_dict = result.model_dump()
-            serializable_workspaces = result_dict.get('workspaces_to_create', [])
+            env_key_requests = result_dict.get('env_keys_to_create', [])
             ui_layout = result_dict.get('ui_layout', [])
             cached_repositories = cached_details.get("repositories", [])
             intent_signatures.append(
                 signature(
-                    "agents.tasks.async_handle_workspace_creation_task",
-                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout) # 📥 Pass your variables as an ordered tuple
+                    "agents.tasks.async_handle_env_key_creation_task",
+                    args=(env_key_requests, channel_name,user_id, ui_layout, cached_repositories) 
                 )
             )
 
-        if "create_repo_env" in result.intents:
+       
+        if "delete_repo_env" in result.intents:
             # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
             from celery import signature
             
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
             result_dict = result.model_dump()
-            serializable_workspaces = result_dict.get('workspaces_to_create', [])
+            env_key_requests = result_dict.get('env_keys_to_delete=', [])
             ui_layout = result_dict.get('ui_layout', [])
             cached_repositories = cached_details.get("repositories", [])
             intent_signatures.append(
                 signature(
-                    "agents.tasks.async_handle_workspace_creation_task",
-                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout) # 📥 Pass your variables as an ordered tuple
+                    "agents.tasks.async_handle_env_key_deletion_task",
+                    args=(env_key_requests, channel_name,user_id, ui_layout, cached_repositories) # 📥 Pass your variables as an ordered tuple
                 )
             )
 
@@ -870,12 +885,19 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
 
 
 
-@shared_task
-def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, user_id, ui_layout):
+@shared_task(
+    bind=True,
+    autoretry_for=(OperationalError,),
+    retry_kwargs={'max_retries': 5},
+    retry_backoff=True,         
+    retry_backoff_max=15        
+)
+def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, user_id, cached_repositories, ui_layout):
     """
     Executes bulk workspace deletions and unlinking asynchronously.
     Fires status updates back to the browser via WebSockets.
     """
+    print("delete_workspace", workspaces_to_delete)
     try:
         user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
@@ -885,7 +907,8 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
         return "No workspaces provided for deletion"
 
     channel_layer = get_channel_layer()
-    
+    workspace_id = None
+    print("daaluuu")
     # Ensure standard list structure handling even if a singular dictionary lands
     deletion_list = workspaces_to_delete if isinstance(workspaces_to_delete, list) else [workspaces_to_delete]
     
@@ -894,19 +917,18 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
     for ws_task in deletion_list:
         # Support lookups via 'workspace_id' integer keys, falling back to name parameters if required
         # Adjust these parameter keys to match your exact Pydantic schema naming structure!
-        workspace_id = ws_task.get("workspace_id")
         workspace_name = ws_task.get("workspace_name")
 
         # Fallback tracking resolution step: If the LLM only gave a string name, look it up in the database
-        if not workspace_id and workspace_name:
+        if workspace_name:
             db_workspace = Workspace.objects.filter(name=workspace_name.strip(), owner=user).first()
             if db_workspace:
-                workspace_id = db_workspace.id
+                workspace_id = db_workspace.pk
 
         if not workspace_id:
             print(f"⚠️ Deletion Skipped: Could not resolve a valid target ID for context: {ws_task}")
             continue
-
+        print("workspace_id", workspace_id)
         try:
             # 1. Fire your decoupled service processing transaction logic block
             execution_result = delete_workspace_with_repos(
@@ -948,7 +970,13 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
 
 
 
-@shared_task
+@shared_task(
+    bind=True,
+    autoretry_for=(OperationalError,),
+    retry_kwargs={'max_retries': 5},
+    retry_backoff=True,         # Exponential backoff (1s, 2s, 4s, 8s...)
+    retry_backoff_max=15        # Max wait limit per retry
+)
 def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
     """
     Asynchronously processes environment key mapping and repository linking.
@@ -958,6 +986,8 @@ def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, 
         user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
         return "User context verification failure"
+
+    print("env_key_requests", env_key_requests)
 
     if not env_key_requests:
         return "No configuration data provided"
@@ -987,7 +1017,7 @@ def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, 
                     selected_repo_ids.append(matched_id)
 
         if not selected_repo_ids:
-            print(f"⚠️ Env Key Warning: No cached repository entries could be verified for inputs: {raw_target_repos}")
+            print(f"⚠️ Env Key Warning: No repository entries could be verified for inputs: {raw_target_repos}")
             continue
 
         try:
@@ -1030,7 +1060,13 @@ def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, 
 
 
 
-@shared_task
+@shared_task(
+    bind=True,
+    autoretry_for=(OperationalError,),
+    retry_kwargs={'max_retries': 5},
+    retry_backoff=True,         
+    retry_backoff_max=15        
+)
 def async_handle_env_key_deletion_task(env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
     """
     Asynchronously processes environment key deletion parameters.
@@ -1107,7 +1143,13 @@ def async_handle_env_key_deletion_task(env_key_requests, channel_name, user_id, 
 
 
 
-@shared_task
+@shared_task(
+    bind=True,
+    autoretry_for=(OperationalError,),
+    retry_kwargs={'max_retries': 5},
+    retry_backoff=True,         
+    retry_backoff_max=15        
+)
 def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
     """
     Asynchronous platform dispatcher.
