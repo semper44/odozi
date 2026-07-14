@@ -367,6 +367,9 @@ class GitHubRefreshView(APIView):
             print("Refresh token request body:", request.COOKIES)
             refresh_token = request.COOKIES.get("jwt_refresh_token")
             expires_at = request.COOKIES.get("expires_at")
+            # Normalize accidental string "None" values into actual None
+            if refresh_token is not None and str(refresh_token).lower() == "none":
+                refresh_token = None
             print("ran through")
 
         except json.JSONDecodeError:
@@ -387,20 +390,22 @@ class GitHubRefreshView(APIView):
         expires_at = isoparse(expires_at)
         elapsed = timezone.now() - expires_at
 
-        profile = UserProfileModel.objects.get(user = request.user)
-        installation_id = profile.installation_id
-        cache_key = f"github:token:{installation_id}"
-        token = cache.get(cache_key)
+        # profile = UserProfileModel.objects.get(user = request.user)
+        # installation_id = profile.installation_id
+        # cache_key = f"github:token:{installation_id}"
+        # token = cache.get(cache_key)
 
-        if not token:
-            print(f"⚡ [TOKEN CACHE HIT] Reusing cached GitHub token for installation {installation_id}")
-            print(f"⏳ [TOKEN CACHE MISS] Generating a fresh GitHub token...")
-            # Call your original dynamic function to mint a fresh 1-hour token
-            fresh_token = get_installation_access_token(installation_id)
-            cache.set(cache_key, fresh_token, timeout=55 * 60)
-                
+        # if not token:
+        #     print(f"⚡ [TOKEN CACHE HIT] Reusing cached GitHub token for installation {installation_id}")
+        #     print(f"⏳ [TOKEN CACHE MISS] Generating a fresh GitHub token...")
+        #     # Call your original dynamic function to mint a fresh 1-hour token
+        #     fresh_token = get_installation_access_token(installation_id)
+        #     cache.set(cache_key, fresh_token, timeout=55 * 60)
+
+
 
         # check if its necessary to poll github
+        print(elapsed,"ijoyaaaaaaa",elapsed is not None, elapsed >= timedelta(hours=6))
         if elapsed is not None and elapsed >= timedelta(hours=7):
 
             parsed_jwt = AccessToken(new_access)  # type: ignore
@@ -467,14 +472,12 @@ class GitHubRefreshView(APIView):
                         "expires_at": expires_in
                     }
 
-                    cached_repos = cache.get(details_cache_key)
 
-                    if cached_repos:
-                        cached_repos["github_access_token"] = github_new_access
-                        cached_repos["github_refresh_token"] = github_new_refresh
-                        cached_repos["expires_at"] = expires_in
+                    cached_repos["github_access_token"] = github_new_access
+                    cached_repos["github_refresh_token"] = github_new_refresh
+                    cached_repos["expires_at"] = expires_in
 
-                        cache.set(details_cache_key, cached_repos, timeout=28800)
+                    cache.set(details_cache_key, cached_repos, timeout=28800)
 
                 except httpx.RequestError:
                     return JsonResponse(
@@ -496,8 +499,9 @@ class GitHubRefreshView(APIView):
 
         print("")
         print("------------------------")
-        print("refresh")
-        print(str(new_access))
+        print("refresh token and type")
+        print(str(refresh))
+        print( type(refresh))
         print("------------------------")
         print("")
 
@@ -511,15 +515,20 @@ class GitHubRefreshView(APIView):
             path="/"
         )
 
-        response.set_cookie(
-            key="jwt_refresh_token",
-            value=str(refresh),  # <-- FIXED HERE TOO
-            max_age=28800,
-            httponly=True,
-            secure=True,
-            samesite="None",
-            path="/"
-        )
+        # Only set refresh cookie when we have a real refresh token value
+        refresh_str = str(refresh) if refresh is not None else None
+        if refresh_str and refresh_str.lower() != "none":
+            response.set_cookie(
+                key="jwt_refresh_token",
+                value=refresh_str,  
+                max_age=28800,
+                httponly=True,
+                secure=True,
+                samesite="None",
+                path="/"
+            )
+        else:
+            response.delete_cookie(key="jwt_refresh_token", path="/")
 
         return response
 

@@ -191,7 +191,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
     workspace_name = workspace_name.strip() if workspace_name else "default"
     selected_repo_ids = selected_repo_ids or []
 
-    print("ronus")
+    print(selected_repo_ids, "ronus", workspace_name)
 
     with transaction.atomic():
         # 1. Clean and uppercase key names to enforce case sanity
@@ -209,7 +209,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
                 owner=user,
                 defaults={"github_account_name": user.username}
             )
-        print("power")
+        print("power", repo_workspace)
         envs_to_create = []
         skipped_duplicates_count = 0
 
@@ -217,6 +217,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
         # 📂 CASE A: SCOPING WORKSPACE-WIDE REUSABLE VARIABLES (selected_repo_ids is empty)
         # =====================================================================
         if not selected_repo_ids:
+            print("italy")
             # Check existing workspace keys to prevent database constraint failures
             existing_workspace_keys = set(RepoEnvKey.objects.filter(
                 workspace=repo_workspace,
@@ -228,6 +229,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
             for key in cleaned_keys:
                 if key in existing_workspace_keys:
                     skipped_duplicates_count += 1
+                    print("skipping")
                     continue
                 
                 envs_to_create.append(
@@ -254,6 +256,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
         # 💻 CASE B: SCOPING ISOLATED REPOSITORY VARIABLES (selected_repo_ids has entries)
         # =====================================================================
         else:
+            print("selected repooo", selected_repo_ids)
             # Map raw input list items to an in-memory lookup map
             incoming_repos_map = {int(repo['repo_id']): repo for repo in repositories_data if 'repo_id' in repo}
             

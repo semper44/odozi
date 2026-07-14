@@ -313,15 +313,21 @@ def dashboard_view(request):
         samesite="None", # Permits local cross-origin development handshakes
         path="/"
     )
-    response.set_cookie(
-        key="jwt_refresh_token",
-        value=str(token_refresh_string),
-        max_age=28800, # 8 Hours matching standard working cycles
-        httponly=True,
-        secure=True,     # Forces HTTPS requirement blocks
-        samesite="None", # Permits local cross-origin development handshakes
-        path="/"
-    )
+    # Only set a refresh cookie when we actually have a valid refresh token.
+    # Avoid writing the string 'None' into the cookie if token_refresh_string is None.
+    if token_refresh_string and str(token_refresh_string).lower() != "none":
+        response.set_cookie(
+            key="jwt_refresh_token",
+            value=str(token_refresh_string),
+            max_age=28800, # 8 Hours matching standard working cycles
+            httponly=True,
+            secure=True,     # Forces HTTPS requirement blocks
+            samesite="None", # Permits local cross-origin development handshakes
+            path="/"
+        )
+    else:
+        # Remove any stale refresh cookie present on the client.
+        response.delete_cookie(key="jwt_refresh_token", path="/")
 
     print(f"🚀 [DASHBOARD] Clean execution complete. Returning data payload for: {username}")
     return response

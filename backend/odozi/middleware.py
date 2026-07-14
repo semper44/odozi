@@ -1,11 +1,13 @@
 # middleware.py
 from typing import Any, Dict
 from urllib.parse import parse_qs
-from django.contrib.auth.models import AnonymousUser
-from channels.middleware import BaseMiddleware
-from rest_framework_simplejwt.tokens import AccessToken
+from django.core.cache import cache
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
+
+from channels.middleware import BaseMiddleware
 from channels.db import database_sync_to_async
+from rest_framework_simplejwt.tokens import AccessToken
 from odozi.utils.crypto import decrypt_token
 
 User = get_user_model()
@@ -37,6 +39,7 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
 
         # 2. Extract your secure token cookie name
         # ⚠️ MAKE SURE THIS MATCHES EXACTLY WITH WHAT YOU SET IN YOUR SET_COOKIE FUNCTION!
+        
         encrypted_jwt = cookies.get("jwt_access_token") 
         print("ssssssssssssssssssss", encrypted_jwt)
         
@@ -48,12 +51,22 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
                 
                 # 4. Try to parse token and verify cryptographic signature locally
                 parsed_jwt = AccessToken(token_string)  # type: ignore
-                
+                print(111111111111)
                 user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
+                print(222222222)
                 
                 # 5. Look up user inside database
                 scope["user"] = await get_user_from_db(user_id) # type: ignore
-                scope["github_token"] = encrypted_jwt
+                print(3333333333)
+                details_cache_key = f"user:repos:{user_id}"
+                print(4444)
+                cached_details = cache.get(details_cache_key)
+                print(5555, cached_details)
+                if cached_details:
+                    encrypted_jwt = cached_details["github_access_token"]
+                    print(6666)
+                    scope["github_token"] = encrypted_jwt
+                print(77777)
                 
             except Exception as e:
                 print(f"💥 [WS-AUTH] CRITICAL REJECTION: Parsing/Decryption exploded! Error: {str(e)}")

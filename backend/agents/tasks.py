@@ -561,7 +561,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
         print(result.intents, "and", result.active_rules)
         details_cache_key = f"user:repos:{user_id}"
         cached_details = cache.get(details_cache_key)
-        print("cached_repos", 44444444444, cached_details)
+        print("cached_repos", token, cached_details)
         # Check if data exists and is the correct format (list or dict of repos)
         if cached_details is not None:
             # Process your cached_repos directly here
@@ -892,7 +892,7 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
     retry_backoff=True,         
     retry_backoff_max=15        
 )
-def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, user_id, cached_repositories, ui_layout):
+def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_name, user_id, cached_repositories, ui_layout):
     """
     Executes bulk workspace deletions and unlinking asynchronously.
     Fires status updates back to the browser via WebSockets.
@@ -908,6 +908,7 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
 
     channel_layer = get_channel_layer()
     workspace_id = None
+    workspace_not_found = []
     print("daaluuu")
     # Ensure standard list structure handling even if a singular dictionary lands
     deletion_list = workspaces_to_delete if isinstance(workspaces_to_delete, list) else [workspaces_to_delete]
@@ -924,9 +925,11 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
             db_workspace = Workspace.objects.filter(name=workspace_name.strip(), owner=user).first()
             if db_workspace:
                 workspace_id = db_workspace.pk
+            else:
+                workspace_not_found.append(workspace_name)
 
         if not workspace_id:
-            print(f"⚠️ Deletion Skipped: Could not resolve a valid target ID for context: {ws_task}")
+            print(f"⚠️ Deletion Skipped: Could not resolve a valid target ID for context: {workspace_name}")
             continue
         print("workspace_id", workspace_id)
         try:
@@ -940,7 +943,7 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
         except Exception as deletion_error:
             print(f"🚨 Failed processing deletion thread loop for ID {workspace_id}: {str(deletion_error)}")
             continue
-
+    print("before", workspace_not_found)
     # 2. 🚀 BROADCAST RESULTS: Shoot the structured processing metrics back down the WebSocket pipe
     if deletion_summaries:
         # Build a neat string summary description or return raw payload arrays based on your layout requirement
@@ -977,10 +980,10 @@ def async_handle_workspace_deletion_task(workspaces_to_delete, channel_name, use
     retry_backoff=True,         # Exponential backoff (1s, 2s, 4s, 8s...)
     retry_backoff_max=15        # Max wait limit per retry
 )
-def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
+def async_handle_env_key_creation_task(self, env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
     """
     Asynchronously processes environment key mapping and repository linking.
-    Fires real-time success stats straight down the user's WebSocket pipe.
+    Supports polymorphic execution: Workspace-wide scope or Repository-explicit scope.
     """
     try:
         user = User.objects.get(pk=user_id)
@@ -1001,41 +1004,57 @@ def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, 
     cached_map = {repo.get('name', '').lower().strip(): repo for repo in parent_repo_list if isinstance(repo, dict)}
 
     for req in requests_list:
-        workspace_name = req.get("workspace_name") or req.get("workspace", "")
+        # 🌟 INITIALIZE VARIABLES INSIDE THE LOOP BODY PER REQUEST CONTEXT
+        workspace_name = req.get("workspace_name")
         raw_key_names = req.get("key_names", [])
-        raw_target_repos = req.get("repositories", []) or req.get("repo_names", [])
-
+        raw_target_repos = req.get("repositories", [])
+        
         selected_repo_ids = []
+        repos_not_found = []
 
-        # 1. 🔍 SINGLE LINE LOOP: Match user inputs to your parent cached array list items
-        for raw_name in raw_target_repos:
-            user_input = str(raw_name).lower().replace(" ", "-").strip()
-            
-            if user_input in cached_map:
-                matched_id = cached_map[user_input].get("id")
-                if matched_id:
-                    selected_repo_ids.append(matched_id)
+        # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
+        if raw_target_repos:
+            for raw_name in raw_target_repos:
+                user_input = str(raw_name).lower().replace(" ", "-").strip()
+                
+                if user_input in cached_map:
+                    matched_id = cached_map[user_input].get("id")
+                    if matched_id:
+                        selected_repo_ids.append(matched_id)
+                else:
+                    repos_not_found.append(user_input)
 
-        if not selected_repo_ids:
-            print(f"⚠️ Env Key Warning: No repository entries could be verified for inputs: {raw_target_repos}")
-            continue
+            # If user targeted specific repos but none could be verified, halt this specific request
+            if not selected_repo_ids:
+                print(f"⚠️ Env Key Warning: Explicit repositories targeted but none verified for: {raw_target_repos}")
+                continue
 
+        # 2. ⚡ MOVE TRY BLOCK INSIDE THE LOOP CONTEXT
         try:
-            # 2. ⚡ FIRE TRANSACTION: Invoke your business service function natively inside the worker
+            print("qqqqqqqqqqqqqqqq - Target scope verified online.")
+            
+            # Invoke your business service function natively inside the loop
             service_result = create_repo_env_keys_service(
                 user=user,
-                repositories_data=parent_repo_list, # Passes cache list metadata for bulk-creation processing fallback
+                repositories_data=parent_repo_list, 
                 key_names=raw_key_names,
                 workspace_name=workspace_name,
-                selected_repo_ids=selected_repo_ids
+                selected_repo_ids=selected_repo_ids  # Passes empty list cleanly if workspace scope is targeted
             )
 
-            # 3. 🚀 IMMEDIATE BROADCAST: Push the success summary metrics right out to the client browser
-            chat_confirmation_text = (
-                f"Successfully injected {service_result['environment_keys_created_count']} new environment keys "
-                f"across {len(selected_repo_ids)} repositories under the '{workspace_name}' workspace environment profile context."
-            )
+            # Determine response descriptive summary text depending on polymorphic execution scope return
+            if service_result.get("scope") == "workspace":
+                chat_confirmation_text = (
+                    f"Successfully injected {service_result['environment_keys_created_count']} reusable keys "
+                    f"globally across the entire '{workspace_name}' workspace tree configuration profile."
+                )
+            else:
+                chat_confirmation_text = (
+                    f"Successfully injected {service_result['environment_keys_created_count']} new environment keys "
+                    f"across {len(selected_repo_ids)} repositories under the '{workspace_name}' workspace environment context."
+                )
 
+            # 🚀 IMMEDIATE BROADCAST: Push the success summary metrics right out to the client browser
             async_to_sync(channel_layer.group_send)(
                 channel_name,
                 {
@@ -1045,7 +1064,7 @@ def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, 
                         "raw_output": {
                             "ui_layout_route": ui_layout,
                             "chat_response": chat_confirmation_text,
-                            "key_injection_details": service_result # Feeds rich summary metadata maps straight to React state
+                            "key_injection_details": service_result 
                         },
                     }
                 }
@@ -1067,7 +1086,7 @@ def async_handle_env_key_creation_task(env_key_requests, channel_name, user_id, 
     retry_backoff=True,         
     retry_backoff_max=15        
 )
-def async_handle_env_key_deletion_task(env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
+def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
     """
     Asynchronously processes environment key deletion parameters.
     Fires removal logs directly down the user's secure room WebSocket pipe.
@@ -1150,7 +1169,7 @@ def async_handle_env_key_deletion_task(env_key_requests, channel_name, user_id, 
     retry_backoff=True,         
     retry_backoff_max=15        
 )
-def run_agentic_pipeline(repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
+def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
     """
     Asynchronous platform dispatcher.
     """

@@ -17,20 +17,52 @@ class UserInputModel(models.Model):
 
 
 
+
 class RepoEnvKey(models.Model):
     """
     Tracks only the NAMES of the environment variables a user requires.
-    We NEVER store the actual secret values on our database for maximum security.
+    Supports both workspace-wide reusability and repository-specific isolation.
     """
-    repo = models.ForeignKey(GitHubRepository, on_delete=models.CASCADE, related_name="repo_env_keys")
-    key_name = models.CharField(max_length=255) # e.g., "DJANGO_SECRET_KEY", "STRIPE_API_KEY"
+    # Nullable workspace link: If set, variables apply to ALL repos in this workspace
+    workspace = models.ForeignKey(
+        Workspace, 
+        on_delete=models.CASCADE, 
+        related_name="workspace_env_keys",
+        blank=True, 
+        null=True
+    )
+    
+    # Nullable repository link: If set, variable is isolated to this specific repository
+    repo = models.ForeignKey(
+        GitHubRepository, 
+        on_delete=models.CASCADE, 
+        related_name="repo_env_keys",
+        blank=True, 
+        null=True
+    )
+    
+    key_name = models.CharField(max_length=255) # e.g., "DJANGO_SECRET_KEY"
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('repo', 'key_name')
+        # Constraints: Ensure uniqueness within both individual scopes
+        unique_together = [
+            ('workspace', 'key_name'),
+            ('repo', 'key_name')
+        ]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        # Defensive constraint validation: A variable must belong to exactly one scope layer
+        if not self.workspace and not self.repo:
+            raise ValidationError("An environment variable must be linked to either a Workspace or a Repository.")
+        if self.workspace and self.repo:
+            raise ValidationError("An environment variable cannot be linked to both a Workspace and a Repository simultaneously. Choose one scope level.")
 
     def __str__(self):
-        return f"{self.repo} requires {self.key_name}"
+        scope = f"Workspace '{self.workspace.name}'" if self.workspace else f"Repo '{self.repo.repo_name}'"
+        return f"{scope} requires variable: {self.key_name}"
+
 
 
 

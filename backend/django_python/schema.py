@@ -30,12 +30,8 @@ class RepoEnvKeyCreationTask(BaseModel):
     key_names: List[str] = Field(
         description="List of environment key strings to inject (e.g., ['STRIPE_API_KEY', 'DB_PASSWORD'])"
     )
-    # 🌟 Fixed: Added safe default list and told the model to use 0 if unknown
-    selected_repo_ids: List[int] = Field(
-        default=[0],
-        description="Array of integer GitHub repo IDs. If unknown, populate this list with a placeholder item: [0]."
-    )
-    repositories_data: List[RepositoryItem] = Field(
+
+    repositories: List[RepositoryItem] = Field(
         default=[],
         description="Full metadata objects list required to defensively instantiate missing database records"
     )
@@ -71,10 +67,6 @@ class WorkspaceCreationTask(BaseModel):
 class WorkspaceDeletionTask(BaseModel):
     """Captures explicit ID and metadata to execute your delete_workspace_with_repos function."""
     # 🌟 Fixed: Changed from a strict required int to an optional int with a fallback default 0!
-    workspace_id: int = Field(
-        default=0,
-        description="The primary key ID of the workspace. If unknown to the chat session, populate natively as 0."
-    )
     workspace_name: str = Field(description="The name of the workspace being targeted for deletion")
 
 
