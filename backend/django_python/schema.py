@@ -38,15 +38,28 @@ class RepoEnvKeyCreationTask(BaseModel):
 
 
 class RepoEnvKeyDeletionTask(BaseModel):
-    """Maps fields directly to your delete_repo_env_keys_service function parameter footprint."""
+    """Maps fields directly to your polymorphic delete_repo_env_keys_service function parameter footprint."""
+    
+    delete_which: str = Field(
+        description="Must be strictly one of these structural scope targets: 'workspace', 'repo', or 'key_names'."
+    )
+    
+    workspace_name: Optional[str] = Field(
+        default=None,
+        description="The name of the target workspace context. Required if delete_which is 'workspace'."
+    )
+    
     key_names: List[str] = Field(
-        description="List of exact environment key variable names to bulk delete"
+        default=[],
+        description="List of exact environment key variable names to bulk delete (e.g., ['DB', 'CLOUDFLARE'])."
     )
-    # 🌟 Fixed: Added safe default list and fallback placeholder instruction
-    selected_repo_ids: List[int] = Field(
-        default=[0],
-        description="Array of integer GitHub repo IDs. If unknown, populate this list with a placeholder item: [0]."
+    
+    repositories: List[RepositoryItem] = Field(
+        default=[],
+        description="Full metadata objects list required to resolve target repo IDs dynamically via string matching if raw integer IDs are unknown."
     )
+    
+    
 
 
 class ToolStrategyMapping(BaseModel):

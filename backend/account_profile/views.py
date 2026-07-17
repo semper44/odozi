@@ -377,8 +377,10 @@ class GitHubRefreshView(APIView):
 
         refresh = OdoziCustomRefreshToken(refresh_token)
         new_access = str(refresh.access_token)
+        print("before disaster")
+        parsed_jwt = AccessToken(new_access)
 
-        print("abeg", refresh)
+        print("abegiiiiiiiiiiiii", refresh)
         print("new_access", new_access)
         print("")
 
@@ -501,7 +503,6 @@ class GitHubRefreshView(APIView):
         print("------------------------")
         print("refresh token and type")
         print(str(refresh))
-        print( type(refresh))
         print("------------------------")
         print("")
 

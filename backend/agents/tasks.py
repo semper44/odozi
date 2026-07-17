@@ -709,7 +709,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
             result_dict = result.model_dump()
-            env_key_requests = result_dict.get('env_keys_to_delete=', [])
+            env_key_requests = result_dict.get('env_keys_to_delete', [])
             ui_layout = result_dict.get('ui_layout', [])
             cached_repositories = cached_details.get("repositories", [])
             intent_signatures.append(
@@ -990,7 +990,6 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
     except User.DoesNotExist:
         return "User context verification failure"
 
-    print("env_key_requests", env_key_requests)
 
     if not env_key_requests:
         return "No configuration data provided"
@@ -1001,9 +1000,11 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
     requests_list = env_key_requests if isinstance(env_key_requests, list) else [env_key_requests]
 
     # Map the full repository array cache list natively for safe matching bounds
-    cached_map = {repo.get('name', '').lower().strip(): repo for repo in parent_repo_list if isinstance(repo, dict)}
+    cached_map = [(repo.get('name', '').lower().strip(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
+    print("env_key_requests", requests_list)
 
     for req in requests_list:
+        print("kenya")
         # 🌟 INITIALIZE VARIABLES INSIDE THE LOOP BODY PER REQUEST CONTEXT
         workspace_name = req.get("workspace_name")
         raw_key_names = req.get("key_names", [])
@@ -1011,23 +1012,45 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
         
         selected_repo_ids = []
         repos_not_found = []
+        print("lisa",  raw_target_repos)
 
         # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
+                # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
         if raw_target_repos:
-            for raw_name in raw_target_repos:
-                user_input = str(raw_name).lower().replace(" ", "-").strip()
+            for raw_item in raw_target_repos:
+                # 🌟 FIX A: Extract the repository name string safely depending on data type
+                if isinstance(raw_item, dict):
+                    repo_name_str = raw_item.get("repo_name", "")
+                else:
+                    repo_name_str = str(raw_item)
+
+                user_input = repo_name_str.lower().replace(" ", "-").strip()
                 
-                if user_input in cached_map:
-                    matched_id = cached_map[user_input].get("id")
+                # Execute the safe tuple-list match wrapper clean
+                matched_repo_dict = next((repo for low_name, repo in cached_map if user_input in low_name), None)
+                print("matched_repo_dict", matched_repo_dict)
+                
+                if matched_repo_dict:
+                    matched_id = matched_repo_dict.get("id")
                     if matched_id:
                         selected_repo_ids.append(matched_id)
                 else:
+                    # 🌟 FIX B: Fallback directly to the incoming layout metadata payload 
+                    # if the cache does not have this repository loaded yet
+                    if isinstance(raw_item, dict):
+                        incoming_id = raw_item.get("repo_id")
+                        # Only append if it's a real database primary key (not placeholder 0)
+                        if incoming_id and incoming_id != 0:
+                            selected_repo_ids.append(incoming_id)
+                            continue
+                    
                     repos_not_found.append(user_input)
 
             # If user targeted specific repos but none could be verified, halt this specific request
             if not selected_repo_ids:
                 print(f"⚠️ Env Key Warning: Explicit repositories targeted but none verified for: {raw_target_repos}")
                 continue
+
 
         # 2. ⚡ MOVE TRY BLOCK INSIDE THE LOOP CONTEXT
         try:
@@ -1091,36 +1114,46 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
     Asynchronously processes environment key deletion parameters.
     Fires removal logs directly down the user's secure room WebSocket pipe.
     """
+    print("patty1111")
     try:
+        print("patty222")
         user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
         return "User context verification failure"
 
     if not env_key_requests:
+        print("patty3333", env_key_requests)
         return "No configuration data provided for key deletion"
+    
+    print("patty")
 
     channel_layer = get_channel_layer()
     requests_list = env_key_requests if isinstance(env_key_requests, list) else [env_key_requests]
 
     # Map the full repository array cache list natively for safe matching bounds
-    cached_map = {repo.get('name', '').lower().strip(): repo for repo in parent_repo_list if isinstance(repo, dict)}
+    cached_map = [(repo.get('name', '').lower().strip(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
     for req in requests_list:
         raw_key_names = req.get("key_names", [])
         raw_target_repos = req.get("repositories", []) or req.get("repo_names", [])
-
+        delete_which= req.get("delete_which", None)
         selected_repo_ids = []
+
+        print("ev-requests_list", requests_list)
 
         # Match loose string inputs to your parent cached array list items to gather specific IDs
         for raw_name in raw_target_repos:
             user_input = str(raw_name).lower().replace(" ", "-").strip()
             
-            if user_input in cached_map:
-                matched_id = cached_map[user_input].get("id")
+            matched_repo_dict = next((repo for low_name, repo in cached_map if user_input in low_name), None)
+
+            print(matched_repo_dict,"env-raw_name", raw_name)
+            if matched_repo_dict:
+                matched_id = matched_repo_dict.get("id")
                 if matched_id:
                     selected_repo_ids.append(matched_id)
-
-        if not selected_repo_ids or not raw_key_names:
+        print(raw_key_names, "maskd", selected_repo_ids)
+        if not selected_repo_ids and not raw_key_names:
             print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
             continue
 
@@ -1129,6 +1162,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
             service_result = delete_repo_env_keys_service(
                 user=user,
                 key_names=raw_key_names,
+                delete_which=delete_which,
                 selected_repo_ids=selected_repo_ids
             )
 

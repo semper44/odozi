@@ -209,7 +209,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
                 owner=user,
                 defaults={"github_account_name": user.username}
             )
-        print("power", repo_workspace)
+        print(selected_repo_ids, "power", repo_workspace)
         envs_to_create = []
         skipped_duplicates_count = 0
 
@@ -235,7 +235,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
                 envs_to_create.append(
                     RepoEnvKey(workspace=repo_workspace, repo=None, key_name=key)
                 )
-            print("okelezu")
+            print("okelezu", envs_to_create)
             if envs_to_create:
                 RepoEnvKey.objects.bulk_create(envs_to_create)
                 message = f"Successfully injected {len(envs_to_create)} reusable keys into workspace '{workspace_name}'."
@@ -326,7 +326,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
 
 
 
-def delete_repo_env_keys_service(user, key_names: list, workspace_name: str = None, selected_repo_ids: list = None) -> dict:
+def delete_repo_env_keys_service(user, key_names: list, delete_which:str, workspace_name: str = None, selected_repo_ids: list = None) -> dict:
     """
     Polymorphic deletion service to bulk-delete environment variables from either:
     1. An entire Workspace globally (if selected_repo_ids is empty/omitted).
@@ -335,7 +335,7 @@ def delete_repo_env_keys_service(user, key_names: list, workspace_name: str = No
     🔥 CLEANUP RULE: If an affected repository ends up with ZERO remaining keys 
     AND is not linked to any active workspace, it is purged globally to save space.
     """
-    if not key_names:
+    if not key_names and not workspace_name and selected_repo_ids is None:
         raise ValidationError("Must provide a list of key names to delete.")
 
     selected_repo_ids = selected_repo_ids or []
@@ -344,13 +344,15 @@ def delete_repo_env_keys_service(user, key_names: list, workspace_name: str = No
     affected_repos = set()
     purged_repos_info = []
     deleted_count = 0
+    delete_messages = ""
     print("esther")
 
     with transaction.atomic():
         # =====================================================================
         # 📂 CASE A: DELETING WORKSPACE-WIDE REUSABLE VARIABLES
-        # =====================================================================
-        if not selected_repo_ids and workspace_name:
+        # ==================================='==================================
+        if workspace_name and delete_which == "workspace":
+            print("delete_workspace_name")
             try:
                 repo_workspace = Workspace.objects.get(name=workspace_name.strip(), owner=user)
             except Workspace.DoesNotExist:
@@ -365,11 +367,12 @@ def delete_repo_env_keys_service(user, key_names: list, workspace_name: str = No
                 key_name__in=cleaned_keys
             )
             deleted_count, _ = delete_query.delete()
+            print(delete_query, "workspace",deleted_count,"riceeeeee", _)
+            delete_messages += f"Deleted in {workspace_name} "
 
-        # =====================================================================
-        # 💻 CASE B: DELETING REPOSITORY-ISOLATED VARIABLES
-        # =====================================================================
-        elif selected_repo_ids:
+
+        if selected_repo_ids and delete_which == "repo":
+            print("delete_selected_repo_ids")
             # Gather target repositories owned by the user
             target_repos = GitHubRepository.objects.filter(
                 repo_id__in=selected_repo_ids,
@@ -384,8 +387,20 @@ def delete_repo_env_keys_service(user, key_names: list, workspace_name: str = No
                     key_name__in=cleaned_keys
                 )
                 deleted_count, _ = delete_query.delete()
+                print(delete_query,"yana",deleted_count, "target_repos", target_repos, )
+                delete_messages += f"Deleted in {workspace_name} "
 
-            print("cry")
+
+        if key_names and delete_which == "key_names":
+            print("delete_key_name")
+            # Bulk delete matching keys across these repositories
+            delete_query = RepoEnvKey.objects.filter(
+                key_name__in=cleaned_keys
+            )
+            deleted_count, _ = delete_query.delete()
+
+            print(cleaned_keys,"cleaned_keys",deleted_count)
+            # delete_messages += f"Deleted in {workspace_name} "
 
 
         # =====================================================================
