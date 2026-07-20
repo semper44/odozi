@@ -1,16 +1,17 @@
-import shutil
-import traceback
-import subprocess
-import textwrap
 import os
 import re
 import uuid
+import httpx
 import json
 import time
 import jwt
 import base64
+import shutil
 import inspect
 import requests
+import traceback
+import subprocess
+import textwrap
 from toon import encode
 from typing import cast
 
@@ -53,7 +54,12 @@ from langchain_community.callbacks import get_openai_callback
 
 # Celery tasks (the parallel tools)
 
-
+UNIVERSAL_NETWORK_ERRORS = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout
+)
 
 def transform_ci_results(raw_results):
     """
@@ -442,7 +448,13 @@ Set 'ui_layout_route' to:
 
 
 
-@shared_task
+@shared_task(
+    bind=True,
+    autoretry_for= UNIVERSAL_NETWORK_ERRORS,
+    retry_kwargs={'max_retries': 3},
+    retry_backoff=True,        
+    retry_backoff_max=30
+)
 def process_agentic_chat_turn_task(channel_name, user_id, username, token, session_id, prompt_text, repos, provider, model_name, api_key):
     channel_layer = get_channel_layer()
     
@@ -561,7 +573,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
         print(result.intents, "and", result.active_rules)
         details_cache_key = f"user:repos:{user_id}"
         cached_details = cache.get(details_cache_key)
-        print("cached_repos", token, cached_details)
+        print("cached_repos", token)
         # Check if data exists and is the correct format (list or dict of repos)
         if cached_details is not None:
             # Process your cached_repos directly here
@@ -897,7 +909,7 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
     Executes bulk workspace deletions and unlinking asynchronously.
     Fires status updates back to the browser via WebSockets.
     """
-    print("delete_workspace", workspaces_to_delete)
+    print("delete_workspace", workspaces_to_delete, "iwee")
     try:
         user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
@@ -927,6 +939,8 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
                 workspace_id = db_workspace.pk
             else:
                 workspace_not_found.append(workspace_name)
+            print("gang",db_workspace)
+
 
         if not workspace_id:
             print(f"⚠️ Deletion Skipped: Could not resolve a valid target ID for context: {workspace_name}")
@@ -1004,7 +1018,6 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
     print("env_key_requests", requests_list)
 
     for req in requests_list:
-        print("kenya")
         # 🌟 INITIALIZE VARIABLES INSIDE THE LOOP BODY PER REQUEST CONTEXT
         workspace_name = req.get("workspace_name")
         raw_key_names = req.get("key_names", [])

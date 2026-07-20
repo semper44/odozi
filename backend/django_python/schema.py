@@ -5,20 +5,6 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 
-class RepositoryItem(BaseModel):
-    """The master repository descriptor used across all execution rules and metadata tracks."""
-    # 🌟 Added safe fallback default and internal instruction description
-    repo_id: Optional[int] = Field(
-        default=0, 
-        description="The GitHub global integer ID. Default to 0 if the user only provides the repository name string."
-    )
-    repo_name: str = Field(description="Name of the repo (e.g., 'Taskmaster')")
-    repo_owner: str = Field(default="unknown_owner", description="The owner account username")
-    repo_full_name: str = Field(description="Formatted as owner/repo_name")
-    target_branch: Optional[str] = Field(
-        default=None, 
-        description="The specific branch requested (e.g., 'main'). Set to null if not specified."
-    )
 
 
 class RepoEnvKeyCreationTask(BaseModel):
@@ -31,9 +17,9 @@ class RepoEnvKeyCreationTask(BaseModel):
         description="List of environment key strings to inject (e.g., ['STRIPE_API_KEY', 'DB_PASSWORD'])"
     )
 
-    repositories: List[RepositoryItem] = Field(
+    repositories: List[str] = Field(
         default=[],
-        description="Full metadata objects list required to defensively instantiate missing database records"
+        description="The name of the exact repository (e.g., 'Taskmaster')"
     )
 
 
@@ -54,9 +40,9 @@ class RepoEnvKeyDeletionTask(BaseModel):
         description="List of exact environment key variable names to bulk delete (e.g., ['DB', 'CLOUDFLARE'])."
     )
     
-    repositories: List[RepositoryItem] = Field(
+    repositories: List[str] = Field(
         default=[],
-        description="Full metadata objects list required to resolve target repo IDs dynamically via string matching if raw integer IDs are unknown."
+        description="The name of the exact repository (e.g., 'Taskmaster')"
     )
     
     

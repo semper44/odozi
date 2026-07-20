@@ -18,22 +18,6 @@ interface LLMState {
   setLLMConfig: (provider: string, model: string) => void;
 }
 
-interface SocketState {
-  isConnected: boolean;
-  isProcessing: boolean;
-  statusMessage: string;
-  socketError: string | null;
-   activeToast: string | null;
-  streamingMessage: any | null;  // ✅ Global streaming data
-  
-  // Actions to mutate state from your WebSocket manager
-  setConnectionStatus: (status: boolean) => void;
-  setProcessingStatus: (isProcessing: boolean, message?: string) => void;
-  setSocketError: (error: string | null) => void;
-  triggerToastNotification: (message: string) => void;
-  setStreamingMessage: (data: any) => void;  // ✅ Action to update streaming data
-  clearSocketStatus: () => void;
-}
 
 export const useSelectionStore =
   create<SelectionStore>((set) => ({
@@ -78,7 +62,27 @@ export const useLLMStore = create<LLMState>()(
   )
 );
 
+interface SocketErrorPayload {
+  message: string;
+  isImportant: boolean;
+}
 
+interface SocketState {
+  isConnected: boolean;
+  isProcessing: boolean;
+  statusMessage: string;
+  socketError: SocketErrorPayload | null;
+   activeToast: string | null;
+  streamingMessage: any | null;  // ✅ Global streaming data
+  
+  // Actions to mutate state from your WebSocket manager
+  setConnectionStatus: (status: boolean) => void;
+  setProcessingStatus: (isProcessing: boolean, message?: string) => void;
+  setSocketError: (message: string, isImportant?: boolean) => void;
+  triggerToastNotification: (message: string) => void;
+  setStreamingMessage: (data: any) => void;  // ✅ Action to update streaming data
+  clearSocketStatus: () => void;
+}
 
 export const useSocketStore = create<SocketState>((set) => ({
   isConnected: false,
@@ -91,11 +95,15 @@ export const useSocketStore = create<SocketState>((set) => ({
 
   setConnectionStatus: (status) => set({ isConnected: status }),
   
- setProcessingStatus: (isProcessing, message = '') =>
+  setProcessingStatus: (isProcessing, message = '') =>
     set({ isProcessing, statusMessage: message }),
-    
-  setSocketError: (error) => 
-    set({ socketError: error, isProcessing: false, statusMessage: '' }),
+
+  setSocketError: (message, isImportant = false) => 
+    set({ 
+      socketError: { message, isImportant }, 
+      isProcessing: false, 
+      statusMessage: '' 
+    }),
     
   clearSocketStatus: () => set({ isProcessing: false, statusMessage: '', socketError: null }),
 

@@ -44,8 +44,11 @@ class SocketService {
       this.count=0
       this.currentDelay = 1000; // Reset exponential sequence backoff upon clean entry
       useSocketStore.getState().setConnectionStatus(true);
-      useSocketStore.getState().setSocketError(null);
+      // useSocketStore.getState().setSocketError(null);
       useSocketStore.getState().triggerToastNotification(null);
+
+      // Clearing the error object
+      useSocketStore.getState().clearSocketStatus(); 
 
     };
 
@@ -60,7 +63,7 @@ class SocketService {
 
       if (!this.isIntentionalDisconnect) {
         console.warn(`❌ Unscheduled link failure (Code: ${event.code}). Launching reconnect script...`);
-        useSocketStore.getState().setSocketError("Gateway terminated connection: Reconnecting")
+        useSocketStore.getState().setSocketError("Gateway terminated connection: Reconnecting", true)
         if (this.count < 1) {
           useSocketStore.getState().triggerToastNotification("❌ Connection dropped. Reconnecting to gateway...");
         }
@@ -73,7 +76,7 @@ class SocketService {
       if (this.count < 1) {
         useSocketStore.getState().triggerToastNotification("❌ Network handshake verification failure.");
       }
-      useSocketStore.getState().setSocketError("Network handshake verification failure.")
+      useSocketStore.getState().setSocketError("Network handshake verification failure.", true)
     };
 
     this.socket.onmessage = (event) => {
@@ -93,8 +96,12 @@ class SocketService {
           let displayMessage = packet.message;
 
           if (typeof displayMessage === "string") {
+            console.log("packetmessage is a string")
             const lowerMessage = displayMessage.toLowerCase();
-            
+            if (lowerMessage.includes("UNEXPECTED_EOF_WHILE_READING] EOF")){
+              console.log("oluchi should work")
+              displayMessage= 'Network error, please check your internet connection and try again, Or the LLM isnt responding at this time.'
+            }
             // Catch-all keywords for Gemini, OpenAI, and Anthropic quota/rate errors
             const isQuotaError = 
               lowerMessage.includes("resource_exhausted") || 
@@ -108,7 +115,7 @@ class SocketService {
           }
           console.log(displayMessage, "🎯 Chat message:");
 
-          useSocketStore.getState().setSocketError(displayMessage);
+          useSocketStore.getState().setSocketError(displayMessage, true);
             console.log("🟢 STEP 2: Zustand global store has been set to:", useSocketStore.getState().socketError)
         }
 

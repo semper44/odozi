@@ -69,13 +69,15 @@ export default function Dashboard() {
             console.log("🚨 Dashboard caught background worker crash or API block:", socketError);
             
             // Append a system or error message to your chat interface display window
-            const errorSystemMessage: ChatMessage = {
-                id: crypto.randomUUID(),
-                sender: "ai", // or "system" depending on your layout style
-                text: socketError, 
-            };
+            if (socketError.isImportant) {
+                const errorSystemMessage: ChatMessage = {
+                    id: crypto.randomUUID(),
+                    sender: "ai", // or "system" depending on your layout style
+                    text: socketError.message || "An unexpected error occurred. Please try again.", 
+                };
             
             setMessages((prev) => [...prev, errorSystemMessage]);
+            } 
         }
     }, [socketError]);
 
