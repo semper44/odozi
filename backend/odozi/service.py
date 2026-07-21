@@ -345,7 +345,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which:str, worksp
     purged_repos_info = []
     deleted_count = 0
     delete_messages = ""
-    print("esther")
+    print("esther", workspace_name, "FRESH-UP",delete_which, "MAMA",selected_repo_ids, "BETTER",cleaned_keys, "HIGHERR")
 
     with transaction.atomic():
         # =====================================================================
@@ -372,7 +372,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which:str, worksp
 
 
         if selected_repo_ids and delete_which == "repo":
-            print("delete_selected_repo_ids")
+            print("delete_selected_repo_ids", selected_repo_ids, "seeAM")
             # Gather target repositories owned by the user
             target_repos = GitHubRepository.objects.filter(
                 repo_id__in=selected_repo_ids,
@@ -389,6 +389,8 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which:str, worksp
                 deleted_count, _ = delete_query.delete()
                 print(delete_query,"yana",deleted_count, "target_repos", target_repos, )
                 delete_messages += f"Deleted in {workspace_name} "
+            
+            print("repo key deletion doesnt exists")
 
 
         if key_names and delete_which == "key_names":

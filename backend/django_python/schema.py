@@ -18,7 +18,6 @@ class RepoEnvKeyCreationTask(BaseModel):
     )
 
     repositories: List[str] = Field(
-        default=[],
         description="The name of the exact repository (e.g., 'Taskmaster')"
     )
 
@@ -32,18 +31,30 @@ class RepoEnvKeyDeletionTask(BaseModel):
     
     workspace_name: Optional[str] = Field(
         default=None,
-        description="The name of the target workspace context. Required if delete_which is 'workspace'."
+        description="""
+        The name of the target workspace context. Required if delete_which is 'workspace'.
+        CRITICAL: If delete_which is 'repo', this field MUST be null. Never mix a workspace target 
+        and a repository target in the same object block.
+        """
     )
     
     key_names: List[str] = Field(
         default=[],
-        description="List of exact environment key variable names to bulk delete (e.g., ['DB', 'CLOUDFLARE'])."
+        description="""
+        List of exact environment key variable names to bulk delete (e.g., ['DB', 'CLOUDFLARE']).
+        If the user says 'delete all env keys', leave this list completely empty [].
+        """
     )
     
     repositories: List[str] = Field(
         default=[],
-        description="The name of the exact repository (e.g., 'Taskmaster')"
+        description="""
+        The names of the exact repositories targeted. Required if delete_which is 'repo'.
+        CRITICAL: If delete_which is 'workspace', this list MUST be completely empty []. 
+        Never mix a workspace target and a repository target in the same object block.
+        """
     )
+
     
     
 
@@ -83,6 +94,7 @@ class RepoExecutionRule(BaseModel):
         }
         """
     )
+
 
 class OrchestratorAction(BaseModel):
     """

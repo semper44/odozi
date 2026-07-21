@@ -455,7 +455,7 @@ Set 'ui_layout_route' to:
     retry_backoff=True,        
     retry_backoff_max=30
 )
-def process_agentic_chat_turn_task(channel_name, user_id, username, token, session_id, prompt_text, repos, provider, model_name, api_key):
+def process_agentic_chat_turn_task(self, channel_name, user_id, username, token, session_id, prompt_text, repos, provider, model_name, api_key):
     channel_layer = get_channel_layer()
     
     # -------------------------------------------------------------------------
@@ -573,7 +573,7 @@ def process_agentic_chat_turn_task(channel_name, user_id, username, token, sessi
         print(result.intents, "and", result.active_rules)
         details_cache_key = f"user:repos:{user_id}"
         cached_details = cache.get(details_cache_key)
-        print("cached_repos", token)
+        print("cached_repos", token, "bro")
         # Check if data exists and is the correct format (list or dict of repos)
         if cached_details is not None:
             # Process your cached_repos directly here
@@ -931,6 +931,7 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
         # Support lookups via 'workspace_id' integer keys, falling back to name parameters if required
         # Adjust these parameter keys to match your exact Pydantic schema naming structure!
         workspace_name = ws_task.get("workspace_name")
+        print("oh chim", workspace_name, 9999, deletion_list)
 
         # Fallback tracking resolution step: If the LLM only gave a string name, look it up in the database
         if workspace_name:
@@ -939,7 +940,7 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
                 workspace_id = db_workspace.pk
             else:
                 workspace_not_found.append(workspace_name)
-            print("gang",db_workspace)
+            print("gang",db_workspace, "old")
 
 
         if not workspace_id:
@@ -1152,7 +1153,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
         delete_which= req.get("delete_which", None)
         selected_repo_ids = []
 
-        print("ev-requests_list", requests_list)
+        print("ev-requests_list", requests_list,"rrr")
 
         # Match loose string inputs to your parent cached array list items to gather specific IDs
         for raw_name in raw_target_repos:
@@ -1160,12 +1161,12 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
             
             matched_repo_dict = next((repo for low_name, repo in cached_map if user_input in low_name), None)
 
-            print(matched_repo_dict,"env-raw_name", raw_name)
+            print("matched_repo_dict", matched_repo_dict, "env-raw_name", raw_name)
             if matched_repo_dict:
                 matched_id = matched_repo_dict.get("id")
                 if matched_id:
                     selected_repo_ids.append(matched_id)
-        print(raw_key_names, "maskd", selected_repo_ids)
+        print("raw_key_names", raw_key_names, "masked", selected_repo_ids)
         if not selected_repo_ids and not raw_key_names:
             print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
             continue

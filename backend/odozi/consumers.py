@@ -6,7 +6,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         self.user = self.scope.get("user")
-        self.token  = self.scope.get("github_token")
         print("kante",self.user.username, "consumer_user", self.user)
 
         # Check if the user object is anonymous or completely unassigned

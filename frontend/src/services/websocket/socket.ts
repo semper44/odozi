@@ -9,18 +9,17 @@ interface SocketConfig {
 
 class SocketService {
   private socket: WebSocket | null = null;
-  private messageCallback: ((data: StreamingMessage) => void) | null = null;
-  private config: SocketConfig | null = null;
+  private messageCallback: ((data: any) => void) | null = null;
+  private config: any | null = null;
   private isIntentionalDisconnect: boolean = false;
   private reconnectTimeoutId: any = null;
-  private currentDelay: number = 1000; // Base backoff delay (1s)
-  private count: number = 0; 
-  private maxDelay: number = 16000;    // Cap backoff delay (16s)
+  private currentDelay: number = 1000; 
+  private hasFiredErrorThisSession: boolean = false; // 🌟 NEW STATE: Explicit tracking toggle
+  private maxDelay: number = 16000;    
 
-  public configure(config: SocketConfig) {
+  public configure(config: any) {
     this.config = config;
   }
-  
 
   async connect() {
     if (!this.config) {
@@ -29,54 +28,54 @@ class SocketService {
     }
 
     if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
-      return; // Absolute safety lock avoiding connection duplicate storms
+      return; 
     }
 
     this.isIntentionalDisconnect = false;
-    
-    // ✅ FIX: Clean, generic WebSocket path deployment. 
-    // The browser automatically packages your HttpOnly auth cookies into this connection flight!
     const cleanUrl = this.config.baseUrl;
     this.socket = new WebSocket(cleanUrl);
 
     this.socket.onopen = () => {
       console.log("⚡ Browser WebSocket Channel Established via Secure HttpOnly Cookie");
-      this.count=0
-      this.currentDelay = 1000; // Reset exponential sequence backoff upon clean entry
+      
+      // 🌟 Clean session flags cleanly upon successful connection entry
+      this.hasFiredErrorThisSession = false;
+      this.currentDelay = 1000; 
+      
       useSocketStore.getState().setConnectionStatus(true);
-      // useSocketStore.getState().setSocketError(null);
       useSocketStore.getState().triggerToastNotification(null);
-
-      // Clearing the error object
       useSocketStore.getState().clearSocketStatus(); 
-
     };
 
     this.socket.onclose = (event) => {
-      this.socket = null;
-      
       if (event.code === 4001) {
         console.error("🚨 Connection rejected: Login session invalid or unauthenticated.");
-        // Stop retrying if the user session is completely dead
         return;
       }
 
       if (!this.isIntentionalDisconnect) {
         console.warn(`❌ Unscheduled link failure (Code: ${event.code}). Launching reconnect script...`);
-        useSocketStore.getState().setSocketError("Gateway terminated connection: Reconnecting", true)
-        if (this.count < 1) {
+        
+        // 🌟 Use our new boolean flag to guarantee the notification fires EXACTLY ONCE per drop
+        if (!this.hasFiredErrorThisSession) {
+          useSocketStore.getState().setSocketError("Gateway terminated connection: Reconnecting", false);
           useSocketStore.getState().triggerToastNotification("❌ Connection dropped. Reconnecting to gateway...");
+          this.hasFiredErrorThisSession = true; // Lock execution
         }
+        
         this.scheduleReconnect();
       }
     };
 
     this.socket.onerror = (error) => {
-      console.error(this.count, "🚨 Core browser connection layer error detected:", error);
-      if (this.count < 1) {
-        useSocketStore.getState().triggerToastNotification("❌ Network handshake verification failure.");
+      console.error("🚨 Core browser connection layer error detected:", error);
+      
+      // 🌟 Lock out duplicate noise: Only notify the interface once per connection break session
+      if (!this.hasFiredErrorThisSession) {
+        useSocketStore.getState().triggerToastNotification("❌ Please login again.");
+        useSocketStore.getState().setSocketError("Please login again.", false);
+        this.hasFiredErrorThisSession = true; 
       }
-      useSocketStore.getState().setSocketError("Network handshake verification failure.", true)
     };
 
     this.socket.onmessage = (event) => {
@@ -85,24 +84,23 @@ class SocketService {
         console.log("📥 Raw Network Packet Received:", packet);
 
         if (packet.type === "status") {
-          // to output different stages of the llm chat and Test, whether its connecting to github or running pytest, etc
           useSocketStore.getState().setProcessingStatus(true, packet.message || "Processing...");
         } 
 
         else if (packet.type === "error") {
-          useSocketStore.getState().setProcessingStatus(false); // Stop loading 
+          useSocketStore.getState().setProcessingStatus(false); 
           console.log("eche", packet);
 
           let displayMessage = packet.message;
 
           if (typeof displayMessage === "string") {
-            console.log("packetmessage is a string")
             const lowerMessage = displayMessage.toLowerCase();
-            if (lowerMessage.includes("UNEXPECTED_EOF_WHILE_READING] EOF")){
-              console.log("oluchi should work")
-              displayMessage= 'Network error, please check your internet connection and try again, Or the LLM isnt responding at this time.'
+            
+            // 🌟 Handles Celery auto-retry log output safely
+            if (lowerMessage.includes("unexpected_eof_while_reading") || lowerMessage.includes("eof occurred")) {
+              displayMessage = 'Network error, please check your internet connection and try again, Or the LLM provider is taking too long to respond.';
             }
-            // Catch-all keywords for Gemini, OpenAI, and Anthropic quota/rate errors
+            
             const isQuotaError = 
               lowerMessage.includes("resource_exhausted") || 
               lowerMessage.includes("insufficient_quota") || 
@@ -113,18 +111,17 @@ class SocketService {
               displayMessage = "⚠️ You have exceeded your LLM API daily quota limit. Please try again tomorrow or upgrade your plan.";
             }
           }
+          
           console.log(displayMessage, "🎯 Chat message:");
-
+          
+          // 🌟 This triggers your main modal alert securely on the React layout canvas
           useSocketStore.getState().setSocketError(displayMessage, true);
-            console.log("🟢 STEP 2: Zustand global store has been set to:", useSocketStore.getState().socketError)
         }
 
         else if (packet.type === "orchestration_result") {
           useSocketStore.getState().setProcessingStatus(false);
-
           let cleanPayload = packet;
 
-          // 🌟 SENIOR FIX: If the engine wraps the output as a stringified string, unpack it here
           if (packet.raw_output && typeof packet.raw_output === "string") {
             try {
               cleanPayload = JSON.parse(packet.raw_output);
@@ -133,10 +130,8 @@ class SocketService {
             }
           }
 
-          // ✅ Dispatch to global store so ANY component can access it
           useSocketStore.getState().setStreamingMessage(cleanPayload);
           
-          // ✅ Also fire callback if listener exists (for backward compatibility)
           if (this.messageCallback) {
             this.messageCallback(cleanPayload);
           }
@@ -145,18 +140,16 @@ class SocketService {
         console.error("⚠️ Failed parsing incoming WebSocket JSON data frame payload:", err);
       }
     };
-
   }
 
   private scheduleReconnect() {
-    if (this.reconnectTimeoutId) return; // Guard against overlapping duplicate timers
+    if (this.reconnectTimeoutId) return; 
 
     this.reconnectTimeoutId = setTimeout(async () => {
       this.reconnectTimeoutId = null;
       await this.connect();
     }, this.currentDelay);
 
-    // Progressive Jittered Exponential Backoff sequence calculation
     this.currentDelay = Math.min(this.currentDelay * 2, this.maxDelay);
   }
 
@@ -168,7 +161,7 @@ class SocketService {
     }
   }
 
-  onMessage(callback: (data: StreamingMessage) => void) {
+  onMessage(callback: (data: any) => void) {
     this.messageCallback = callback;
   }
 
@@ -184,12 +177,9 @@ class SocketService {
     }
     this.messageCallback = null;
 
-    // 🟡 Reset state tracking variables upon disconnect execution
     useSocketStore.getState().setConnectionStatus(false);
     useSocketStore.getState().clearSocketStatus();
   }
-
-  
 }
 
 export const socketService = new SocketService();
