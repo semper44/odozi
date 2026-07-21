@@ -411,6 +411,10 @@ You must parse exactly where environment keys should be sourced from based on us
 3. CONTEXT OMISSION GUARD: If the user requests an environmental key operation but provides absolutely zero contextual details indicating whether they want it from the workspace tree or from individual repositories, you must:
    - Check if the targeted strategy or execution engine run natively requires environment parameters to operate.
    - If env keys are explicitly needed but the scope is missing, you MUST halt execution, switch 'ui_layout_route' to "CHAT", and cleanly prompt the user inside your 'chat_response' to clarify using their string names (e.g., "I see you want to configure environment variables. Would you like to map these keys across the entire workspace tree or target individual repositories?").
+4    ATOMIC TASK SPLITTING RULE FOR DELETIONS:
+    - If a single user prompt requests environment deletions targeting multiple different scopes at the same time (e.g., "delete keys from semper workspace and django-channels repo"), you MUST treat them as completely separate atomic operations.
+    - You MUST generate multiple, individual independent RepoEnvKeyDeletionTask objects inside the 'env_keys_to_delete' list. 
+    - NEVER bundle or combine a workspace target and a repository target inside the same object block. If delete_which is 'workspace', repositories MUST be empty. If delete_which is 'repo', workspace_name MUST be null.
 
 ### CONTEXT EVOLUTION & HISTORY OVERHAUL PROTOCOL:
 - For standard casual chats or technical inquiries, leave 'evict_prior_history' as False and 'condensed_history_summary' as None.
@@ -1151,6 +1155,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
         raw_key_names = req.get("key_names", [])
         raw_target_repos = req.get("repositories", []) or req.get("repo_names", [])
         delete_which= req.get("delete_which", None)
+        workspace_name= req.get("workspace_name", None)
         selected_repo_ids = []
 
         print("ev-requests_list", requests_list,"rrr")
@@ -1167,7 +1172,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                 if matched_id:
                     selected_repo_ids.append(matched_id)
         print("raw_key_names", raw_key_names, "masked", selected_repo_ids)
-        if not selected_repo_ids and not raw_key_names:
+        if not selected_repo_ids and not raw_key_names and not workspace_name:
             print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
             continue
 
@@ -1177,6 +1182,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                 user=user,
                 key_names=raw_key_names,
                 delete_which=delete_which,
+                workspace_name = workspace_name,
                 selected_repo_ids=selected_repo_ids
             )
 

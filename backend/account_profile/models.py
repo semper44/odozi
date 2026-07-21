@@ -56,6 +56,7 @@ class GitHubRepository(models.Model):
     
     repo_name = models.CharField(max_length=255, db_index=True)        # e.g., "Taskmaster"
     repo_owner = models.CharField(max_length=255, db_index=True)       # e.g., "OdoziEngine"
+    repo_owner_db_relationship = models.ForeignKey(User,on_delete=models.CASCADE, related_name="repo_owner")
     repo_id = models.BigIntegerField(db_index=True)
     repo_full_name = models.CharField(max_length=255, db_index=True) # e.g., "OdoziEngine/Taskmaster"
     

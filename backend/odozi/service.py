@@ -354,7 +354,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which:str, worksp
         if workspace_name and delete_which == "workspace":
             print("delete_workspace_name")
             try:
-                repo_workspace = Workspace.objects.get(name=workspace_name.strip(), owner=user)
+                repo_workspace = Workspace.objects.get(name=workspace_name.strip(), owner=user.username)
             except Workspace.DoesNotExist:
                 raise ValidationError(f"Workspace '{workspace_name}' does not exist.")
 
@@ -376,8 +376,15 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which:str, worksp
             # Gather target repositories owned by the user
             target_repos = GitHubRepository.objects.filter(
                 repo_id__in=selected_repo_ids,
-                workspace__owner=user
             )
+            print("target_repos", target_repos, "user", user)
+            if user:
+                target_repos = target_repos.filter(repo_owner=user.username)
+                if not target_repos.exists():
+                    raise ValidationError("No matching repositories found for the provided IDs under your ownership.")
+            else:
+                raise ValidationError("User context is required to validate repository ownership.")
+            
             affected_repos = set(target_repos)
 
             if target_repos.exists():
@@ -389,8 +396,8 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which:str, worksp
                 deleted_count, _ = delete_query.delete()
                 print(delete_query,"yana",deleted_count, "target_repos", target_repos, )
                 delete_messages += f"Deleted in {workspace_name} "
-            
-            print("repo key deletion doesnt exists")
+            else:
+                print("repo key deletion doesnt exists")
 
 
         if key_names and delete_which == "key_names":
