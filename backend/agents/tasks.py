@@ -371,12 +371,8 @@ system_instruction_text = """
 You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into structured configuration variables inside our Pydantic action schema.
 
 ### CRITICAL ID HANDLING & PLACEHOLDER RULES (NEVER REQUEST INT IDS FROM USERS)
-1. End-users do not know database primary keys or integer backend tokens (like 'workspace_id' or 'repo_id'). You must NEVER ask the user to provide an integer ID in your chat response.
-2. For deletions or updates targeting existing items: Look for the target item by its string name (e.g., 'zugo', 'semper') in the text prompt or conversation history records. 
-3. If your structural schema requires a required integer ID (`int`) field but no specific ID is found in the background history:
-   - Natively manufacture a fallback default integer placeholder (e.g., `0`) for that ID field inside the JSON payload.
-   - Do NOT stop the process or complain about missing IDs. Let the backend service look up the record matching the provided string names instead.
-4. For creation requests (e.g., creating workspaces or repositories): You are establishing a fresh record. Set its integer ID tracking attributes to a placeholder default like `0` or omit them if optional. The user targets things strictly by their human-readable string names.
+1. For deletions or updates targeting existing items: Look for the target item by its string name (e.g., 'zugo', 'semper') in the text prompt or conversation history records. 
+2. Do NOT stop the process or complain about missing IDs. Let the backend service look up the record matching the provided string names instead.
 
 ### REGISTERED SYSTEM TOOL STRATEGIES & CROSS-CUTTING BUNDLES
 
@@ -424,15 +420,18 @@ You must parse exactly where environment keys should be sourced from based on us
 Example Summary Output:
 "User verified platform capabilities for pytest/bandit. Consolidated active workflow initiated for repo-b running strategy models: bandit, pytest."
 
-### MANDATORY BRANCH CONFIGURATION & INTELLECTUAL MAPPING RULES:
-1. When a user requests a tool execution run, look for branch context names in the text (e.g., 'main', 'master', 'test', 'new').
-2. If the user provides a list of branches and repositories (e.g., repositories 'X and Y' and branches 'master, test, and new' or uses the word 'respectively'), use advanced contextual deduction to map the branches to the repositories sequentially. 
-   - If 3 branches are provided for 2 active execution repositories, assign the first matching logical branches (e.g., Repository 1 -> 'master', Repository 2 -> 'test') or fallback intelligently.
-3. If, and ONLY if, the user provides absolutely zero branch keywords anywhere in their message or historical context session baseline memory logs, you must:
-   - Assign the smart engineering default branch "master" to the 'target_branch' field inside the Pydantic schema. 
-   - Do NOT stop the pipeline or ask for clarification if a fallback default can keep the automation moving forward.
-4. If a list of branches is completely incomprehensible and cannot be safely deduced, your 'chat_response' must intelligently ask for exact mapping layout structures (e.g., "I see you listed the branches 'master, test, and new'. To ensure exact execution, which branch applies to 'Taskmaster' and which applies to 'interview'?").
+### MANDATORY BRANCH CONFIGURATION & EXPLICIT CLARIFICATION RULES:
+1. When a user requests any tool execution run or rule assignment, you must find explicit branch context names in the text (e.g., 'main', 'master', 'test', 'new').
+2. **NEVER ASSUME OR FACTORY-DEFAULT A BRANCH NAME.** You are completely forbidden from guessing, inventing, or automatically filling a default branch name (like 'master' or 'main') if it was not explicitly provided by the user.
+3. If the user provides a list of branches and repositories, use logical sequential mapping (e.g., Repository 1 -> Branch 1, Repository 2 -> Branch 2).
+4. **CRITICAL INTENT OVERRIDE GATE FOR CLARIFICATIONS:**
+   - If the user requests an execution but provides NO branch keyword, or if the branch layout mapping is ambiguous, you MUST IMMEDIATELY HALT ALL PIPELINE EXECUTION.
+   - You MUST overwrite the 'intents' list to contain strictly ONE single token: ["technical_query"]. You are completely FORBIDDEN from including "run_static_analysis", "create_repo_env", "delete_workspace", or "delete_repo_env" in the intents array when a branch clarification is happening.
+   - Set 'ui_layout_route' to "CHAT".
+   - Keep 'active_rules', 'workspaces_to_delete', 'env_keys_to_create', and 'env_keys_to_delete' completely empty [].
+   - Use your 'chat_response' to cleanly ask the user to explicitly specify which branch you should execute the tools against (e.g., "I see you want to run analysis on 'Taskmaster'. Could you please specify which branch I should run these checks on?").
 
+   
 ### INTENT PARSING AND MAPPING BOUNDARY RULES
 - "create_workspace": Select this if the user wants to group fresh repositories under a brand new workspace container. Sanitized loose repository names (e.g., "repo a", "z") into standard layouts (e.g., "repo-a").
 - "delete_workspace": Select this intent if the user commands you to drop, remove, clear, or delete a workspace container. Populate the 'workspaces_to_delete' object array using name parameters from text and temporary integer placeholders for required numerical fields.
@@ -925,9 +924,9 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
     channel_layer = get_channel_layer()
     workspace_id = None
     workspace_not_found = []
-    print("daaluuu")
     # Ensure standard list structure handling even if a singular dictionary lands
     deletion_list = workspaces_to_delete if isinstance(workspaces_to_delete, list) else [workspaces_to_delete]
+    print(f"daaluuu-{deletion_list}")
     
     deletion_summaries = []
 
@@ -935,7 +934,7 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
         # Support lookups via 'workspace_id' integer keys, falling back to name parameters if required
         # Adjust these parameter keys to match your exact Pydantic schema naming structure!
         workspace_name = ws_task.get("workspace_name")
-        print("oh chim", workspace_name, 9999, deletion_list)
+        print(f"oh chim- {workspace_name}")
 
         # Fallback tracking resolution step: If the LLM only gave a string name, look it up in the database
         if workspace_name:
@@ -1171,7 +1170,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                 matched_id = matched_repo_dict.get("id")
                 if matched_id:
                     selected_repo_ids.append(matched_id)
-        print("raw_key_names", raw_key_names, "masked", selected_repo_ids)
+        print("diamond",workspace_name,"raw_key_names", raw_key_names, "masked", selected_repo_ids)
         if not selected_repo_ids and not raw_key_names and not workspace_name:
             print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
             continue
@@ -1185,6 +1184,8 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                 workspace_name = workspace_name,
                 selected_repo_ids=selected_repo_ids
             )
+
+            print("service_result", service_result)
 
             # 🚀 IMMEDIATE BROADCAST: Inform the React frontend layout what keys were purged
             chat_confirmation_text = (
@@ -1206,6 +1207,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                     }
                 }
             )
+
 
         except Exception as service_error:
             print(f"🚨 Background worker environmental key deletion failure: {str(service_error)}")
