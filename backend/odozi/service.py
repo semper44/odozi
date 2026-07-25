@@ -366,7 +366,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             ws_rows_dropped, _ = delete_query.delete()  # 🌟 Use explicit scope name variables
             total_deleted_accumulator += ws_rows_dropped
             print("delete_query",delete_query,"workspace rows dropped:", ws_rows_dropped)
-            delete_messages += f"Deleted all envs in {workspace_name} "
+            delete_messages += f"Deleted all envs in {workspace_name} workspace."
 
         # =====================================================================
         # 📂 CASE B: DELETING REPOSITORY-SPECIFIC ISOLATED VARIABLES
@@ -398,7 +398,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             
             # 🌟 FIXED: Changed 'deleted_count' to 'repo_rows_dropped' to prevent crashes!
             print(delete_query, "yana", repo_rows_dropped, "target_repos", target_repos)
-            delete_messages += f"Deleted all envs in {target_repos}. "
+            delete_messages += f"Deleted all envs in {selected_repo_names}. "
         # =====================================================================
         # 📂 CASE C: DELETING GLOBAL VARIABLES BY EXACT KEY NAME
         # =====================================================================

@@ -1156,7 +1156,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
         delete_which= req.get("delete_which", None)
         workspace_name= req.get("workspace_name", None)
         selected_repo_ids = []
-        selected_repo_names = []
+        selected_repo_names = set()
 
         print("ev-requests_list", requests_list,"rrr")
 
@@ -1171,7 +1171,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                 matched_id = matched_repo_dict.get("id")
                 if matched_id:
                     selected_repo_ids.append(matched_id)
-                    selected_repo_names.append(raw_name)
+                    selected_repo_names.add(matched_repo_dict.get("name"))
         print("diamond",workspace_name,"raw_key_names", raw_key_names, "masked", selected_repo_ids)
         if not selected_repo_ids and not raw_key_names and not workspace_name:
             print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
