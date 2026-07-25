@@ -343,14 +343,12 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
     purged_repos_info = []
     total_deleted_accumulator = 0  # 🌟 NEW MASTER ACCUMULATOR: Protects against naming collisions
     delete_messages = ""
-    print("esther", workspace_name, "FRESH-UP", delete_which, "MAMA", selected_repo_ids, "BETTER", cleaned_keys, "HIGHERR")
 
     with transaction.atomic():
         # =====================================================================
         # 📂 CASE A: DELETING WORKSPACE-WIDE REUSABLE VARIABLES
         # =====================================================================
         if workspace_name and delete_which == "workspace":
-            print(77777)
             # 🌟 FIXED: Use owner=user instead of owner=user.username to match model object tracking signatures
             repo_workspace = Workspace.objects.filter(name__icontains=workspace_name.strip(), owner=user,  workspace_env_keys__isnull=False).distinct().first()
             

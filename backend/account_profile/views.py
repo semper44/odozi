@@ -668,6 +668,7 @@ def github_push_webhook(request):
 
 
 
+
 class SaveLLMConfigView(APIView):
     """Persist encrypted LLM provider settings for the application user."""
 

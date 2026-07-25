@@ -367,6 +367,7 @@ def ensure_orchestrator_yaml_is_online(
 
 
 
+
 system_instruction_text = """
 You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into structured configuration variables inside our Pydantic action schema.
 
@@ -1247,7 +1248,7 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     # =========================================================================
     ensure_orchestrator_yaml_is_online(repo_owner, repo_name, default_branch, target_branch, git_token)
     print("")
-    print({"default_branch": user_requested_rules})
+    print("amapiano",default_branch,{"default_branch": user_requested_rules})
     base_classes_text = inspect.getsource(rule_classes)
     
     # Strip any local manual __main__ loop if it exists in your file text
@@ -1256,7 +1257,15 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
 
     visitor_instances_lines = []
 
-    strategies_dict = user_requested_rules if isinstance(user_requested_rules, dict) else {}
+    strategies_dict = {}
+    if isinstance(user_requested_rules, dict):
+        strategies_dict = user_requested_rules
+    elif isinstance(user_requested_rules, list):
+        # Maps old format: [{"rule_key": "x", "params": {...}}] into flat dict keys
+        for item in user_requested_rules:
+            if isinstance(item, dict) and "rule_key" in item:
+                strategies_dict[item["rule_key"]] = item.get("params", {})
+    
     
     for rule_key, rule_payload in strategies_dict.items():
         # Only process tools registered in our AST engine toolkit
