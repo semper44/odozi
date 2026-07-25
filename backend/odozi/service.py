@@ -327,7 +327,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
 
 
 
-def delete_repo_env_keys_service(user, key_names: list, delete_which: str, workspace_name: str = None, selected_repo_ids: list = None) -> dict:
+def delete_repo_env_keys_service(user, key_names: list, delete_which: str, workspace_name: str = None, selected_repo_ids: list = None, selected_repo_names: list = None) -> dict:
     """
     Polymorphic deletion service to bulk-delete environment variables from either:
     1. An entire Workspace globally (if selected_repo_ids is empty/omitted).
@@ -355,7 +355,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             repo_workspace = Workspace.objects.filter(name__icontains=workspace_name.strip(), owner=user,  workspace_env_keys__isnull=False).distinct().first()
             
             if not repo_workspace:
-                raise ValidationError(f"Workspace '{workspace_name}' does not exist.")
+                raise ValidationError(f"No Env found associated with {workspace_name} Workspace.")
 
             affected_repos = set(repo_workspace.repositories.all())
             print("knack",repo_workspace,"delete_workspace_name")
@@ -366,7 +366,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             ws_rows_dropped, _ = delete_query.delete()  # 🌟 Use explicit scope name variables
             total_deleted_accumulator += ws_rows_dropped
             print("delete_query",delete_query,"workspace rows dropped:", ws_rows_dropped)
-            delete_messages += f"Deleted in envs in {workspace_name} "
+            delete_messages += f"Deleted all envs in {workspace_name} "
 
         # =====================================================================
         # 📂 CASE B: DELETING REPOSITORY-SPECIFIC ISOLATED VARIABLES
@@ -381,7 +381,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             if user:
                 target_repos = target_repos.filter(repo_owner=user.username)
                 if not target_repos.exists():
-                    raise ValidationError("No matching repositories found for the provided IDs under your ownership.")
+                    raise ValidationError(f"No Env found in {selected_repo_names} repositories.")
             else:
                 raise ValidationError("User context is required to validate repository ownership.")
             
@@ -398,7 +398,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             
             # 🌟 FIXED: Changed 'deleted_count' to 'repo_rows_dropped' to prevent crashes!
             print(delete_query, "yana", repo_rows_dropped, "target_repos", target_repos)
-            delete_messages += f"Deleted in targeted repositories. "
+            delete_messages += f"Deleted all envs in {target_repos}. "
         # =====================================================================
         # 📂 CASE C: DELETING GLOBAL VARIABLES BY EXACT KEY NAME
         # =====================================================================
@@ -411,35 +411,31 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             total_deleted_accumulator += global_rows_dropped
             print(cleaned_keys, "cleaned_keys global rows dropped:", global_rows_dropped)
 
+   
         # =====================================================================
-        # 🧹 STEP C: THE SPACE-SAVING ORPHAN REPOSITORY PURGE ENGINE
-        # =====================================================================
-        print("personal")
-                # =====================================================================
-        # 🧹 STEP C: THE SPACE-SAVING ORPHAN REPOSITORY PURGE ENGINE
+        # 🧹 STEP d: THE SPACE-SAVING ORPHAN REPOSITORY PURGE ENGINE
         # =====================================================================
         print("personal")
         for repo in affected_repos:
-            # 1. Safely extract workspace references whether ForeignKey or ManyToMany
-            if hasattr(repo, 'workspaces'):
-                workspace_ids = list(repo.workspaces.values_list('id', flat=True))
-                is_in_any_workspace = len(workspace_ids) > 0
-            else:
-                direct_ws = getattr(repo, 'workspace', None)
-                workspace_ids = [direct_ws.id] if direct_ws else []
-                is_in_any_workspace = len(workspace_ids) > 0
+            # 🌟 FIX: Query your actual ManyToMany relationship field `workspace` safely using values_list
+            workspace_ids = list(repo.workspace.values_list('id', flat=True))
+            is_in_any_workspace = repo.workspace.exists()
+            
+            print(f"Repo: {repo.repo_name} | Linked Workspace IDs: {workspace_ids} | Connected: {is_in_any_workspace}")
 
-            # 2. Check if keys still exist for this specific repository, or for its associated workspace(s)
+            # Safe relational database scanning
             has_remaining_keys = RepoEnvKey.objects.filter(repo=repo).exists() or RepoEnvKey.objects.filter(
                 workspace_id__in=workspace_ids
             ).exists()
+            
+            print(f"Repo: {repo.repo_name} | Has remaining keys: {has_remaining_keys}")
 
-            # 3. Purge if it has no keys left and belongs to no workspace context
+            # Clean purge if completely orphaned
             if not has_remaining_keys and not is_in_any_workspace:
                 purged_repos_info.append({
-                    "id": getattr(repo, 'repo_id', repo.id),
-                    "name": getattr(repo, 'repo_name', getattr(repo, 'name', '')),
-                    "full_name": getattr(repo, 'repo_full_name', '')
+                    "id": repo.repo_id,
+                    "name": repo.repo_name,
+                    "full_name": repo.repo_full_name
                 })
                 repo.delete() 
         print("feedd")

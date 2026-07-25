@@ -1156,6 +1156,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
         delete_which= req.get("delete_which", None)
         workspace_name= req.get("workspace_name", None)
         selected_repo_ids = []
+        selected_repo_names = []
 
         print("ev-requests_list", requests_list,"rrr")
 
@@ -1170,6 +1171,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                 matched_id = matched_repo_dict.get("id")
                 if matched_id:
                     selected_repo_ids.append(matched_id)
+                    selected_repo_names.append(raw_name)
         print("diamond",workspace_name,"raw_key_names", raw_key_names, "masked", selected_repo_ids)
         if not selected_repo_ids and not raw_key_names and not workspace_name:
             print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
@@ -1182,16 +1184,17 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                 key_names=raw_key_names,
                 delete_which=delete_which,
                 workspace_name = workspace_name,
-                selected_repo_ids=selected_repo_ids
+                selected_repo_ids=selected_repo_ids,
+                selected_repo_names= selected_repo_names
             )
 
             print("service_result", service_result)
 
             # 🚀 IMMEDIATE BROADCAST: Inform the React frontend layout what keys were purged
-            chat_confirmation_text = (
-                f"Successfully wiped out {service_result['deleted_count']} environment keys "
-                f"across {service_result['affected_repositories_count']} repositories."
-            )
+            # chat_confirmation_text = (
+            #     f"Successfully wiped out {service_result['deleted_count']} environment keys "
+            #     f"across {service_result['affected_repositories_count']} repositories."
+            # )
 
             async_to_sync(channel_layer.group_send)(
                 channel_name,
@@ -1201,7 +1204,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                         "type": "orchestration_result",
                         "raw_output": {
                             "ui_layout_route": ui_layout,
-                            "chat_response": chat_confirmation_text,
+                            "chat_response": service_result.get("message", "Environment key deletion completed."),
                             "key_deletion_details": service_result
                         },
                     }
