@@ -248,120 +248,151 @@ def workflow_exists(url, headers, branch):
     }
 
 
+def find_matching_repos_from_redis(all_repos, user_provided_input):
+    """
+    Finds all potential repository matches from Redis.
+    Returns a list of unique, case-preserved GitHub repository names.
+    """
+    raw_search = user_provided_input.strip().lower()
+    # Strip symbols entirely to catch missing hyphens/underscores
+    alphanumeric_search = "".join(c for c in raw_search if c.isalnum())
+
+    # Using sets to ensure we don't accidentally return duplicate names
+    matched_names = set()
+
+    for repo_tuple in all_repos:
+        true_github_name = repo_tuple.get('name', '')
+        
+        true_name_lower = true_github_name.lower()
+        true_alphanumeric = "".join(c for c in true_name_lower if c.isalnum())
+
+        # Catch case-insensitive matches OR alphanumeric matches (handles missing hyphens)
+        if true_name_lower == raw_search or true_alphanumeric == alphanumeric_search:
+            matched_names.add(true_github_name)
+            continue
+
+        # Catch fuzzy substring matches (handles partial inputs like 'taskmaster' matching 'Taskmaster--')
+        if raw_search in true_name_lower or alphanumeric_search in true_alphanumeric:
+            matched_names.add(true_github_name)
+
+    # Convert back to a list to easily pass back to your LLM or user chat
+    return list(matched_names)
+
+
 
 def ensure_orchestrator_yaml_is_online(
     repo_owner,
     repo_name,
     default_branch,
     target_branch,
-    git_token
+    git_token, all_repos
 ):
-    url = (
-        f"https://api.github.com/repos/"
-        f"{repo_owner}/{repo_name}/contents/"
-        f".github/workflows/orchestrator.yaml"
-    )
+    matching_results = find_matching_repos_from_redis(all_repos, repo_name)
+    print(f"Matching results for : {matching_results}")
+    
+    if len(matching_results) > 0: 
+        if len(matching_results) > 1:
+            return {"status":"failed", "message": f"They are many Repos with alike names, just to be sure, which one of them did you mean - {matching_results}?"}
 
-    headers = {
-        "Authorization": f"Bearer {git_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
-    }
-
-    yaml_file_path = os.path.join(
-        settings.BASE_DIR,
-        "agents",
-        "orchestrator.yaml"
-    )
-
-    with open(yaml_file_path, "r", encoding="utf-8") as f:
-        yaml_content = f.read()
-
-    encoded_content = base64.b64encode(
-        yaml_content.encode("utf-8")
-    ).decode("utf-8")
-
-    # ----------------------------------------------------
-    # PARALLEL BRANCH CHECKS
-    # ----------------------------------------------------
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-
-        default_future = executor.submit(
-            workflow_exists,
-            url,
-            headers,
-            default_branch
-        )
-
-        target_future = executor.submit(
-            workflow_exists,
-            url,
-            headers,
-            target_branch
-        )
-
-        default_result = default_future.result()
-        target_result = target_future.result()
-
-    # ----------------------------------------------------
-    # ENSURE DEFAULT BRANCH
-    # ----------------------------------------------------
-
-    if not default_result["exists"]:
-
-        payload = {
-            "message": "ci: initialize Odozi workflow",
-            "content": encoded_content,
-            "branch": default_branch,
-            "sha": default_result["sha"]
-        }
-
-        response = requests.put(
-            url,
-            json=payload,
-            headers=headers
-        )
-
-        if response.status_code not in (200, 201):
-            print(
-                f"Default branch upload failed: "
-                f"{response.status_code} {response.text}"
+        elif (len(matching_results) == 1):
+            resolved_repo = matching_results[0]
+            url = (
+                f"https://api.github.com/repos/"
+                f"{repo_owner}/{resolved_repo}/contents/"
+                f".github/workflows/orchestrator.yaml"
             )
-            return False
 
-    # ----------------------------------------------------
-    # ENSURE TARGET BRANCH
-    # ----------------------------------------------------
+            headers = {
+                "Authorization": f"Bearer {git_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28"
+            }
 
-    if not target_result["exists"]:
-
-        payload = {
-            "message": "ci: initialize Odozi workflow",
-            "content": encoded_content,
-            "branch": target_branch,
-            "sha": target_result["sha"]
-        }
-
-        response = requests.put(
-            url,
-            json=payload,
-            headers=headers
-        )
-
-        if response.status_code not in (200, 201):
-            print(
-                f"Target branch upload failed: "
-                f"{response.status_code} {response.text}"
+            yaml_file_path = os.path.join(
+                settings.BASE_DIR,
+                "agents",
+                "orchestrator.yaml"
             )
-            return False
 
-    print(
-        f"Workflow present on "
-        f"{default_branch} and {target_branch}"
-    )
+            with open(yaml_file_path, "r", encoding="utf-8") as f:
+                yaml_content = f.read()
 
-    return True
+            encoded_content = base64.b64encode(
+                yaml_content.encode("utf-8")
+            ).decode("utf-8")
+
+            # PARALLEL BRANCH CHECKS
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                default_future = executor.submit(
+                    workflow_exists,
+                    url,
+                    headers,
+                    default_branch
+                )
+                target_future = executor.submit(
+                    workflow_exists,
+                    url,
+                    headers,
+                    target_branch
+                )
+
+                default_result = default_future.result()
+                target_result = target_future.result()
+
+            # ----------------------------------------------------
+            # ENSURE DEFAULT BRANCH
+            # ----------------------------------------------------
+            if not default_result["exists"]:
+                payload = {
+                    "message": "ci: initialize Odozi workflow",
+                    "content": encoded_content,
+                    "branch": default_branch
+                }
+                
+                # Clean fix for the explicit null/None SHA crashing 404 bug
+                if default_result.get("sha"):
+                    payload["sha"] = default_result["sha"]
+
+                response = requests.put(
+                    f"{url}?ref={default_branch}",
+                    json=payload,
+                    headers=headers
+                )
+
+                if response.status_code not in (200, 201):
+                    print(f"Default branch upload failed: {response.status_code} {response.text}")
+                    return {"status":"failed", "message": f"Default branch upload failed: {response.status_code} {response.text}"}
+
+            # ----------------------------------------------------
+            # ENSURE TARGET BRANCH
+            # ----------------------------------------------------
+            if not target_result["exists"]:
+                payload = {
+                    "message": "ci: initialize Odozi workflow",
+                    "content": encoded_content,
+                    "branch": target_branch
+                }
+
+                if target_result.get("sha"):
+                    payload["sha"] = target_result["sha"]
+
+                response = requests.put(
+                    f"{url}?ref={target_branch}",
+                    json=payload,
+                    headers=headers
+                )
+
+                if response.status_code not in (200, 201):
+                    print(f"Target branch upload failed: {response.status_code} {response.text}")
+                    return {"status":"failed", "message": f"Target branch upload failed: {response.status_code} {response.text}"}
+
+            # 🔴 FIXED HERE: This print and return block are out-dented by 4 spaces.
+            # Now it returns successfully whether the file was uploaded just now OR if it was already online!
+            print(f"Workflow present on {default_branch} and {target_branch}")
+            return {"status": "success", "message": resolved_repo}
+            
+    else:
+        return {"status":"failed", "message": f"You typed {repo_name}, but i couldnt find a repo that matches such name"}
 
 
 
@@ -577,7 +608,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
         print(result.intents, "and", result.active_rules)
         details_cache_key = f"user:repos:{user_id}"
         cached_details = cache.get(details_cache_key)
-        print("cached_repos", token, "bro")
+        print("cached_repos", cached_details, "bro")
         # Check if data exists and is the correct format (list or dict of repos)
         if cached_details is not None:
             # Process your cached_repos directly here
@@ -598,8 +629,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                 print(f"📊 [GITHUB API] External status responded: {github_res.status_code}")
                 repositories_data = github_res.json() if github_res.status_code == 200 else []
                 github_res_status = github_res.status_code
-                repositories_data = []
-            
+                print("github repositories_data", repositories_data)
                 cleaned_repos = []
                 # for easy access in tasks.py
                 repo_names = []
@@ -793,6 +823,7 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
     # print(,"parent_repo_list", parent_repo_list)
     cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
+    print("tanker", cached_pairs, "arinze",parent_repo_list)
 
     pipeline_tasks = []
 
@@ -811,7 +842,7 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
                         repo_owner=repo_owner,
                         repo_name=sanitized_name,
                         default_branch="main",
-                        repo_data = {},
+                        repo_data = parent_repo_list,
                         commit_sha="main", #work
                         target_branch=rule.get("target_branch") or "main",
                         ref_string=f"refs/heads/{rule.get("target_branch")}",
@@ -1246,7 +1277,10 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     # =========================================================================
     # STEP 1: SCRIPT STITCHING ENGINE (Your existing logic)
     # =========================================================================
-    ensure_orchestrator_yaml_is_online(repo_owner, repo_name, default_branch, target_branch, git_token)
+    resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, default_branch, target_branch, git_token, repo_data)
+    if resolved_repo_name.get("status") != "success":
+        print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
+        return {"status": "error", "message": "Orchestrator YAML validation failed"}
     print("")
     print("amapiano",default_branch,{"default_branch": user_requested_rules})
     base_classes_text = inspect.getsource(rule_classes)
@@ -1356,10 +1390,10 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     
     # Example output string: '["DJANO_SECRET_KEY"]'
     env_keys_payload = json.dumps(list(registered_keys)) if registered_keys else "[]"
-
+    matched_repo_name = resolved_repo_name.get('message')
     url = (
         f"https://api.github.com/repos/"
-        f"{repo_owner}/{repo_name}/actions/workflows/"
+        f"{repo_owner}/{matched_repo_name}/actions/workflows/"
         f"orchestrator.yaml/dispatches"
     )    
     headers = {

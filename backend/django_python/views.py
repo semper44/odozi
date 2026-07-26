@@ -206,7 +206,7 @@ def dashboard_view(request):
             print(f"❌ [GITHUB API] Error occurred while fetching repositories: {e}")
             repositories_data = []
 
-
+        print("dashboard-repo-data", repositories_data)
         # Parse data defensively mapping dict properties safely
         # cleaned_repos = [{
         #     "id": r.get("id"),
