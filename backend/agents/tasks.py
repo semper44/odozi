@@ -259,9 +259,13 @@ def find_matching_repos_from_redis(all_repos, user_provided_input):
 
     # Using sets to ensure we don't accidentally return duplicate names
     matched_names = set()
+    default_branch = set()
 
     for repo_tuple in all_repos:
+        print("")
+        print("i want you to check if in repo interview", repo_tuple)
         true_github_name = repo_tuple.get('name', '')
+        default__redis_branch = repo_tuple.get('default_branch')
         
         true_name_lower = true_github_name.lower()
         true_alphanumeric = "".join(c for c in true_name_lower if c.isalnum())
@@ -269,33 +273,37 @@ def find_matching_repos_from_redis(all_repos, user_provided_input):
         # Catch case-insensitive matches OR alphanumeric matches (handles missing hyphens)
         if true_name_lower == raw_search or true_alphanumeric == alphanumeric_search:
             matched_names.add(true_github_name)
+            default_branch.add(default__redis_branch)
             continue
 
         # Catch fuzzy substring matches (handles partial inputs like 'taskmaster' matching 'Taskmaster--')
         if raw_search in true_name_lower or alphanumeric_search in true_alphanumeric:
             matched_names.add(true_github_name)
+            default_branch.add(default__redis_branch)
 
+    print("disrespect", default_branch)
     # Convert back to a list to easily pass back to your LLM or user chat
-    return list(matched_names)
+    return {"matched_names":list(matched_names), "default_branches": list(default_branch)}
 
 
 
 def ensure_orchestrator_yaml_is_online(
     repo_owner,
     repo_name,
-    default_branch,
     target_branch,
     git_token, all_repos
 ):
     matching_results = find_matching_repos_from_redis(all_repos, repo_name)
-    print(f"Matching results for : {matching_results}")
+    resolved_repo = matching_results["matched_names"][0]
+    print(f"Matching results for : {matching_results} and just matched repo-{resolved_repo}")
     
-    if len(matching_results) > 0: 
-        if len(matching_results) > 1:
+    if len(resolved_repo) > 0: 
+        if len(resolved_repo) > 1:
             return {"status":"failed", "message": f"They are many Repos with alike names, just to be sure, which one of them did you mean - {matching_results}?"}
 
-        elif (len(matching_results) == 1):
-            resolved_repo = matching_results[0]
+        elif (len(matching_results["matched_names"]) == 1):
+            
+            default_branch = matching_results["default_branches"][0]
             url = (
                 f"https://api.github.com/repos/"
                 f"{repo_owner}/{resolved_repo}/contents/"
@@ -645,7 +653,8 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                     cleaned_repos.append({
                         "id": r.get("id"),
                         "name": name,
-                        "full_name": r.get("full_name")
+                        "full_name": r.get("full_name"),
+                        "default_branch": r.get('default_branch') 
                     })
                     
                     # 3. Simultaneously append to the flat name list
@@ -1277,7 +1286,7 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     # =========================================================================
     # STEP 1: SCRIPT STITCHING ENGINE (Your existing logic)
     # =========================================================================
-    resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, default_branch, target_branch, git_token, repo_data)
+    resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, target_branch, git_token, repo_data)
     if resolved_repo_name.get("status") != "success":
         print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
         return {"status": "error", "message": "Orchestrator YAML validation failed"}

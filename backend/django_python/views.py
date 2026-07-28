@@ -83,6 +83,7 @@ def dashboard_view(request):
     github_access_token = None
     expires_at = None
     github_res_status = None
+    
 
 
     # FIRST LOGIN HANDSHAKE (Transit Ticket Present) 
@@ -170,7 +171,6 @@ def dashboard_view(request):
         print("NOTING")
         return JsonResponse({"error": "Anonymous context rejected. Missing valid authentication elements."}, status=403)
 
-    print("moreeeeeeeeeeeeeeeeeeeeee")
     if not username or not user_id:
         print(99999999999)
         return JsonResponse({"error": "Failed to map token identities securely."}, status=401)
@@ -178,6 +178,7 @@ def dashboard_view(request):
 
     details_cache_key = f"user:repos:{user_id}"
     cached_repos = cache.get(details_cache_key)
+    # cache.delete(details_cache_key)
     user = User.objects.get(pk=user_id)
     installed_github = UserProfileModel.objects.get(user=user).installed_github
 
@@ -221,14 +222,15 @@ def dashboard_view(request):
             # 1. Defensive type check
             if not isinstance(r, dict):
                 continue
-                
+
             name = r.get("name")
-            
+        
             # 2. Append to full structured list
             cleaned_repos.append({
                 "id": r.get("id"),
                 "name": name,
-                "full_name": r.get("full_name")
+                "full_name": r.get("full_name"),
+                "default_branch": r.get('default_branch')  
             })
             
             # 3. Simultaneously append to the flat name list
