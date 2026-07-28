@@ -2,6 +2,7 @@
 from typing import Any, Dict
 from urllib.parse import parse_qs
 from django.core.cache import cache
+from django.http import HttpResponse
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 
@@ -66,14 +67,18 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
                     encrypted_jwt = cached_details["github_access_token"]
                     print(6666)
                     scope["github_token"] = encrypted_jwt
+                else:
+                    return HttpResponse("Not authorized", status=401)
                 print(77777)
                 
             except Exception as e:
                 print(f"💥 [WS-AUTH] CRITICAL REJECTION: Parsing/Decryption exploded! Error: {str(e)}")
                 scope["user"] = AnonymousUser() # type: ignore
+                return HttpResponse("Something wrong with authentication, please try again", status=400)
         else:
             print("⚠️ [WS-AUTH] REJECTION: 'my_jwt_access_token' cookie was entirely missing from WebSocket handshake headers.")
             scope["user"] = AnonymousUser() # type: ignore
+            return HttpResponse("Not authenticated", status=400)
 
         print("--- 📡 FORWARDING TO CONSUMER ROUTER ---")
         return await self.inner(scope, receive, send) # type: ignore

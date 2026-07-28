@@ -229,23 +229,28 @@ user_payload = {
 
 
 
-def workflow_exists(url, headers, branch):
-    response = requests.get(
-        url,
-        headers=headers,
-        params={"ref": branch}
-    )
+def workflow_exists(url, headers, branch_name):
+    """
+    Checks if a workflow file exists on a specific branch and returns its SHA.
+    """
+    try:
+        # The URL passed in MUST contain the ?ref= query parameter
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # File exists! Return True and pass the true object SHA string
+            return {"exists": True, "sha": data.get("sha")}
+            
+        elif response.status_code == 404:
+            # File truly does not exist yet
+            return {"exists": False, "sha": None}
+            
+    except Exception as e:
+        print(f"Error checking workflow status: {e}")
+        
+    return {"exists": False, "sha": None}
 
-    if response.status_code == 200:
-        return {
-            "exists": False,
-            "sha": response.json().get("sha")
-        }
-
-    return {
-        "exists": False,
-        "sha": None
-    }
 
 
 def find_matching_repos_from_redis(all_repos, user_provided_input):
@@ -294,19 +299,19 @@ def ensure_orchestrator_yaml_is_online(
     git_token, all_repos
 ):
     matching_results = find_matching_repos_from_redis(all_repos, repo_name)
-    resolved_repo = matching_results["matched_names"][0]
+    resolved_repo = matching_results["matched_names"]
     print(f"Matching results for : {matching_results} and just matched repo-{resolved_repo}")
     
     if len(resolved_repo) > 0: 
         if len(resolved_repo) > 1:
             return {"status":"failed", "message": f"They are many Repos with alike names, just to be sure, which one of them did you mean - {matching_results}?"}
 
-        elif (len(matching_results["matched_names"]) == 1):
+        elif len(resolved_repo) == 1:
             
             default_branch = matching_results["default_branches"][0]
             url = (
                 f"https://api.github.com/repos/"
-                f"{repo_owner}/{resolved_repo}/contents/"
+                f"{repo_owner}/{resolved_repo[0]}/contents/"
                 f".github/workflows/orchestrator.yaml"
             )
 
@@ -329,17 +334,20 @@ def ensure_orchestrator_yaml_is_online(
                 yaml_content.encode("utf-8")
             ).decode("utf-8")
 
+            default_url_check = f"{url}?ref={default_branch}"
+            target_url_check = f"{url}?ref={target_branch}"
+
             # PARALLEL BRANCH CHECKS
             with ThreadPoolExecutor(max_workers=2) as executor:
                 default_future = executor.submit(
                     workflow_exists,
-                    url,
+                    default_url_check,
                     headers,
                     default_branch
                 )
                 target_future = executor.submit(
                     workflow_exists,
-                    url,
+                    target_url_check,
                     headers,
                     target_branch
                 )
@@ -362,7 +370,7 @@ def ensure_orchestrator_yaml_is_online(
                     payload["sha"] = default_result["sha"]
 
                 response = requests.put(
-                    f"{url}?ref={default_branch}",
+                    default_url_check,
                     json=payload,
                     headers=headers
                 )
@@ -385,7 +393,7 @@ def ensure_orchestrator_yaml_is_online(
                     payload["sha"] = target_result["sha"]
 
                 response = requests.put(
-                    f"{url}?ref={target_branch}",
+                    target_url_check,
                     json=payload,
                     headers=headers
                 )
@@ -616,7 +624,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
         print(result.intents, "and", result.active_rules)
         details_cache_key = f"user:repos:{user_id}"
         cached_details = cache.get(details_cache_key)
-        print("cached_repos", cached_details, "bro")
+        print(token,"cached_repos", cached_details, "bro")
         # Check if data exists and is the correct format (list or dict of repos)
         if cached_details is not None:
             # Process your cached_repos directly here
@@ -1290,6 +1298,7 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     if resolved_repo_name.get("status") != "success":
         print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
         return {"status": "error", "message": "Orchestrator YAML validation failed"}
+
     print("")
     print("amapiano",default_branch,{"default_branch": user_requested_rules})
     base_classes_text = inspect.getsource(rule_classes)
@@ -1402,7 +1411,7 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     matched_repo_name = resolved_repo_name.get('message')
     url = (
         f"https://api.github.com/repos/"
-        f"{repo_owner}/{matched_repo_name}/actions/workflows/"
+        f"{repo_owner}/{matched_repo_name[0]}/actions/workflows/"
         f"orchestrator.yaml/dispatches"
     )    
     headers = {
@@ -1420,7 +1429,7 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
         }
     }
     
-    print("DEBUG: Dispatching to GitHub API with payload:")
+    print(matched_repo_name[0], "DEBUG: Dispatching to GitHub API with payload:", url)
     feedback_r = requests.post(url, json=api_payload, headers=headers)
     if feedback_r.status_code == 204:
         print("🎉 SUCCESS! GitHub successfully accepted the workflow dispatch request.")
