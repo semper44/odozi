@@ -18,15 +18,15 @@ from django.contrib import admin
 from django.urls import path, include
 
 from account_profile.views import github_push_webhook
-from .views import ReceiveInput
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("push_webhook/", github_push_webhook),
     path('account/', include("account_profile.urls")),
+    path('general/', include("general.urls")),
     path('dashboard/', include("django_python.urls")),
-    path("receive_input/", ReceiveInput.as_view(), name="receive_input"),
+    # path("receive_input/", ReceiveInput.as_view(), name="receive_input"),
 
 ]
 

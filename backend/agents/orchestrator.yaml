@@ -135,7 +135,7 @@ jobs:
           buffer = []
           last_flush = time.time()
           flush_count = 0
-          url = '${{ inputs.backend_url }}/dashboard/results/'
+          url = '${{ inputs.backend_url }}/general/results/'
           token = os.environ.get('RUNNER_AUTH_TOKEN', '')
           
           headers = {
@@ -175,8 +175,13 @@ jobs:
           if len(buffer) > 0:
               flush()
           " < <($RUN_CMD 2>&1)
+          
+          # 🌟 THE HOOK FIX: Force pytest to write the physical report.json file to the disk right now!
+          $RUN_CMD > /dev/null 2>&1 || true
+
           echo "TEST_EXIT_CODE=${PIPESTATUS}" >> $GITHUB_ENV
           PYTEST_EXIT=${PIPESTATUS[0]}
+
 
           echo "================================================"
           echo "PYTEST FINISHED"
@@ -190,7 +195,7 @@ jobs:
         if: always()
         run: |
           if [ -f "report.json" ]; then
-            curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+            curl -X POST "${{ inputs.backend_url }}/general/results/" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "bypass-tunnel-reminder: true" \
               -F "repo_owner=${{ github.repository_owner }}" \
@@ -222,7 +227,7 @@ jobs:
       - name: Run Ruff Linter
         run: |
           ruff check --output-format json . > ruff_report.json || true
-          curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+          curl -X POST "${{ inputs.backend_url }}/general/results/" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
             -F "repo=${{ github.repository }}" \
@@ -251,7 +256,7 @@ jobs:
       - name: Run Bandit Security
         run: |
           bandit -r . -lll -f json > bandit_report.json || true
-          curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+          curl -X POST "${{ inputs.backend_url }}/general/results/" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
             -F "repo=${{ github.repository }}" \
@@ -281,7 +286,7 @@ jobs:
         run: |
           echo '${{ inputs.custom_script_payload }}' | base64 -d > odozi_runner.py
           python odozi_runner.py > odozi_report.json || true
-          curl -X POST "${{ inputs.backend_url }}/dashboard/results/" \
+          curl -X POST "${{ inputs.backend_url }}/general/results/" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "bypass-tunnel-reminder: true" \
             -F "repo=${{ github.repository }}" \
@@ -321,17 +326,26 @@ jobs:
           echo "================================================"
           pip install --upgrade pip pip-audit
           
-          # Locate requirements.txt dynamically anywhere in the repo
           REQ_FILE=$(find . -name "requirements.txt" | head -n 1)
           
+          # 1. Output the tool checks directly into a local JSON report file
           if [ -n "$REQ_FILE" ]; then
               echo "Found dependency file: $REQ_FILE"
-              # Run audit and output a raw text stream
-              pip-audit -r "$REQ_FILE" 2>&1
+              pip-audit -f json -r "$REQ_FILE" > pip_audit_report.json || true
           else
-              echo "⚠️ Warning: No requirements.txt found. Auditing active python environment instead."
-              pip-audit 2>&1
+              echo "⚠️ Warning: No requirements.txt found. Auditing active environment."
+              pip-audit -f json > pip_audit_report.json || true
           fi
+
+          # 2. Curl that final report file back to your Django server views
+          curl -X POST "${{ inputs.backend_url }}/general/results/" \
+            -H "bypass-tunnel-reminder: true" \
+            -F "repo=${{ github.repository }}" \
+            -F "repo_owner=${{ github.repository_owner }}" \
+            -F "run_id=${{ github.run_id }}" \
+            -F "tool=pip_audit" \
+            -F "file=@pip_audit_report.json"
+
 
 
 
@@ -355,7 +369,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - run: |
-          rm .github/workflows/odozi-temp.yml
+          rm .github/workflows/orchestrator.yml
 
           git config user.name "github-actions"
           git config user.email "actions@github.com"
