@@ -33,7 +33,7 @@ class ReceiveInput(generics.CreateAPIView):
             200: OpenApiResponse(description="Processing acknowledged"),
         },
     )
-    def post(self, reqqust):
+    def post(self, request):
         input = request.POST.get('input', '')
         user_input = is_input_safe(input)
         if input == "":
@@ -52,20 +52,42 @@ class ReceiveInput(generics.CreateAPIView):
 
 
 class OptimizedResultsReceiverView(APIView):
-    parser_classes = [JSONParser, MultiPartParser]
+    """
+    Endpoint that catches the final full JSON reports sent via 'curl -F' 
+    from your GitHub Actions YAML file, updating Postgres and saving logs to R2.
+    """
+    parser_classes = [MultiPartParser] # Optimized strictly for file uploads
+    authentication_classes = [] 
+    permission_classes = []
 
     def post(self, request, *args, **kwargs):
-        tool_name = request.data.get("tool")
-        repo_name = request.data.get("repo", "").split("/")[-1].strip()
-        run_id = request.data.get("run_id") # GitHub Run ID token identifier
+        # 1. Extract the tracking data parameters sent from your curl flags
+        tool_name = request.data.get("tool") # e.g., 'bandit'
+        repo_owner = request.data.get("repo_owner")
+        
+        # Clean 'owner/repo' strings safely into just the repository name
+        raw_repo = request.data.get("repo", "")
+        repo_name = raw_repo.split("/")[-1].strip() if "/" in raw_repo else raw_repo
 
-        # Fetch the matching operational database tracking rows
-        workflow = AuditWorkflow.objects.filter(repository_name=repo_name, status="processing").order_by("-created_at").first()
+        if "file" not in request.FILES:
+            return Response({"error": "Missing final report file attachment"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Locate the active history rows waiting for this report in your local Postgres DB
+        workflow = AuditWorkflow.objects.filter(
+            repository_name=repo_name, 
+            status="processing"
+        ).order_by("-created_at").first()
+
         if not workflow:
-            return Response({"status": "ignored", "reason": "No active workflow model context"}, status=status.HTTP_200_OK)
+            # Fallback check if the workflow already marked itself closed
+            workflow = AuditWorkflow.objects.filter(repository_name=repo_name).order_by("-created_at").first()
+            if not workflow:
+                return Response({"error": "No matching active workflow history found"}, status=status.HTTP_404_NOT_FOUND)
 
+        # Grab or allocate the individual tool tracking row
         job, _ = AuditJob.objects.get_or_create(workflow=workflow, tool_name=tool_name)
 
+        # 3. Connect to your Cloudflare R2 client container layer
         r2_client = boto3.client(
             "s3",
             endpoint_url=f"https://{settings.CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
@@ -73,58 +95,48 @@ class OptimizedResultsReceiverView(APIView):
             aws_secret_access_key=settings.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
         )
 
-        # 🌟 ADJUSTMENT A: ATOMIC LOG STREAM CHUNKING (Pytest Streamer)
-        if "logs" in request.data:
-            log_lines = request.data.get("logs", [])
-            if not log_lines:
-                return Response({"status": "empty"}, status=status.HTTP_200_OK)
+        uploaded_report = request.FILES["file"]
+        r2_object_key = f"workspaces/{workflow.workspace_id}/workflows/{workflow.id}/jobs/{tool_name}/final_report.json"
 
-            # Generate an isolated file segment chunk using a timestamp token hash identifier
-            # Path layout: workspaces/{id}/workflows/{id}/jobs/{tool}/chunk_{timestamp}.json
-            timestamp_token = int(time.time_ns())
-            chunk_object_key = f"workspaces/{workflow.workspace_id}/workflows/{workflow.id}/jobs/{tool_name}/chunk_{timestamp_token}.json"
+        try:
+            # 4. Decode the uploaded JSON file content safely
+            report_content = uploaded_report.read().decode("utf-8")
+            parsed_json = json.loads(report_content)
 
-            chunk_payload = {
-                "run_id": run_id,
-                "sequence_timestamp": timestamp_token,
-                "lines": log_lines
+            # Package it uniformly for cloud storage
+            final_payload = {
+                "workflow_id": str(workflow.id),
+                "job_id": str(job.id),
+                "tool": tool_name,
+                "repository": repo_name,
+                "completed_at": str(datetime.now()),
+                "report_data": parsed_json
             }
 
-            # Direct $O(1)$ write operation. Zero reads, zero race conditions, zero file overrides!
+            # 5. Push the massive report data payload straight to Cloudflare R2 cloud storage
             r2_client.put_object(
                 Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME,
-                Key=chunk_object_key,
-                Body=json.dumps(chunk_payload),
+                Key=r2_object_key,
+                Body=json.dumps(final_payload, indent=2),
                 ContentType="application/json"
             )
-            return Response({"status": "chunk_filed"}, status=status.HTTP_200_OK)
 
-        # 🌟 ADJUSTMENT B: STRUCTURAL COMPLETED REPORTS (Bandit / Ruff / Odozi)
-        elif "file" in request.FILES:
-            uploaded_report = request.FILES["file"]
-            final_report_key = f"workspaces/{workflow.workspace_id}/workflows/{workflow.id}/jobs/{tool_name}/final_report.json"
+            # 6. Save the Cloudflare file location path directly into your PostgreSQL tracking record row
+            job.log_blob_path = f"{settings.CLOUDFLARE_R2_PUBLIC_URL}/{r2_object_key}"
+            job.status = "success"
+            job.completed_at = datetime.now()
+            job.save()
 
-            try:
-                report_data = json.loads(uploaded_report.read().decode("utf-8"))
-                
-                r2_client.put_object(
-                    Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME,
-                    Key=final_report_key,
-                    Body=json.dumps({"tool": tool_name, "run_id": run_id, "data": report_data}, indent=2),
-                    ContentType="application/json"
-                )
+            # Smart Check: If all other tool running jobs inside this workflow are done, mark the parent workflow success too!
+            if not workflow.jobs.filter(status="processing").exists():
+                workflow.status = "success"
+                workflow.save()
 
-                # Link history path mapping pointer to PostgreSQL row index
-                job.log_blob_path = f"jobs/{tool_name}/" # Store parent folder prefix directory path reference
-                job.status = "success"
-                job.completed_at = datetime.now()
-                job.save()
+            return Response({"status": "success", "message": "Final report archived safely in Cloudflare R2"}, status=status.HTTP_200_OK)
 
-                return Response({"status": "report_filed"}, status=status.HTTP_200_OK)
-            except Exception as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({"error": "Malformed structural payload parameter data wrapper"}, status=status.HTTP_400_BAD_REQUEST)
-
+        except Exception as e:
+            job.status = "failure"
+            job.save()
+            return Response({"error": f"Failed saving report: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

@@ -922,6 +922,7 @@ class LogStreamingResultsView(APIView):
         },
     )
     def post(self, request, *args, **kwargs):
+        print("login stream results")
         run_id = request.data.get('run_id')
         repo_full_name = request.data.get('repo')  # e.g., "semper44/odozi"
         incoming_logs = request.data.get('logs', []) # List of strings from YAML
