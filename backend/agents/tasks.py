@@ -229,30 +229,6 @@ user_payload = {
 
 
 
-def workflow_exists(url, headers, branch_name):
-    """
-    Checks if a workflow file exists on a specific branch and returns its SHA.
-    """
-    try:
-        # The URL passed in MUST contain the ?ref= query parameter
-        response = requests.get(url, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
-            # File exists! Return True and pass the true object SHA string
-            return {"exists": True, "sha": data.get("sha")}
-            
-        elif response.status_code == 404:
-            # File truly does not exist yet
-            return {"exists": False, "sha": None}
-            
-    except Exception as e:
-        print(f"Error checking workflow status: {e}")
-        
-    return {"exists": False, "sha": None}
-
-
-
 def find_matching_repos_from_redis(all_repos, user_provided_input):
     """
     Finds all potential repository matches from Redis.
@@ -291,125 +267,169 @@ def find_matching_repos_from_redis(all_repos, user_provided_input):
     return {"matched_names":list(matched_names), "default_branches": list(default_branch)}
 
 
+def workflow_exists(url, headers, branch_name):
+    """
+    Checks if a workflow file exists on a specific branch and returns its SHA.
+    """
+    try:
+        print("\n==============================")
+        print("CHECKING WORKFLOW")
+        print("Branch:", branch_name)
+        print("GET URL:", url)
+
+        response = requests.get(url, headers=headers, timeout=15)
+
+        print("GET Status:", response.status_code)
+        print("GET Response:")
+        print(response.text)
+
+        if response.status_code == 200:
+            data = response.json()
+
+            print("Workflow EXISTS")
+            print("SHA:", data.get("sha"))
+
+            return {
+                "exists": True,
+                "sha": data.get("sha")
+            }
+
+        elif response.status_code == 404:
+            print("Workflow DOES NOT exist.")
+
+            return {
+                "exists": False,
+                "sha": None
+            }
+
+        else:
+            print("Unexpected status code.")
+
+    except Exception as e:
+        print(f"Error checking workflow status: {e}")
+
+    return {
+        "exists": False,
+        "sha": None
+    }
+
 
 def ensure_orchestrator_yaml_is_online(
     repo_owner,
     repo_name,
     target_branch,
-    git_token, all_repos
+    git_token,
+    all_repos
 ):
     matching_results = find_matching_repos_from_redis(all_repos, repo_name)
     resolved_repo = matching_results["matched_names"]
-    print(f"Matching results for : {matching_results} and just matched repo-{resolved_repo}")
-    
-    if len(resolved_repo) > 0: 
-        if len(resolved_repo) > 1:
-            return {"status":"failed", "message": f"They are many Repos with alike names, just to be sure, which one of them did you mean - {matching_results}?"}
 
-        elif len(resolved_repo) == 1:
-            
-            default_branch = matching_results["default_branches"][0]
-            url = (
-                f"https://api.github.com/repos/"
-                f"{repo_owner}/{resolved_repo[0]}/contents/"
-                f".github/workflows/orchestrator.yaml"
-            )
+    print(f"Matching results: {matching_results}")
 
-            headers = {
-                "Authorization": f"Bearer {git_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28"
+    if len(resolved_repo) == 0:
+        return {
+            "status": "failed",
+            "message": f"You typed '{repo_name}', but I couldn't find any matching repository."
+        }
+
+    if len(resolved_repo) > 1:
+        return {
+            "status": "failed",
+            "message": f"Multiple repositories matched your input. Which one did you mean?\n{matching_results}"
+        }
+
+    default_branch = matching_results["default_branches"][0]
+
+    print("\n==============================")
+    print("Repository:", resolved_repo[0])
+    print("Default branch:", default_branch)
+    print("Target branch:", target_branch)
+    print("==============================")
+
+    url = (
+        f"https://api.github.com/repos/"
+        f"{repo_owner}/{resolved_repo[0]}/contents/"
+        f".github/workflows/orchestrator.yaml"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {git_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+
+    yaml_file_path = os.path.join(
+        settings.BASE_DIR,
+        "agents",
+        "orchestrator.yaml"
+    )
+
+    with open(yaml_file_path, "r", encoding="utf-8") as f:
+        yaml_content = f.read()
+
+    encoded_content = base64.b64encode(
+        yaml_content.encode("utf-8")
+    ).decode("utf-8")
+
+    # Remove duplicates while preserving order
+    branches_to_process = list(
+        dict.fromkeys([default_branch, target_branch])
+    )
+
+    for branch in branches_to_process:
+
+        print(f"\n========== PROCESSING BRANCH: {branch} ==========")
+
+        check_url = f"{url}?ref={branch}"
+
+        result = workflow_exists(
+            check_url,
+            headers,
+            branch
+        )
+
+        print("Workflow check:", result)
+
+        payload = {
+            "message": "ci: synchronize Odozi workflow",
+            "content": encoded_content,
+            "branch": branch
+        }
+
+        # Existing file -> update
+        if result["exists"]:
+            payload["sha"] = result["sha"]
+            print("Updating existing workflow...")
+        else:
+            print("Creating workflow...")
+
+        response = requests.put(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+
+        print("PUT Status:", response.status_code)
+        print("PUT Response:", response.text)
+
+        if response.status_code not in (200, 201):
+            return {
+                "status": "failed",
+                "message": (
+                    f"Failed syncing workflow on '{branch}'. "
+                    f"{response.status_code}: {response.text}"
+                )
             }
 
-            yaml_file_path = os.path.join(
-                settings.BASE_DIR,
-                "agents",
-                "orchestrator.yaml"
-            )
+        print(f"Successfully synchronized workflow on '{branch}'.")
 
-            with open(yaml_file_path, "r", encoding="utf-8") as f:
-                yaml_content = f.read()
+    print("\nWorkflow synchronized successfully on all required branches.")
 
-            encoded_content = base64.b64encode(
-                yaml_content.encode("utf-8")
-            ).decode("utf-8")
-
-            default_url_check = f"{url}?ref={default_branch}"
-            target_url_check = f"{url}?ref={target_branch}"
-
-            # PARALLEL BRANCH CHECKS
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                default_future = executor.submit(
-                    workflow_exists,
-                    default_url_check,
-                    headers,
-                    default_branch
-                )
-                target_future = executor.submit(
-                    workflow_exists,
-                    target_url_check,
-                    headers,
-                    target_branch
-                )
-
-                default_result = default_future.result()
-                target_result = target_future.result()
-
-            # ----------------------------------------------------
-            # ENSURE DEFAULT BRANCH
-            # ----------------------------------------------------
-            if not default_result["exists"]:
-                payload = {
-                    "message": "ci: initialize Odozi workflow",
-                    "content": encoded_content,
-                    "branch": default_branch
-                }
-                
-                # Clean fix for the explicit null/None SHA crashing 404 bug
-                if default_result.get("sha"):
-                    payload["sha"] = default_result["sha"]
-
-                response = requests.put(
-                    default_url_check,
-                    json=payload,
-                    headers=headers
-                )
-
-                if response.status_code not in (200, 201):
-                    print(f"Default branch upload failed: {response.status_code} {response.text}")
-                    return {"status":"failed", "message": f"Default branch upload failed: {response.status_code} {response.text}"}
-
-            # ----------------------------------------------------
-            # ENSURE TARGET BRANCH
-            # ----------------------------------------------------
-            if not target_result["exists"]:
-                payload = {
-                    "message": "ci: initialize Odozi workflow",
-                    "content": encoded_content,
-                    "branch": target_branch
-                }
-
-                if target_result.get("sha"):
-                    payload["sha"] = target_result["sha"]
-
-                response = requests.put(
-                    target_url_check,
-                    json=payload,
-                    headers=headers
-                )
-
-                if response.status_code not in (200, 201):
-                    print(f"Target branch upload failed: {response.status_code} {response.text}")
-                    return {"status":"failed", "message": f"Target branch upload failed: {response.status_code} {response.text}"}
-
-            # 🔴 FIXED HERE: This print and return block are out-dented by 4 spaces.
-            # Now it returns successfully whether the file was uploaded just now OR if it was already online!
-            print(f"Workflow present on {default_branch} and {target_branch}")
-            return {"status": "success", "message": resolved_repo}
-            
-    else:
-        return {"status":"failed", "message": f"You typed {repo_name}, but i couldnt find a repo that matches such name"}
-
+    return {
+        "status": "success",
+        "message": resolved_repo
+    }
 
 
 
@@ -1393,7 +1413,21 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     # STEP 2: DISPATCH TO LIVE GITHUB API (Uncomment when ready to go live)
     # =========================================================================
     print("user_requested_rules", user_requested_rules)
-    selected_tools = user_requested_rules
+     # 1. Start a clean flat list for your GitHub Actions YAML checkboxes
+    yaml_tools_list = []
+
+    # 2. Iterate through whatever keys the user/LLM requested
+    for rule_key in strategies_dict.keys():
+        # A. If it's an internal AST check, append 'odozi_visitors' to light up Job 4
+        if rule_key in AST_TOOL_REGISTRY:
+            if "odozi_visitors" not in yaml_tools_list:
+                yaml_tools_list.append("odozi_visitors")
+        else:
+            # B. If it's a native runner rule (like 'bandit', 'pytest', or 'ruff'), 
+            # pass it straight through to light up its individual Job block
+            yaml_tools_list.append(rule_key)
+
+    print(f"🎯 SMART ENGINE AUTO-MAPPED WORKFLOW TOOLS: {yaml_tools_list}")
      # 1. Look up the repository full slug name in your DB
     # repo_slug = f"{repo_owner}/{repo_name}"
 
@@ -1423,13 +1457,19 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     api_payload = {
         "ref":  target_branch,  
         "inputs": {
-            "tools_list": json.dumps(selected_tools),
+            "tools_list": json.dumps(yaml_tools_list),
             "custom_script_payload": encoded_script,
             "env_keys_list": env_keys_payload
         }
     }
     
     print(matched_repo_name[0], "DEBUG: Dispatching to GitHub API with payload:", url)
+    print("=================== PROOF OF PAYLOAD FORMATS ===================")
+    print(f"1. RAW user_requested_rules (From LLM): {user_requested_rules}")
+    print(f"2. STRATEGIES DICT (Extracted): {strategies_dict}")
+    print(f"3. WHAT DISPATCH RECEIVED (tools_list): {json.dumps(user_requested_rules)}")
+    print("================================================================")
+
     feedback_r = requests.post(url, json=api_payload, headers=headers)
     if feedback_r.status_code == 204:
         print("🎉 SUCCESS! GitHub successfully accepted the workflow dispatch request.")
