@@ -1360,9 +1360,6 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
             
     visitors_code_block = "\n".join(visitor_instances_lines)
 
-    # DEBUG
-    print(visitors_code_block)
-
     raw_template = f"""
     if __name__ == "__main__":
         import os

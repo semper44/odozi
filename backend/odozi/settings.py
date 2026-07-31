@@ -32,14 +32,14 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "odd-brooms-doubt.loca.lt",
+    "fast-results-behave.loca.lt",
     "short-aliens-sniff.loca.lt"
 ]
 
 # CORS
 CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http://localhost:5173",
                         "http://127.0.0.1:8000",'http://127.0.0.1',"http://127.0.0.1:5173",
-                        "ws://127.0.0.1:8000", "ws://localhost:8000", "https://odd-brooms-doubt.loca.lt", "https://short-aliens-sniff.loca.lt"]
+                        "ws://127.0.0.1:8000", "ws://localhost:8000", "https://fast-results-behave.loca.lt"]
 
 CORS_ALLOW_CREDENTIALS = True
 
