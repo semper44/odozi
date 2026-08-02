@@ -283,8 +283,10 @@ jobs:
         with:
           python-version: '3.11'
       - name: Run Custom Odozi Code Engine
+        env:
+          CUSTOM_SCRIPT: ${{ inputs.custom_script_payload }}
         run: |
-          echo '${{ inputs.custom_script_payload }}' | base64 -d > odozi_runner.py > /dev/null 2>&1
+          echo "$CUSTOM_SCRIPT" | base64 -d > odozi_runner.py
           python odozi_runner.py | tee odozi_report.json
           curl -X POST "${{ inputs.backend_url }}/general/results/" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
@@ -298,6 +300,7 @@ jobs:
 
     # =========================================================================
  
+  
   # JOB 5: PIP-AUDIT RUNNER (Dependency Vulnerability Scanner)
   # =========================================================================
   run-pip-audit:

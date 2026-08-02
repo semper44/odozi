@@ -281,7 +281,7 @@ def workflow_exists(url, headers, branch_name):
 
         print("GET Status:", response.status_code)
         print("GET Response:")
-        print(response.text)
+        # print(response.text)
 
         if response.status_code == 200:
             data = response.json()
@@ -876,6 +876,7 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
                 # Append the task signature context blocks to the array list
                 pipeline_tasks.append(
                     run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
+                        channel_name= channel_name,
                         repo_owner=repo_owner,
                         repo_name=sanitized_name,
                         default_branch="main",
@@ -1297,10 +1298,11 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
     retry_backoff=True,         
     retry_backoff_max=15        
 )
-def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
+def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
     """
     Asynchronous platform dispatcher.
     """
+    channel_layer = get_channel_layer()
     # =========================================================================
     # ✅ STEP 0: GENERATE DYNAMIC 1-HOUR TOKEN VIA PRIVATE KEY
     # =========================================================================
@@ -1317,6 +1319,16 @@ def run_agentic_pipeline(self, repo_owner, repo_name,default_branch, repo_data,c
     resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, target_branch, git_token, repo_data)
     if resolved_repo_name.get("status") != "success":
         print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
+        async_to_sync(channel_layer.group_send)(
+                channel_name, # Targets the static room name string
+                {
+                    "type": "chat_message",
+                    "payload": {
+                        "type": "orchestration_result",
+                        "raw_output": {f"{resolved_repo_name.get('message')}"},
+                    }
+                }
+            )
         return {"status": "error", "message": "Orchestrator YAML validation failed"}
 
     print("")
