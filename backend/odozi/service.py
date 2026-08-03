@@ -13,7 +13,7 @@ from django_python.models import RepoEnvKey
 from django_python.serializer import GitHubRepositorySerializer
 
 
-
+error_data = {}
 
 def is_input_safe(user_text):
     # Block common shell injection characters
@@ -48,6 +48,11 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
         if repositories_data:
             serializer = GitHubRepositorySerializer(data=repositories_data, many=True)
             if not serializer.is_valid():
+                error_data["repo_validation"] = { 
+                    "status": "failed",
+                    "message": "Repository data validation failed.",
+                    "errors": serializer.errors
+                }
                 raise ValidationError(serializer.errors)
 
             validated_data_list = serializer.validated_data
@@ -101,7 +106,8 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
                 "total_already_existed": len(already_existed_in_db)
             },
             "freshly_created_repositories": freshly_created_in_db,
-            "already_existing_repositories": already_existed_in_db
+            "already_existing_repositories": already_existed_in_db,
+            "error_data": error_data
         }
 
 
@@ -203,6 +209,10 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
             try:
                 repo_workspace = Workspace.objects.get(name=workspace_name, owner=user)
             except Workspace.DoesNotExist:
+                error_data["workspace_creation_resolution"] = {
+                    "status": "failed",
+                    "message": f"Workspace '{workspace_name}' does not exist for this user."
+                }
                 raise ValidationError(f"Workspace '{workspace_name}' does not exist for this user.")
         else:
             repo_workspace, _ = Workspace.objects.get_or_create(
@@ -353,6 +363,10 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             repo_workspace = Workspace.objects.filter(name__icontains=workspace_name.strip(), owner=user,  workspace_env_keys__isnull=False).distinct().first()
             
             if not repo_workspace:
+                error_data["workspace_resolution"] = {
+                    "status": "failed",
+                    "message": f"No Env found associated with {workspace_name} Workspace."
+                }
                 raise ValidationError(f"No Env found associated with {workspace_name} Workspace.")
 
             affected_repos = set(repo_workspace.repositories.all())
@@ -442,6 +456,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
         return {
             "status": "success",
             "message": delete_messages,
+            "error_data": error_data
             # "metrics": {
             #     "variables_deleted": total_deleted_accumulator,  # 🌟 Safely map the safe master variable
             #     "repositories_evaluated": len(affected_repos),

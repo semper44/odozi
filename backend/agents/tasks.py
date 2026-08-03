@@ -13,7 +13,7 @@ import traceback
 import subprocess
 import textwrap
 from toon import encode
-from typing import cast
+from typing import Any, Dict, List, cast
 
 from celery import shared_task, group, chord
 
@@ -60,6 +60,8 @@ UNIVERSAL_NETWORK_ERRORS = (
     requests.exceptions.ConnectionError,
     requests.exceptions.Timeout
 )
+
+error_data = {}
 
 def transform_ci_results(raw_results):
     """
@@ -267,6 +269,7 @@ def find_matching_repos_from_redis(all_repos, user_provided_input):
     return {"matched_names":list(matched_names), "default_branches": list(default_branch)}
 
 
+
 def workflow_exists(url, headers, branch_name):
     """
     Checks if a workflow file exists on a specific branch and returns its SHA.
@@ -281,37 +284,56 @@ def workflow_exists(url, headers, branch_name):
 
         print("GET Status:", response.status_code)
         print("GET Response:")
-        # print(response.text)
 
-        if response.status_code == 200:
-            data = response.json()
+        # Always expose HTTP details so callers (and LLM) can reason about failures
+        http_status = response.status_code
+        http_body = response.text
+
+        if http_status == 200:
+            try:
+                data = response.json()
+                sha = data.get("sha")
+            except Exception:
+                sha = None
 
             print("Workflow EXISTS")
-            print("SHA:", data.get("sha"))
+            print("SHA:", sha)
 
             return {
                 "exists": True,
-                "sha": data.get("sha")
+                "sha": sha,
+                "http_status": http_status,
+                "http_body": http_body
             }
 
-        elif response.status_code == 404:
+        elif http_status == 404:
             print("Workflow DOES NOT exist.")
 
             return {
                 "exists": False,
-                "sha": None
+                "sha": None,
+                "http_status": http_status,
+                "http_body": http_body
             }
 
         else:
             print("Unexpected status code.")
+            return {
+                "exists": False,
+                "sha": None,
+                "http_status": http_status,
+                "http_body": http_body
+            }
 
     except Exception as e:
         print(f"Error checking workflow status: {e}")
-
-    return {
-        "exists": False,
-        "sha": None
-    }
+        return {
+            "exists": False,
+            "sha": None,
+            "http_status": None,
+            "http_body": None,
+            "error": str(e)
+        }
 
 
 def ensure_orchestrator_yaml_is_online(
@@ -327,17 +349,19 @@ def ensure_orchestrator_yaml_is_online(
     print(f"Matching results: {matching_results}")
 
     if len(resolved_repo) == 0:
-        return {
+        error_data["repo_resolution_not_found"] = {
             "status": "failed",
             "message": f"You typed '{repo_name}', but I couldn't find any matching repository."
         }
+        return
 
     if len(resolved_repo) > 1:
-        return {
+        error_data["repo_resolution"] = {
             "status": "failed",
             "message": f"Multiple repositories matched your input. Which one did you mean?\n{matching_results}"
         }
-
+        return
+    
     default_branch = matching_results["default_branches"][0]
 
     print("\n==============================")
@@ -376,6 +400,9 @@ def ensure_orchestrator_yaml_is_online(
         dict.fromkeys([default_branch, target_branch])
     )
 
+    branches_outcomes = []
+    errors = []
+
     for branch in branches_to_process:
 
         print(f"\n========== PROCESSING BRANCH: {branch} ==========")
@@ -397,38 +424,62 @@ def ensure_orchestrator_yaml_is_online(
         }
 
         # Existing file -> update
-        if result["exists"]:
-            payload["sha"] = result["sha"]
+        if result.get("exists"):
+            if result.get("sha"):
+                payload["sha"] = result.get("sha")
             print("Updating existing workflow...")
         else:
             print("Creating workflow...")
 
-        response = requests.put(
-            url,
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
+        try:
+            response = requests.put(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
 
-        print("PUT Status:", response.status_code)
-        print("PUT Response:", response.text)
-
-        if response.status_code not in (200, 201):
-            return {
-                "status": "failed",
-                "message": (
-                    f"Failed syncing workflow on '{branch}'. "
-                    f"{response.status_code}: {response.text}"
-                )
+            outcome = {
+                "branch": branch,
+                "attempted_url": url,
+                "workflow_check": result,
+                "http_status": response.status_code,
+                "http_body": response.text
             }
+            branches_outcomes.append(outcome)
 
-        print(f"Successfully synchronized workflow on '{branch}'.")
+            print("PUT Status:", response.status_code)
+            print("PUT Response:", response.text)
+
+            if response.status_code not in (200, 201):
+                errors.append({"branch": branch, "status": response.status_code, "body": response.text})
+            else:
+                print(f"Successfully synchronized workflow on '{branch}'.")
+
+        except Exception as e:
+            err = {"branch": branch, "error": str(e)}
+            errors.append(err)
+            branches_outcomes.append({"branch": branch, "error": str(e)})
+
+    if errors:
+        error_data["repo_resolution"] = {
+                    "status": "failed",
+                    "message": errors,
+                    "branches": branches_outcomes,
+                }
+        return {
+            "status": "partial_failure" if branches_outcomes else "failed",
+            "message": resolved_repo,
+            "branches": branches_outcomes,
+            "errors": errors
+        }
 
     print("\nWorkflow synchronized successfully on all required branches.")
 
     return {
         "status": "success",
-        "message": resolved_repo
+        "message": resolved_repo,
+        "branches": branches_outcomes
     }
 
 
@@ -519,6 +570,7 @@ Set 'ui_layout_route' to:
 
 
 
+
 @shared_task(
     bind=True,
     autoretry_for= UNIVERSAL_NETWORK_ERRORS,
@@ -552,19 +604,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                 AIMessage(content=msg.content)
             )
 
-    # print("atitude")
-    # toon_history_memory = encode(history_list)
-    # print("iti")
-    # print(history_list)
-    # print("")
-    # print(toon_history_memory)
-
-    # master_system_prompt = f"""
-    #     {system_instruction_text}
-
-    #     ### PAST CONVERSATION STATE LOGS (TOON):
-    #     {{toon_history}}
-    # """
 
     # Assemble your structural Prompt Template using ONE clean system message entry
     prompt_template = ChatPromptTemplate.from_messages([
@@ -789,8 +828,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
             # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
             from celery import signature
             
-            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
-            # You pass the task path name string and your parameters directly inside signature()
+            # passing the task path name string and  parameters directly inside signature()
             result_dict = result.model_dump()
             env_key_requests = result_dict.get('env_keys_to_delete', [])
             ui_layout = result_dict.get('ui_layout', [])
@@ -813,6 +851,8 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
         # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
         # -------------------------------------------------------------------------
         print("coat", "swaaaaa")
+
+        agentic_chat_follow_up(error_data, provider, model_name, api_key, history_messages)
         
         # 🚀 FIXED: Swapped from .send to .group_send to connect to group_user_room static strings safely!
         async_to_sync(channel_layer.group_send)(
@@ -873,9 +913,9 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
         matched_repo_dict = next((repo for low_name, repo in cached_pairs if sanitized_name in low_name), None)
         if matched_repo_dict:
             try:
-                # Append the task signature context blocks to the array list
+                # Appending the task signature context blocks to the array list
                 pipeline_tasks.append(
-                    run_agentic_pipeline.s( # 🌟 Note the '.s' signature decorator!
+                    run_agentic_pipeline.s(  # type: ignore
                         channel_name= channel_name,
                         repo_owner=repo_owner,
                         repo_name=sanitized_name,
@@ -948,6 +988,10 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
                 repos_found.append(serializer_ready_data)
             else:
                 repos_not_found.append(raw_repo)
+                error_data["repo_resolution_for_workspace_creation_not_found"] = {
+                    "type": "error",
+                    "message": f"Repository '{user_input}' not found."
+                }
 
         # 3. Safe validation pass execution
         if len(repos_found) > 0:
@@ -1132,6 +1176,10 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
                             continue
                     
                     repos_not_found.append(user_input)
+                    error_data["repo_resolution_for_key_creation_not_found"] = {
+                        "type": "error",
+                        "message": f"Repository '{user_input}' not found."
+                    }
 
             # If user targeted specific repos but none could be verified, halt this specific request
             if not selected_repo_ids:
@@ -1319,17 +1367,26 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, target_branch, git_token, repo_data)
     if resolved_repo_name.get("status") != "success":
         print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
+        # Send detailed structured result back to frontend / LLM via websocket
         async_to_sync(channel_layer.group_send)(
-                channel_name, # Targets the static room name string
-                {
-                    "type": "chat_message",
-                    "payload": {
-                        "type": "orchestration_result",
-                        "raw_output": {f"{resolved_repo_name.get('message')}"},
-                    }
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route": "CHAT",
+                        "chat_response": "Orchestrator YAML validation failed",
+                        "orchestrator_sync_details": resolved_repo_name
+                    },
                 }
-            )
-        return {"status": "error", "message": "Orchestrator YAML validation failed"}
+            }
+        )
+        return {
+            "status": "error",
+            "message": "Orchestrator YAML validation failed",
+            "orchestrator_sync_details": resolved_repo_name
+        }
 
     print("")
     print("amapiano",default_branch,{"default_branch": user_requested_rules})
@@ -1436,11 +1493,7 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
             # pass it straight through to light up its individual Job block
             yaml_tools_list.append(rule_key)
 
-    print(f"🎯 SMART ENGINE AUTO-MAPPED WORKFLOW TOOLS: {yaml_tools_list}")
-     # 1. Look up the repository full slug name in your DB
-    # repo_slug = f"{repo_owner}/{repo_name}"
 
-    print(repo_name, repo_data, repo_owner, "repo")
     
     # 2. Fetch only the variable names registered for THIS specific repository
     repo_merge = f'{repo_owner}/{repo_name}'
@@ -1494,6 +1547,80 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
         }
 
 
+
+@shared_task(
+    bind=True,
+    autoretry_for= UNIVERSAL_NETWORK_ERRORS,
+    retry_kwargs={'max_retries': 3},
+    retry_backoff=True,        
+    retry_backoff_max=30
+)
+
+
+def agentic_chat_follow_up(
+    self, 
+    error_data: Dict[str, Any], 
+    provider: str, 
+    model_name: str, 
+    api_key: str,
+    history_messages: List[Any] = None 
+):
+    # LIGHTWEIGHT SYSTEM INSTRUCTION
+    short_followup_instruction = """
+    You are the Error Resolution Core for Project Odozi. Your only task is to review 
+    a backend execution error dictionary and translate it into a friendly, helpful 
+    response for the user. 
+    
+    Review the chat history to see what they were trying to do, explain what went wrong 
+    using the error metrics, and clearly ask them for the missing details or clarification.
+    """
+
+    
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", short_followup_instruction),
+        MessagesPlaceholder(variable_name="history"),
+        ("human", "{input}")                                        
+    ])
+
+    # Dynamic model vendor factory setup
+    if provider == "openai":
+        llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
+    else:
+        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=settings.GEMINI_API_KEY)
+
+    structured_llm = llm.with_structured_output(OrchestratorAction)
+    
+    chain = prompt_template | structured_llm
+
+    # Fallback to an empty list if no history messages were passed in
+    if history_messages is None:
+        history_messages = []
+
+    # Build the authoritative automated backend notification payload string
+    backend_event_input = (
+        f"🚨 BACKEND INTERNAL ERROR REPORT\n"
+        f"The system encountered an operational failure while processing the pipeline:\n"
+        f"{json.dumps(error_data, indent=2)}\n\n"
+        f"INSTRUCTION: Look at the error data, update OrchestratorAction layout fields, "
+        f"set ui_layout_route to 'CHAT', and write a clear user explanation inside chat_response."
+    )
+
+    try:
+        # 🔴 FIXED: chain.invoke now executes smoothly with all metrics resolved
+        with get_openai_callback() as cb:
+            result = cast(OrchestratorAction, chain.invoke({
+                "history": history_messages, 
+                "input": backend_event_input
+            }))
+            
+            print(f"📊 Token usage tracking - Cost: {cb.total_cost}")
+            print(f"🤖 LLM Generated Message: {result.chat_response}")
+            
+            return result
+            
+    except Exception as e:
+        print(f"CRITICAL: Background follow up invocation failed: {str(e)}")
+        return None
 
 
 @shared_task
