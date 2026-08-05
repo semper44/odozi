@@ -500,6 +500,7 @@ def ensure_orchestrator_yaml_is_online(
 
     return {
         "status": "success",
+        "repo": resolved_repo[0],
         "message": "Successfully synchronized workflow",
         "branches": [default_branch, target_branch],
         "error_data": error_data
@@ -887,6 +888,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
             )
             workflow_canvas = group(intent_signatures) | callback_signature
             workflow_canvas.apply_async()
+
         # else:
         #     # If no intent task was created, still run the follow-up task.
         #     agentic_chat_follow_up.apply_async(
@@ -1415,26 +1417,6 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     print("as-what_nah", resolved_repo_name)
     if resolved_repo_name.get("status") != "success":
         print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
-        # Send detailed structured result back to frontend / LLM via websocket
-        # async_to_sync(channel_layer.group_send)(
-        #     channel_name,
-        #     {
-        #         "type": "chat_message",
-        #         "payload": {
-        #             "type": "orchestration_result",
-        #             "raw_output": {
-        #                 "ui_layout_route": "CHAT",
-        #                 "chat_response": "Orchestrator YAML validation failed",
-        #                 "orchestrator_sync_details": resolved_repo_name
-        #             },
-        #         }
-        #     }
-        # )
-
-        error_data["ensure_orchestrator_yaml_is_online_error"] = {
-                    "type": "error",
-                    "message": f"Repository not found."
-                }
         return {
             "status": "error",
             "message": "Orchestrator YAML validation failed",
@@ -1557,10 +1539,11 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     
     # Example output string: '["DJANO_SECRET_KEY"]'
     env_keys_payload = json.dumps(list(registered_keys)) if registered_keys else "[]"
-    matched_repo_name = resolved_repo_name.get('message')
+    matched_repo_name = resolved_repo_name.get('repo')
+    print(f"estavao-{matched_repo_name}")
     url = (
         f"https://api.github.com/repos/"
-        f"{repo_owner}/{matched_repo_name[0]}/actions/workflows/"
+        f"{repo_owner}/{matched_repo_name}/actions/workflows/"
         f"orchestrator.yaml/dispatches"
     )    
     headers = {
@@ -1578,7 +1561,7 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
         }
     }
     
-    print(matched_repo_name[0], "DEBUG: Dispatching to GitHub API with payload:", url)
+    print(matched_repo_name, "DEBUG: Dispatching to GitHub API with payload:", url)
     print("=================== PROOF OF PAYLOAD FORMATS ===================")
     print(f"1. RAW user_requested_rules (From LLM): {user_requested_rules}")
     print(f"2. STRATEGIES DICT (Extracted): {strategies_dict}")
@@ -1588,7 +1571,11 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     feedback_r = requests.post(url, json=api_payload, headers=headers)
     if feedback_r.status_code == 204:
         print("🎉 SUCCESS! GitHub successfully accepted the workflow dispatch request.")
-        return {"status": "success", "message": "Pipeline launched successfully in the cloud."}
+        return { 
+            "status": "success", 
+            "message": "Pipeline launched successfully in the cloud.",
+            "error-data": resolved_repo_name
+            }
         
     else:
         # ✅ DEFENSIVE FIX: Print raw text instead of .json() to stop the JSONDecodeError crash
@@ -1687,9 +1674,16 @@ def agentic_chat_follow_up(
         return {"task_result": str(value)}
 
 
+    flattened_results = []
+    for child_result in task_results or []:
+        if isinstance(child_result, (list, tuple)):
+            flattened_results.extend(child_result)
+        else:
+            flattened_results.append(child_result)
+
     normalized_child_errors = []
     seen_errors = set()
-    for child_result in task_results or []:
+    for child_result in flattened_results:
         normalized = _normalize_child_result(child_result)
         is_error = (
             normalized.get("status") == "error"
