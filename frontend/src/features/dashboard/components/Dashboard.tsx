@@ -351,9 +351,9 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                             <p className="font-bold text-black">Welcome, John</p>
                         </div>
 
-                        {/* <!-- input box parent --> */}
+                        {/* input box parent */}
                         <div className="flex justify-between items-center flex-grow">
-                            {/* <!-- input box --> */}
+                            {/*  input box */}
                             <div className="w-[60%] xl:w-[72%] relative">
                                 <input 
                                     value={searchQuery}

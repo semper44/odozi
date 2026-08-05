@@ -353,14 +353,17 @@ def ensure_orchestrator_yaml_is_online(
             "status": "failed",
             "message": f"You typed '{repo_name}', but I couldn't find any matching repository."
         }
-        return
+
+        return error_data
+        
 
     if len(resolved_repo) > 1:
         error_data["repo_resolution"] = {
             "status": "failed",
             "message": f"Multiple repositories matched your input. Which one did you mean?\n{matching_results}"
         }
-        return
+
+        return error_data
     
     default_branch = matching_results["default_branches"][0]
 
@@ -415,7 +418,6 @@ def ensure_orchestrator_yaml_is_online(
             branch
         )
 
-        print("Workflow check:", result)
 
         payload = {
             "message": "ci: synchronize Odozi workflow",
@@ -449,7 +451,6 @@ def ensure_orchestrator_yaml_is_online(
             branches_outcomes.append(outcome)
 
             print("PUT Status:", response.status_code)
-            print("PUT Response:", response.text)
 
             if response.status_code not in (200, 201):
                 errors.append({"branch": branch, "status": response.status_code, "body": response.text})
@@ -461,25 +462,47 @@ def ensure_orchestrator_yaml_is_online(
             errors.append(err)
             branches_outcomes.append({"branch": branch, "error": str(e)})
 
+    print("mum-dad", error_data)
+
     if errors:
         error_data["repo_resolution"] = {
-                    "status": "failed",
-                    "message": errors,
-                    "branches": branches_outcomes,
-                }
+            "status": "failed",
+            # "branches": branches_outcomes,
+        }
+        for error_message in errors:
+            print(f"5k---{error_message}")
+            error_string = error_message.get('body')
+
+            # Parse the string into a Python dictionary
+            parsed_error_string = json.loads(error_string)
+
+            # Extract just the message
+            print("wwwwwwwwwwwwwwww", parsed_error_string)
+            crash_error = parsed_error_string.get('message', None)
+            crash_branch = error_message.get('branch')
+            if crash_error:
+                error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch- {crash_branch} for repo-{resolved_repo[0]} : '{error_message['branch']}': {crash_error}"
+                error_data["repo_resolution"]["branch"] = crash_branch
+                break
+
+        error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch"
+
+
+        print("mum-dad2", error_data)
         return {
             "status": "partial_failure" if branches_outcomes else "failed",
-            "message": resolved_repo,
-            "branches": branches_outcomes,
-            "errors": errors
+            "message": error_data["repo_resolution"]["message"],
+            "branches": error_data["repo_resolution"]["branch"],
+            "error_data": error_data
         }
 
     print("\nWorkflow synchronized successfully on all required branches.")
 
     return {
         "status": "success",
-        "message": resolved_repo,
-        "branches": branches_outcomes
+        "message": "Successfully synchronized workflow",
+        "branches": [default_branch, target_branch],
+        "error_data": error_data
     }
 
 
@@ -594,15 +617,19 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
         past_messages.reverse()
 
     history_messages = []
+    history_payload = []
+    task_results = []
     for msg in past_messages:
         if msg.role == "user":
             history_messages.append(
                 HumanMessage(content=msg.content)
             )
+            history_payload.append({"role": "user", "content": msg.content})
         elif msg.role == "ai":
             history_messages.append(
                 AIMessage(content=msg.content)
             )
+            history_payload.append({"role": "ai", "content": msg.content})
 
 
     # Assemble your structural Prompt Template using ONE clean system message entry
@@ -659,7 +686,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                 # 2. Save the current user text prompt as the first record of the new era
                 ChatMessage.objects.create(session=session, role="user", content=prompt_text)
                 
-                # 3. 🌱 THE SEED: Save the LLM's own high-utility condensed text summary
+                # Saving the LLM's own high-utility condensed text summary
                 # This becomes the single baseline row memory anchor for the next message turn!
                 summary_marker = f"""
                     [ACTIVE SYSTEM CONTEXT BASELINE]:
@@ -769,6 +796,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                 )
             )
 
+
         if "create_workspace" in result.intents:
             # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
             from celery import signature
@@ -842,9 +870,28 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
 
 
 
-        # Fire both intent tasks concurrently in microseconds
+        # Fire all intent tasks concurrently and run follow-up only after they're done.
         if intent_signatures:
-            group(intent_signatures).apply_async()
+            print(f"intent-error-{error_data}")
+            callback_signature = signature(
+                "agents.tasks.agentic_chat_follow_up",
+                kwargs={
+                    "error_data": error_data,
+                    "provider": provider,
+                    "model_name": model_name,
+                    "api_key": api_key,
+                    "channel_name": channel_name,
+                    "session_id": session_id,
+                    "history_payload": history_payload
+                },
+            )
+            workflow_canvas = group(intent_signatures) | callback_signature
+            workflow_canvas.apply_async()
+        # else:
+        #     # If no intent task was created, still run the follow-up task.
+        #     agentic_chat_follow_up.apply_async(
+        #         args=([], error_data, provider, model_name, api_key, channel_name, history_payload)
+        #     )
 
 
         # -------------------------------------------------------------------------
@@ -852,7 +899,8 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
         # -------------------------------------------------------------------------
         print("coat", "swaaaaa")
 
-        agentic_chat_follow_up(error_data, provider, model_name, api_key, history_messages)
+        # The follow-up task will be dispatched as a chord callback and therefore
+        # will execute after all intent tasks complete.
         
         # 🚀 FIXED: Swapped from .send to .group_send to connect to group_user_room static strings safely!
         async_to_sync(channel_layer.group_send)(
@@ -896,7 +944,6 @@ def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, pa
     Runs in parallel. Reads the repo list straight out of RAM memory parameters,
     requiring ZERO outbound network connections to Redis!
     """
-    # Convert the passed parameter directly into a lookup set array
     # print(,"parent_repo_list", parent_repo_list)
     cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
@@ -1365,23 +1412,29 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     # STEP 1: SCRIPT STITCHING ENGINE (Your existing logic)
     # =========================================================================
     resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, target_branch, git_token, repo_data)
+    print("as-what_nah", resolved_repo_name)
     if resolved_repo_name.get("status") != "success":
         print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
         # Send detailed structured result back to frontend / LLM via websocket
-        async_to_sync(channel_layer.group_send)(
-            channel_name,
-            {
-                "type": "chat_message",
-                "payload": {
-                    "type": "orchestration_result",
-                    "raw_output": {
-                        "ui_layout_route": "CHAT",
-                        "chat_response": "Orchestrator YAML validation failed",
-                        "orchestrator_sync_details": resolved_repo_name
-                    },
+        # async_to_sync(channel_layer.group_send)(
+        #     channel_name,
+        #     {
+        #         "type": "chat_message",
+        #         "payload": {
+        #             "type": "orchestration_result",
+        #             "raw_output": {
+        #                 "ui_layout_route": "CHAT",
+        #                 "chat_response": "Orchestrator YAML validation failed",
+        #                 "orchestrator_sync_details": resolved_repo_name
+        #             },
+        #         }
+        #     }
+        # )
+
+        error_data["ensure_orchestrator_yaml_is_online_error"] = {
+                    "type": "error",
+                    "message": f"Repository not found."
                 }
-            }
-        )
         return {
             "status": "error",
             "message": "Orchestrator YAML validation failed",
@@ -1552,29 +1605,38 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     bind=True,
     autoretry_for= UNIVERSAL_NETWORK_ERRORS,
     retry_kwargs={'max_retries': 3},
-    retry_backoff=True,        
+    retry_backoff=True,
     retry_backoff_max=30
 )
-
-
 def agentic_chat_follow_up(
-    self, 
-    error_data: Dict[str, Any], 
-    provider: str, 
-    model_name: str, 
-    api_key: str,
-    history_messages: List[Any] = None 
+    self,
+    task_results: List[Any] = None,     # Has a default (= None)
+    error_data: Dict[str, Any] = None, 
+    provider: str = "",                 
+    model_name: str = "",               
+    api_key: str = "",                  
+    channel_name: str = "",             
+    session_id: int = None,                 
+    history_payload: List[Dict[str, str]] = None
 ):
     # LIGHTWEIGHT SYSTEM INSTRUCTION
     short_followup_instruction = """
-    You are the Error Resolution Core for Project Odozi. Your only task is to review 
-    a backend execution error dictionary and translate it into a friendly, helpful 
-    response for the user. 
-    
-    Review the chat history to see what they were trying to do, explain what went wrong 
-    using the error metrics, and clearly ask them for the missing details or clarification.
+        You are the Error Resolution Core for Project Odozi, an autonomous agentic CI/CD gateway. 
+        Your sole task is to translate backend validation error dictionaries into helpful user feedback.
+
+        ### 🛡️ CRITICAL SECURITY & OUTPUT BOUNDARIES:
+        1. NEVER expose raw technical dictionary structures, IDs, or database stack trace strings to the user. Translate anomalies into clear, human-friendly guidance.
+        2. ALWAYS keep 'active_rules', 'workspaces_to_delete', 'env_keys_to_create', and 'env_keys_to_delete' completely EMPTY [].
+        3. ALWAYS force 'ui_layout_route' to "CHAT" and overwrite your 'intents' list to contain strictly one token: ["technical_query"].
+
+        ### 📂 ERROR CONTEXT HANDLERS:
+        - If 'repo_resolution' is present: State that you couldn't match the repository name cleanly. If multiple options are provided in the telemetry metrics, output them as a numbered list and ask the user to clarify which exact one they meant.
+        - If 'workspace_resolution' is present: Politely notify the user that no active environment variables could be found associated with that specific workspace container path.
+
+        Review the chat history to understand their intent, summarize what failed gracefully inside 'chat_response', and ask the user for clarification.
     """
 
+    print("task_results",task_results, "doo doooo dooo", error_data)
     
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", short_followup_instruction),
@@ -1592,35 +1654,226 @@ def agentic_chat_follow_up(
     
     chain = prompt_template | structured_llm
 
-    # Fallback to an empty list if no history messages were passed in
-    if history_messages is None:
-        history_messages = []
+    history_messages: List[Any] = []
+    if history_payload is not None:
+        for item in history_payload:
+            if item.get("role") == "user":
+                history_messages.append(HumanMessage(content=item.get("content", "")))
+            else:
+                history_messages.append(AIMessage(content=item.get("content", "")))
+
+    # Normalize the child task outputs into a consistent error list.
+    # Child tasks may return dicts, strings, or simple status messages.
+    
+    if isinstance(error_data, str) or error_data is None:
+        try:
+            error_data = json.loads(error_data) if error_data else {}
+        except Exception:
+            error_data = {"raw_backend_notice": str(error_data)}
+
+    def _normalize_child_result(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            return {"message": value}
+        if isinstance(value, (list, tuple)):
+            return {"task_result": list(value)}
+        return {"task_result": str(value)}
+
+
+    normalized_child_errors = []
+    seen_errors = set()
+    for child_result in task_results or []:
+        normalized = _normalize_child_result(child_result)
+        is_error = (
+            normalized.get("status") == "error"
+            or normalized.get("error") is not None
+            or normalized.get("exception") is not None
+            or normalized.get("message") is not None
+        )
+        if is_error:
+            error_key = json.dumps(normalized, sort_keys=True, default=str)
+            if error_key not in seen_errors:
+                seen_errors.add(error_key)
+                normalized_child_errors.append(normalized)
+
+    error_data = error_data or {}
+    error_data["child_errors"] = normalized_child_errors
+
+    print("error_data['child_errors']", error_data, "finish")
 
     # Build the authoritative automated backend notification payload string
     backend_event_input = (
         f"🚨 BACKEND INTERNAL ERROR REPORT\n"
         f"The system encountered an operational failure while processing the pipeline:\n"
-        f"{json.dumps(error_data, indent=2)}\n\n"
+        f"{json.dumps(error_data, indent=2)}\n"
+        f"Task results:\n{json.dumps(task_results, indent=2, default=str)}\n\n"
         f"INSTRUCTION: Look at the error data, update OrchestratorAction layout fields, "
         f"set ui_layout_route to 'CHAT', and write a clear user explanation inside chat_response."
     )
 
     try:
-        # 🔴 FIXED: chain.invoke now executes smoothly with all metrics resolved
         with get_openai_callback() as cb:
             result = cast(OrchestratorAction, chain.invoke({
                 "history": history_messages, 
                 "input": backend_event_input
             }))
             
-            print(f"📊 Token usage tracking - Cost: {cb.total_cost}")
-            print(f"🤖 LLM Generated Message: {result.chat_response}")
-            
-            return result
+            print(f"📊 result-follow-up: {result}")
+
+            with transaction.atomic():
+                session = ChatSession.objects.get(pk=session_id)
+                # Append system telemetry verification marker flags to history sequence
+                ChatMessage.objects.create(session=session, role="user", content=f"[System Handled Errors: {json.dumps(error_data, default=str)}]")
+                # Save the clean friendly message the LLM generated
+                ChatMessage.objects.create(session=session, role="ai", content=result.chat_response)
+            async_to_sync(get_channel_layer().group_send)(
+                channel_name,
+                {
+                    "type": "chat_message",
+                    "payload": {
+                        "type": "orchestration_result",
+                        "raw_output": {
+                            "ui_layout_route": result.ui_layout_route,
+                            "chat_response": result.chat_response,
+                            "task_results": task_results,
+                            "error_data": error_data,
+                        },
+                    }
+                }
+            )
+            return result.model_dump()
             
     except Exception as e:
         print(f"CRITICAL: Background follow up invocation failed: {str(e)}")
         return None
+
+
+
+
+def handle_backend_error_followup( self,
+    task_results: List[Any],
+    error_data: Dict[str, Any],
+    provider: str,
+    model_name: str,
+    api_key: str,
+    channel_name: str,
+    history_payload: List[Dict[str, str]] = None
+    ):
+    """
+    Separate, lightweight function dedicated solely to error translation.
+    """
+    short_followup_instruction = """
+        You are the Error Resolution Core for Project Odozi, an autonomous agentic CI/CD gateway. 
+        Your sole task is to translate backend validation error dictionaries into helpful user feedback.
+
+        ### 🛡️ CRITICAL SECURITY & OUTPUT BOUNDARIES:
+        1. NEVER expose raw technical dictionary structures, IDs, or database stack trace strings to the user. Translate anomalies into clear, human-friendly guidance.
+        2. ALWAYS keep 'active_rules', 'workspaces_to_delete', 'env_keys_to_create', and 'env_keys_to_delete' completely EMPTY [].
+        3. ALWAYS force 'ui_layout_route' to "CHAT" and overwrite your 'intents' list to contain strictly one token: ["technical_query"].
+
+        ### 📂 ERROR CONTEXT HANDLERS:
+        - If 'repo_resolution' is present: State that you couldn't match the repository name cleanly. If multiple options are provided in the telemetry metrics, output them as a numbered list and ask the user to clarify which exact one they meant.
+        - If 'workspace_resolution' is present: Politely notify the user that no active environment variables could be found associated with that specific workspace container path.
+
+        Review the chat history to understand their intent, summarize what failed gracefully inside 'chat_response', and ask the user for clarification.
+    """
+     # Normalize the child task outputs into a consistent error list.
+        # Child tasks may return dicts, strings, or simple status messages.
+    
+    def _normalize_child_result(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            return {"message": value}
+        if isinstance(value, (list, tuple)):
+            return {"task_result": list(value)}
+        return {"task_result": str(value)}
+
+    normalized_child_errors = []
+    seen_errors = set()
+
+    for child_result in task_results or []:
+        normalized = _normalize_child_result(child_result)
+        is_error = (
+            normalized.get("status") == "error"
+            or normalized.get("error") is not None
+            or normalized.get("exception") is not None
+            or normalized.get("message") is not None
+        )
+        if is_error:
+            error_key = json.dumps(normalized, sort_keys=True, default=str)
+            if error_key not in seen_errors:
+                seen_errors.add(error_key)
+                normalized_child_errors.append(normalized)
+
+    error_data = error_data or {}
+    error_data["child_errors"] = normalized_child_errors
+    
+    # 1. Fetch past chat logs so the model knows what the user originally requested
+    session = ChatSession.objects.get(pk=session_id)
+    past_messages = list(session.messages.all().order_by('created_at')[:10])
+    
+    # Assemble messages wrapper list array...
+    history_messages = [] 
+    # (Populate history_messages with HumanMessage/AIMessage objects from past_messages)
+
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", short_followup_instruction),
+        MessagesPlaceholder(variable_name="history"),
+        ("human", "SYSTEM ERROR REPORT: {input}")                                        
+    ])
+
+    # Dynamic model vendor factory setup
+    if provider == "openai":
+        llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
+    else:
+        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=settings.GEMINI_API_KEY)
+
+    structured_llm = llm.with_structured_output(OrchestratorAction)
+        
+    chain = prompt_template | structured_llm
+
+    # Run the error analysis
+    result = chain.invoke({
+        "history": history_messages,
+        "input": json.dumps(error_data) # Send the error dictionary here
+    })
+
+
+    with transaction.atomic():
+        # Save a system note tracking user context alignment
+        ChatMessage.objects.create(session=session, role="user", content=f"[System Error Handled: {json.dumps(error_data)}]")
+        # Save the friendly question the LLM built
+        ChatMessage.objects.create(session=session, role="ai", content=result.chat_response)
+
+    # 📡 Broadcast the message down to the screen over WebSockets
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        channel_name,
+        {
+            "type": "chat_message",
+            "payload": {
+                "type": "orchestration_result",
+                "raw_output": {"ui_layout_route": "CHAT", "chat_response": result.chat_response}
+            }
+        }
+    )
+
+
+
 
 
 @shared_task
