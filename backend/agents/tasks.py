@@ -15,7 +15,7 @@ import textwrap
 from toon import encode
 from typing import Any, Dict, List, cast
 
-from celery import shared_task, group, chord
+from celery import shared_task, group, chord, signature
 
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
@@ -245,8 +245,6 @@ def find_matching_repos_from_redis(all_repos, user_provided_input):
     default_branch = set()
 
     for repo_tuple in all_repos:
-        print("")
-        print("i want you to check if in repo interview", repo_tuple)
         true_github_name = repo_tuple.get('name', '')
         default__redis_branch = repo_tuple.get('default_branch')
         
@@ -351,6 +349,7 @@ def ensure_orchestrator_yaml_is_online(
     if len(resolved_repo) == 0:
         error_data["repo_resolution_not_found"] = {
             "status": "failed",
+            "repo":resolved_repo[0],
             "message": f"You typed '{repo_name}', but I couldn't find any matching repository."
         }
 
@@ -360,6 +359,7 @@ def ensure_orchestrator_yaml_is_online(
     if len(resolved_repo) > 1:
         error_data["repo_resolution"] = {
             "status": "failed",
+            "repo":resolved_repo[0],
             "message": f"Multiple repositories matched your input. Which one did you mean?\n{matching_results}"
         }
 
@@ -466,8 +466,7 @@ def ensure_orchestrator_yaml_is_online(
 
     if errors:
         error_data["repo_resolution"] = {
-            "status": "failed",
-            # "branches": branches_outcomes,
+            "status": "partial_failure" if branches_outcomes else "failed",
         }
         for error_message in errors:
             print(f"5k---{error_message}")
@@ -482,19 +481,13 @@ def ensure_orchestrator_yaml_is_online(
             crash_branch = error_message.get('branch')
             if crash_error:
                 error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch- {crash_branch} for repo-{resolved_repo[0]} : '{error_message['branch']}': {crash_error}"
+                error_data["repo_resolution"]["repo"] = resolved_repo[0]
                 error_data["repo_resolution"]["branch"] = crash_branch
                 break
 
-        error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch"
-
 
         print("mum-dad2", error_data)
-        return {
-            "status": "partial_failure" if branches_outcomes else "failed",
-            "message": error_data["repo_resolution"]["message"],
-            "branches": error_data["repo_resolution"]["branch"],
-            "error_data": error_data
-        }
+        return error_data
 
     print("\nWorkflow synchronized successfully on all required branches.")
 
@@ -503,7 +496,6 @@ def ensure_orchestrator_yaml_is_online(
         "repo": resolved_repo[0],
         "message": "Successfully synchronized workflow",
         "branches": [default_branch, target_branch],
-        "error_data": error_data
     }
 
 
@@ -619,7 +611,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
 
     history_messages = []
     history_payload = []
-    task_results = []
     for msg in past_messages:
         if msg.role == "user":
             history_messages.append(
@@ -711,7 +702,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
         print(result.intents, "and", result.active_rules)
         details_cache_key = f"user:repos:{user_id}"
         cached_details = cache.get(details_cache_key)
-        print(token,"cached_repos", cached_details, "bro")
+        # print(token,"cached_repos", cached_details, "bro")
         # Check if data exists and is the correct format (list or dict of repos)
         if cached_details is not None:
             # Process your cached_repos directly here
@@ -782,25 +773,89 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
 
 
         if "run_static_analysis" in result.intents:
-            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER!
-            from celery import signature
-            
-            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
-            # You pass the task path name string and your parameters directly inside signature()
-            serializable_rules = [rule.model_dump() for rule in result.active_rules]
-            installed_github_code = UserProfileModel.objects.get(user=user).installation_id
 
-            intent_signatures.append(
-                signature(
-                    "agents.tasks.async_handle_static_analysis_task",
-                    args=(serializable_rules,channel_name, repo_owner, cached_repositories, installed_github_code) # 📥 Pass your variables as an ordered tuple
-                )
+            installed_github_code = (
+                UserProfileModel.objects
+                .get(user=user)
+                .installation_id
             )
+
+            cached_pairs = [
+                (
+                    repo.get("name", "").lower(),
+                    repo
+                )
+                for repo in cached_repositories
+                if isinstance(repo, dict)
+            ]
+
+            for rule in result.active_rules:
+
+                repo_name = (
+                    rule.repo_name
+                    .lower()
+                    .replace(" ", "-")
+                    .strip()
+                )
+
+                matched_repo = next(
+                    (
+                        repo
+                        for low_name, repo in cached_pairs
+                        if repo_name in low_name
+                    ),
+                    None,
+                )
+
+                if not matched_repo:
+                    continue
+
+                intent_signatures.append(
+
+                    run_agentic_pipeline.s(
+
+                        channel_name=channel_name,
+
+                        repo_owner=repo_owner,
+
+                        repo_name=repo_name,
+
+                        default_branch=matched_repo.get(
+                            "default_branch",
+                            "main"
+                        ),
+
+                        repo_data=cached_repositories,
+
+                        commit_sha=matched_repo.get(
+                            "default_branch",
+                            "main"
+                        ),
+
+                        target_branch=(
+                            rule.target_branch
+                            or matched_repo.get(
+                                "default_branch",
+                                "main"
+                            )
+                        ),
+
+                        ref_string=(
+                            f"refs/heads/"
+                            f"{rule.target_branch or matched_repo.get('default_branch','main')}"
+                        ),
+
+                        installation_id=installed_github_code,
+
+                        user_requested_rules=rule.strategies,
+
+                    )
+                )
 
 
         if "create_workspace" in result.intents:
             # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
-            from celery import signature
+            
             
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
@@ -816,10 +871,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
             )
 
         
-        if "delete_workspace" in result.intents:
-            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
-            from celery import signature
-            
+        if "delete_workspace" in result.intents:            
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
             result_dict = result.model_dump()
@@ -836,8 +888,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
 
 
         if "create_repo_env" in result.intents:
-            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
-            from celery import signature
             
             # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
             # You pass the task path name string and your parameters directly inside signature()
@@ -854,8 +904,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
 
        
         if "delete_repo_env" in result.intents:
-            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
-            from celery import signature
             
             # passing the task path name string and  parameters directly inside signature()
             result_dict = result.model_dump()
@@ -877,7 +925,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
             callback_signature = signature(
                 "agents.tasks.agentic_chat_follow_up",
                 kwargs={
-                    "error_data": error_data,
                     "provider": provider,
                     "model_name": model_name,
                     "api_key": api_key,
@@ -889,16 +936,7 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
             workflow_canvas = group(intent_signatures) | callback_signature
             workflow_canvas.apply_async()
 
-        # else:
-        #     # If no intent task was created, still run the follow-up task.
-        #     agentic_chat_follow_up.apply_async(
-        #         args=([], error_data, provider, model_name, api_key, channel_name, history_payload)
-        #     )
-
-
-        # -------------------------------------------------------------------------
-        # PHASE 4: WEBSOCKET TRANSMISSION (Push data back up to the frontend UI)
-        # -------------------------------------------------------------------------
+        
         print("coat", "swaaaaa")
 
         # The follow-up task will be dispatched as a chord callback and therefore
@@ -937,53 +975,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
             }
         )
 
-
-
-
-@shared_task
-def async_handle_static_analysis_task(active_rules, channel_name, repo_owner, parent_repo_list, installed_github_code):
-    """
-    Runs in parallel. Reads the repo list straight out of RAM memory parameters,
-    requiring ZERO outbound network connections to Redis!
-    """
-    # print(,"parent_repo_list", parent_repo_list)
-    cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
-
-    print("tanker", cached_pairs, "arinze",parent_repo_list)
-
-    pipeline_tasks = []
-
-
-    # active_rules=[RepoExecutionRule(repo_name='Taskmaster', target_branch='master', strategies=['check_transaction_atomic', 'check_docstrings']), RepoExecutionRule(repo_name='interview', target_branch='test', strategies=['check_transaction_atomic', 'check_docstrings', 'bandit', 'pii_leakage', 'pytest'])]
-    
-    for rule in active_rules:
-        print(f"rule.repo_name - {rule.get('repo_name')}")
-        sanitized_name = rule.get('repo_name').lower().replace(" ", "-").strip()
-        matched_repo_dict = next((repo for low_name, repo in cached_pairs if sanitized_name in low_name), None)
-        if matched_repo_dict:
-            try:
-                # Appending the task signature context blocks to the array list
-                pipeline_tasks.append(
-                    run_agentic_pipeline.s(  # type: ignore
-                        channel_name= channel_name,
-                        repo_owner=repo_owner,
-                        repo_name=sanitized_name,
-                        default_branch="main",
-                        repo_data = parent_repo_list,
-                        commit_sha="main", #work
-                        target_branch=rule.get("target_branch") or "main",
-                        ref_string=f"refs/heads/{rule.get("target_branch")}",
-                        installation_id=installed_github_code, 
-                        user_requested_rules=rule.get("strategies")
-                    )
-                )
-            except GitHubRepository.DoesNotExist:
-                pass
-
-
-    # 🚀 BULK TRIGGER: Fire all task pipelines concurrently in microseconds!
-    if pipeline_tasks:
-        group(pipeline_tasks).apply_async()
 
 
 
@@ -1417,11 +1408,7 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     print("as-what_nah", resolved_repo_name)
     if resolved_repo_name.get("status") != "success":
         print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
-        return {
-            "status": "error",
-            "message": "Orchestrator YAML validation failed",
-            "orchestrator_sync_details": resolved_repo_name
-        }
+        return resolved_repo_name
 
     print("")
     print("amapiano",default_branch,{"default_branch": user_requested_rules})
@@ -1571,20 +1558,23 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     feedback_r = requests.post(url, json=api_payload, headers=headers)
     if feedback_r.status_code == 204:
         print("🎉 SUCCESS! GitHub successfully accepted the workflow dispatch request.")
-        return { 
-            "status": "success", 
-            "message": "Pipeline launched successfully in the cloud.",
-            "error-data": resolved_repo_name
-            }
+        resolved_repo_name.update({
+            "status": "success",
+            "tasks":"Deploy to Github",
+            "repo": matched_repo_name if matched_repo_name else "",
+            "message": "Repo and branch resolved. Pipeline launched on github successfully."
+        })
+        return resolved_repo_name
         
     else:
-        # ✅ DEFENSIVE FIX: Print raw text instead of .json() to stop the JSONDecodeError crash
         print(f"❌ GITHUB ERROR [{feedback_r.status_code}]: {feedback_r.text}")
-        return {
-            "status": "validation_error", 
-            "http_code": feedback_r.status_code, 
-            "github_raw_message": feedback_r.text
-        }
+        resolved_repo_name.update({
+            "status": "validation_error",
+            "tasks":"Deploy to Github",
+            "repo":matched_repo_name if matched_repo_name else "",
+            "message": feedback_r.text
+        })
+        return resolved_repo_name
 
 
 
@@ -1597,158 +1587,169 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
 )
 def agentic_chat_follow_up(
     self,
-    task_results: List[Any] = None,     # Has a default (= None)
-    error_data: Dict[str, Any] = None, 
-    provider: str = "",                 
-    model_name: str = "",               
-    api_key: str = "",                  
-    channel_name: str = "",             
-    session_id: int = None,                 
-    history_payload: List[Dict[str, str]] = None
+    task_results: List[Any] = None,
+    provider: str = "",
+    model_name: str = "",
+    api_key: str = "",
+    channel_name: str = "",
+    session_id: int = None,
+    history_payload: List[Dict[str, str]] = None,
 ):
+    # -------------------------------------------------------------------------
     # LIGHTWEIGHT SYSTEM INSTRUCTION
+    # -------------------------------------------------------------------------
     short_followup_instruction = """
-        You are the Error Resolution Core for Project Odozi, an autonomous agentic CI/CD gateway. 
-        Your sole task is to translate backend validation error dictionaries into helpful user feedback.
+    You are the Error Resolution Core for Project Odozi, an autonomous agentic CI/CD gateway.
 
-        ### 🛡️ CRITICAL SECURITY & OUTPUT BOUNDARIES:
-        1. NEVER expose raw technical dictionary structures, IDs, or database stack trace strings to the user. Translate anomalies into clear, human-friendly guidance.
-        2. ALWAYS keep 'active_rules', 'workspaces_to_delete', 'env_keys_to_create', and 'env_keys_to_delete' completely EMPTY [].
-        3. ALWAYS force 'ui_layout_route' to "CHAT" and overwrite your 'intents' list to contain strictly one token: ["technical_query"].
+    Your task is to translate backend task results into a clear, concise,
+    user-friendly response.
 
-        ### 📂 ERROR CONTEXT HANDLERS:
-        - If 'repo_resolution' is present: State that you couldn't match the repository name cleanly. If multiple options are provided in the telemetry metrics, output them as a numbered list and ask the user to clarify which exact one they meant.
-        - If 'workspace_resolution' is present: Politely notify the user that no active environment variables could be found associated with that specific workspace container path.
+    ### RULES
 
-        Review the chat history to understand their intent, summarize what failed gracefully inside 'chat_response', and ask the user for clarification.
+    1. NEVER expose stack traces, IDs or internal backend implementation.
+    2. Summarize successful operations.
+    3. Explain failures in plain English.
+    4. If clarification is required, politely ask for it.
+    5. ALWAYS keep:
+       - active_rules=[]
+       - workspaces_to_create=[]
+       - workspaces_to_delete=[]
+       - env_keys_to_create=[]
+       - env_keys_to_delete=[]
+    6. ALWAYS set:
+       ui_layout_route="CHAT"
+       intents=["technical_query"]
     """
 
-    print("task_results",task_results, "doo doooo dooo", error_data)
-    
+    print("task_results:", task_results)
+
+    # -------------------------------------------------------------------------
+    # Prompt Template
+    # -------------------------------------------------------------------------
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", short_followup_instruction),
         MessagesPlaceholder(variable_name="history"),
-        ("human", "{input}")                                        
+        ("human", "{input}")
     ])
 
-    # Dynamic model vendor factory setup
+    # -------------------------------------------------------------------------
+    # LLM Factory
+    # -------------------------------------------------------------------------
     if provider == "openai":
-        llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
+        llm = ChatOpenAI(
+            model=model_name,
+            temperature=0,
+            api_key=api_key
+        )
     else:
-        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=settings.GEMINI_API_KEY)
+        llm = ChatGoogleGenerativeAI(
+            model=model_name,
+            temperature=0,
+            google_api_key=settings.GEMINI_API_KEY
+        )
 
     structured_llm = llm.with_structured_output(OrchestratorAction)
-    
     chain = prompt_template | structured_llm
 
+    # -------------------------------------------------------------------------
+    # Restore Chat History
+    # -------------------------------------------------------------------------
     history_messages: List[Any] = []
-    if history_payload is not None:
+
+    if history_payload:
         for item in history_payload:
             if item.get("role") == "user":
-                history_messages.append(HumanMessage(content=item.get("content", "")))
+                history_messages.append(
+                    HumanMessage(content=item.get("content", ""))
+                )
             else:
-                history_messages.append(AIMessage(content=item.get("content", "")))
+                history_messages.append(
+                    AIMessage(content=item.get("content", ""))
+                )
 
-    # Normalize the child task outputs into a consistent error list.
-    # Child tasks may return dicts, strings, or simple status messages.
-    
-    if isinstance(error_data, str) or error_data is None:
-        try:
-            error_data = json.loads(error_data) if error_data else {}
-        except Exception:
-            error_data = {"raw_backend_notice": str(error_data)}
+    # -------------------------------------------------------------------------
+    # Build backend summary for the LLM
+    # -------------------------------------------------------------------------
+    backend_event_input = f"""
+        The following backend tasks have completely finished executing.
 
-    def _normalize_child_result(value: Any) -> Dict[str, Any]:
-        if isinstance(value, dict):
-            return value
-        if isinstance(value, str):
-            try:
-                parsed = json.loads(value)
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception:
-                pass
-            return {"message": value}
-        if isinstance(value, (list, tuple)):
-            return {"task_result": list(value)}
-        return {"task_result": str(value)}
+        Task Results:
 
+        {json.dumps(task_results, indent=2, default=str)}
 
-    flattened_results = []
-    for child_result in task_results or []:
-        if isinstance(child_result, (list, tuple)):
-            flattened_results.extend(child_result)
-        else:
-            flattened_results.append(child_result)
+        Instructions:
 
-    normalized_child_errors = []
-    seen_errors = set()
-    for child_result in flattened_results:
-        normalized = _normalize_child_result(child_result)
-        is_error = (
-            normalized.get("status") == "error"
-            or normalized.get("error") is not None
-            or normalized.get("exception") is not None
-            or normalized.get("message") is not None
-        )
-        if is_error:
-            error_key = json.dumps(normalized, sort_keys=True, default=str)
-            if error_key not in seen_errors:
-                seen_errors.add(error_key)
-                normalized_child_errors.append(normalized)
+        • Summarize what completed successfully.
+        • Explain any failures clearly.
+        • Do not expose backend implementation details.
+        • If the user needs to clarify something, ask politely.
+    """
 
-    error_data = error_data or {}
-    error_data["child_errors"] = normalized_child_errors
-
-    print("error_data['child_errors']", error_data, "finish")
-
-    # Build the authoritative automated backend notification payload string
-    backend_event_input = (
-        f"🚨 BACKEND INTERNAL ERROR REPORT\n"
-        f"The system encountered an operational failure while processing the pipeline:\n"
-        f"{json.dumps(error_data, indent=2)}\n"
-        f"Task results:\n{json.dumps(task_results, indent=2, default=str)}\n\n"
-        f"INSTRUCTION: Look at the error data, update OrchestratorAction layout fields, "
-        f"set ui_layout_route to 'CHAT', and write a clear user explanation inside chat_response."
-    )
+    print("backend_event_input", backend_event_input)
 
     try:
+
         with get_openai_callback() as cb:
-            result = cast(OrchestratorAction, chain.invoke({
-                "history": history_messages, 
-                "input": backend_event_input
-            }))
-            
-            print(f"📊 result-follow-up: {result}")
 
-            with transaction.atomic():
-                session = ChatSession.objects.get(pk=session_id)
-                # Append system telemetry verification marker flags to history sequence
-                ChatMessage.objects.create(session=session, role="user", content=f"[System Handled Errors: {json.dumps(error_data, default=str)}]")
-                # Save the clean friendly message the LLM generated
-                ChatMessage.objects.create(session=session, role="ai", content=result.chat_response)
-            async_to_sync(get_channel_layer().group_send)(
-                channel_name,
-                {
-                    "type": "chat_message",
-                    "payload": {
-                        "type": "orchestration_result",
-                        "raw_output": {
-                            "ui_layout_route": result.ui_layout_route,
-                            "chat_response": result.chat_response,
-                            "task_results": task_results,
-                            "error_data": error_data,
-                        },
-                    }
-                }
+            result = cast(
+                OrchestratorAction,
+                chain.invoke({
+                    "history": history_messages,
+                    "input": backend_event_input
+                })
             )
-            return result.model_dump()
-            
+
+            print("📊 Follow-up Result")
+            print(result)
+
+        # -----------------------------------------------------------------
+        # Save conversation
+        # -----------------------------------------------------------------
+        with transaction.atomic():
+
+            session = ChatSession.objects.get(pk=session_id)
+
+            ChatMessage.objects.create(
+                session=session,
+                role="user",
+                content=f"[Backend Task Results]: {json.dumps(task_results, default=str)}"
+            )
+
+            ChatMessage.objects.create(
+                session=session,
+                role="ai",
+                content=result.chat_response
+            )
+
+        # -----------------------------------------------------------------
+        # Push response to websocket
+        # -----------------------------------------------------------------
+        async_to_sync(get_channel_layer().group_send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route": result.ui_layout_route,
+                        "chat_response": result.chat_response,
+                        "task_results": task_results,
+                    },
+                },
+            },
+        )
+
+        return result.model_dump()
+
     except Exception as e:
-        print(f"CRITICAL: Background follow up invocation failed: {str(e)}")
+
+        print("=" * 80)
+        print("FOLLOW-UP FAILED")
+        print(e)
+        traceback.print_exc()
+        print("=" * 80)
+
         return None
-
-
 
 
 def handle_backend_error_followup( self,
