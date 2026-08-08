@@ -50,10 +50,11 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
             if not serializer.is_valid():
                 error_data["repo_validation"] = { 
                     "status": "failed",
+                    "workspace": workspace_name,
                     "message": "Repository data validation failed.",
                     "errors": serializer.errors
                 }
-                raise ValidationError(serializer.errors)
+                return error_data
 
             validated_data_list = serializer.validated_data
             incoming_ids = [item['repo_id'] for item in validated_data_list]
@@ -93,7 +94,7 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
                 workspace.repositories.add(*repos_attached)
 
         # 🌟 UI RETURN PAYLOAD: Returns a clear split detailing exactly what happened
-        return {
+        error_data.update({
             "status": "success",
             "workspace": {
                 "id": workspace.id,
@@ -107,8 +108,8 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
             },
             "freshly_created_repositories": freshly_created_in_db,
             "already_existing_repositories": already_existed_in_db,
-            "error_data": error_data
-        }
+        })
+        return error_data
 
 
 
@@ -213,7 +214,7 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
                     "status": "failed",
                     "message": f"Workspace '{workspace_name}' does not exist for this user."
                 }
-                raise ValidationError(f"Workspace '{workspace_name}' does not exist for this user.")
+                return error_data
         else:
             repo_workspace, _ = Workspace.objects.get_or_create(
                 name="default", 
@@ -344,7 +345,11 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
     2. Specific Repositories (if selected_repo_ids has entries).
     """
     if not key_names and not workspace_name and selected_repo_ids is None:
-        raise ValidationError("Must provide a list of key names to delete.")
+        error_data["delete_repo_env_keys_error"] = {
+            "status": "failed",
+            "message": "Must provide a list of key names to delete."
+        }
+        return error_data
 
     selected_repo_ids = selected_repo_ids or []
     cleaned_keys = list(set([str(name).strip().upper() for name in key_names if str(name).strip()]))
@@ -367,7 +372,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
                     "status": "failed",
                     "message": f"No Env found associated with {workspace_name} Workspace."
                 }
-                raise ValidationError(f"No Env found associated with {workspace_name} Workspace.")
+                return error_data
 
             affected_repos = set(repo_workspace.repositories.all())
             print("knack",repo_workspace,"delete_workspace_name")
@@ -393,9 +398,17 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             if user:
                 target_repos = target_repos.filter(repo_owner=user.username)
                 if not target_repos.exists():
-                    raise ValidationError(f"No Env found in {selected_repo_names} repositories.")
+                    error_data["workspace_resolution"] = {
+                        "status": "failed",
+                        "message": f"No Env found in {selected_repo_names} repositories."
+                    }
+                    return error_data
             else:
-                raise ValidationError("User context is required to validate repository ownership.")
+                error_data["workspace_resolution"] = {
+                    "status": "failed",
+                    "message": "User context is required to validate repository ownership."
+                }
+                return error_data
             
             affected_repos = set(target_repos)
             print("affected_repos", affected_repos, "cleaned_keys", cleaned_keys)

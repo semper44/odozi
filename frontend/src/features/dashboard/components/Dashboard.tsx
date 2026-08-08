@@ -42,6 +42,13 @@ export default function Dashboard() {
     const [showInstallModal, setShowInstallModal] = useState(true);
     const [hasCheckedInstallPrompt, setHasCheckedInstallPrompt] = useState(false);
 
+    const [activeLeftTab, setActiveLeftTab] = useState("Home");
+    const leftTabs = [
+        { id: "Home", label: "Home", icon: <House className="cursor-pointer" /> },
+        { id: "Chat", label: "Chat", icon: <Bot className="cursor-pointer" /> },
+        { id: "History", label: "History", icon: <CheckCheck className="cursor-pointer" /> },
+    ];
+
     const selected = useSelectionStore((state) => state.selected);
     const useCreateRepos = useCreateReposMutation();
     const useCreateEnv = useCreateEnvKeysMutation();
@@ -314,27 +321,38 @@ const createEnvVar = (keyList: string[], workspace:string) => {
         <div className="w-full flex pr-4 pl-2">
 
             {/* left bar */}
-            <div className=" xl:mr-0 w-[11.5%] h-full flex flex-col hidden md:block">
+            <div className=" xl:mr-0 w-[11.5%] h-full flex flex-col hidden md:block pt-3">
 
                 <div className="tabs flex flex-col h-full">
-                    <div id="project-tabs" className="hidden xl:block">
-                        <div
-                            style={{ backgroundColor: '#be9ee2' }}
-                            className="cursor-pointer w-full px-3 py-2 mt-[27px] rounded-lg  hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
-                            <House className="cursor-pointer" />
-                            <p >Home</p>
-                        </div>
+                    <div id="project-tabs" className="w-full hidden xl:grid top-tabs gap-2">
+                        {leftTabs.map((tab) => {
+                            const isActive = activeLeftTab === tab.id;
+                            return (
+                                <div
+                                    key={tab.id}
+                                    onClick={() => setActiveLeftTab(tab.id)}
+                                    className={`cursor-pointer w-full px-3 py-2 rounded-lg flex items-center justify-start gap-3 transition-colors ${isActive ? "bg-purple-300 text-black" : "bg-transparent hover:bg-purple-200 hover:text-black"}`}>
+                                    {tab.icon}
+                                    <p>{tab.label}</p>
+                                </div>
+                            );
+                        })}
                     </div>
 
                     {/* <!-- second tab  --> */}
-                    <div className="top-tabs w-full grid xl:hidden">
-                        <House className="cursor-pointer" />
-                        <p
-                            className="cursor-pointer w-full px-3 py-2 mt-[27px] rounded-lg hover:bg-purple-200 bg-purple-300 hover:text-black flex items-center justify-start gap-3">
-                            Home</p>
-
-                        <p className="cursor-pointer w-full px-3 py-2  rounded-lg hover:bg-purple-200 hover:text-black flex items-center justify-start gap-3">
-                            History</p>
+                    <div className="top-tabs w-full grid xl:hidden gap-2">
+                        {leftTabs.map((tab, index) => {
+                            const isActive = activeLeftTab === tab.id;
+                            return (
+                                <p
+                                    key={tab.id}
+                                    onClick={() => setActiveLeftTab(tab.id)}
+                                    className={`cursor-pointer w-full px-3 py-2 rounded-lg flex items-center justify-start gap-3 transition-colors ${isActive ? "bg-purple-300 text-black" : "bg-transparent hover:bg-purple-200 hover:text-black"}`}>
+                                    {tab.icon}
+                                    {tab.label}
+                                </p>
+                            );
+                        })}
                     </div>
                 </div>
                 
@@ -348,7 +366,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
                         {/*  my proj */}
                         <div className="my-proj w-fit hidden md:flex items-center gap-2">
-                            <p className="font-bold text-black">Welcome, John</p>
+                            <p className="font-bold text-black pl-10">Welcome, John</p>
                         </div>
 
                         {/* input box parent */}
@@ -430,27 +448,26 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                         <img src={gradientBg } alt="Robot AI" className="w-[35%]" style={{ width : "35%"}} />
                                         <p className="text-black pt-3">How can i help?</p>
                                         {/* input */}
-                                        <div className="w-[70%] h-[20%] justify-self-center">
-                                            <div className="relative w-[90%] h-[60%]">
+                                        <div className="w-[70%] h-[20%] justify-self-center relative">
+                                             <input 
+                                                type="text"
+                                                value={prompt}
+                                                onChange={(e) => setPrompt(e.target.value)}
+                                                // 🌟 Captures the Enter key natively and fires the clean string text
+                                                onKeyDown={(e) => {
+                                                if (e.key === "Enter" && !isPending && prompt.trim()) {
+                                                    handleSendRequest(prompt);
+                                                    setPrompt(""); // Instantly clear the inline input field state
+                                                }
+                                                }}
+                                                placeholder="Type your message..."
+                                                className={`pl-4 rounded-xl border red-800 mt-4 w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
+                                                style={{ borderColor: "black" }}
+                                            />
+                                            <div className="">
                                                     {isPending ? (
 
-                                                        <div className="relative w-full">
-                                                            <input 
-                                                                type="text"
-                                                                value={prompt}
-                                                                onChange={(e) => setPrompt(e.target.value)}
-                                                                // 🌟 Captures the Enter key natively and fires the clean string text
-                                                                onKeyDown={(e) => {
-                                                                if (e.key === "Enter" && !isPending && prompt.trim()) {
-                                                                    handleSendRequest(prompt);
-                                                                    setPrompt(""); // Instantly clear the inline input field state
-                                                                }
-                                                                }}
-                                                                placeholder="Type a message..."
-                                                                className={`pl-4 rounded-xl border w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
-                                                                style={{ borderColor: "black" }}
-                                                            />
-                                                            
+                                                        <div className="relative w-full">                                                            
                                                             <button 
                                                                 type="button" // 🌟 Changed from "submit" to "button" to avoid form triggers
                                                                 onClick={() => {
@@ -460,31 +477,15 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                                                 }
                                                                 }}
                                                                 id="send-icon" 
-                                                                className="animate-spin absolute top-[30%] right-[5%] cursor-pointer flex items-center justify-center"
+                                                                className="animate-spin absolute top-[50%] right-[5%] cursor-pointer flex items-center justify-center"
                                                                 disabled={isPending || !prompt.trim()}
                                                             >
-                                                                bbb
                                                                 <SendHorizontal />            
                                                             </button>
                                                         </div>
 
                                                         
-                                                    ) : (
-                                                    <div className="relative w-full">
-                                                            <input 
-                                                                type="text"
-                                                                value={prompt}
-                                                                onChange={(e) => setPrompt(e.target.value)}
-                                                                // 🌟 Capture the keyboard Enter key manually without page-reload events
-                                                                onKeyDown={(e) => {
-                                                                if (e.key === "Enter" && prompt.trim()) {
-                                                                    handleSendRequest(prompt);
-                                                                    setPrompt(""); // Clear out your local input box state text
-                                                                }
-                                                                }}
-                                                                placeholder="Type a message..."
-                                                            />
-                                                            
+                                                    ) : (                                                            
                                                             <button 
                                                                 type="button" // Changed from "submit" to "button"
                                                                 onClick={() => {
@@ -494,11 +495,10 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                                                 }
                                                                 }}
                                                                 id="send-icon" 
-                                                                className="absolute top-[30%] right-[5%] cursor-pointer bg-transparent border-none p-0 flex items-center justify-center"
+                                                                className="absolute top-[50%] right-[5%] cursor-pointer bg-transparent border-none p-0 flex items-center justify-center"
                                                             >
                                                                 <SendHorizontal />            
                                                             </button>
-                                                        </div>
 
                                                     )}
                                                 
@@ -534,7 +534,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                     </div>
 
                     {/* right bar */}
-                    <div className="w-[25%] h-full pt-3 items-center gap-4 pl-4 hidden lg:flex flex-col justify-start">
+                    <div className="w-[25%] h-full pt-3 items-start gap-4 pl-4 hidden lg:flex flex-col justify-start">
 
                         {/* Include your absolute rendering portal layer down at the bottom of the node string tree */}
                         <WorkspaceModal
@@ -547,24 +547,24 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                             isPending={useCreateRepos.isPending}
                         />
                         
-                        <div className="w-full space-y-4 flex items-center">
-                            <button 
-                                onClick={() => setIsModalOpen(true)}
-                                className="p-1 mt-2 bg-green-500 hover:bg-green-700 text-white rounded-full shadow-sm transition-colors cursor-pointer mr-4"
-                                >
-                                <Plus className="w-5 h-5" />
-                            </button>
+                        <div className="w-full flex items-center gap-3">
                             {/* workspace List */}
-                            <div className="space-y-4">
+                            <div className="">
                                 <WorkspaceDropdown
                                     workspaces={data?.uniqueWorkspaces || ["olive corp"]}
                                     selectedWorkspace={selectedWorkspace}
                                     onSelectWorkspace={setSelectedWorkspace}
                                 />
                             </div>
+                            <button 
+                                onClick={() => setIsModalOpen(true)}
+                                className="p-1 bg-green-500 hover:bg-green-700 text-white rounded-full shadow-sm transition-colors cursor-pointer"
+                                >
+                                <Plus className="w-5 h-5" />
+                            </button>
                         </div>
                         {/* create env variables */}
-                        <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
+                        <div className="w-[161.61px] flex gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
                             onClick={() => setEnvShowModal(!envShowModal)}
                         >
                             <span className="text-sm font-semibold text-gray-700">
@@ -581,7 +581,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                         
                         />} 
                         {/* select LLM */}
-                        <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
+                        <div className="w-[161.61px] px-4 py-2.5 bg-white border border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors shadow-sm select-none"
                             onClick={() => setShowLlmModal(!showLlmModal)}
                         >
                             <span className="text-sm font-semibold text-gray-700">

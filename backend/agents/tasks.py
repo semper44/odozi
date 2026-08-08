@@ -236,6 +236,7 @@ def find_matching_repos_from_redis(all_repos, user_provided_input):
     Finds all potential repository matches from Redis.
     Returns a list of unique, case-preserved GitHub repository names.
     """
+    did_not_match_exactly = True
     raw_search = user_provided_input.strip().lower()
     # Strip symbols entirely to catch missing hyphens/underscores
     alphanumeric_search = "".join(c for c in raw_search if c.isalnum())
@@ -255,6 +256,7 @@ def find_matching_repos_from_redis(all_repos, user_provided_input):
         if true_name_lower == raw_search or true_alphanumeric == alphanumeric_search:
             matched_names.add(true_github_name)
             default_branch.add(default__redis_branch)
+            did_not_match_exactly = False
             continue
 
         # Catch fuzzy substring matches (handles partial inputs like 'taskmaster' matching 'Taskmaster--')
@@ -264,7 +266,11 @@ def find_matching_repos_from_redis(all_repos, user_provided_input):
 
     print("disrespect", default_branch)
     # Convert back to a list to easily pass back to your LLM or user chat
-    return {"matched_names":list(matched_names), "default_branches": list(default_branch)}
+    return {
+        "matched_names":list(matched_names), 
+        "default_branches": list(default_branch),
+        "did_not_match_exactly": did_not_match_exactly
+        }
 
 
 
@@ -343,6 +349,7 @@ def ensure_orchestrator_yaml_is_online(
 ):
     matching_results = find_matching_repos_from_redis(all_repos, repo_name)
     resolved_repo = matching_results["matched_names"]
+    did_not_match_exactly = matching_results["did_not_match_exactly"]
 
     print(f"Matching results: {matching_results}")
 
@@ -480,7 +487,7 @@ def ensure_orchestrator_yaml_is_online(
             crash_error = parsed_error_string.get('message', None)
             crash_branch = error_message.get('branch')
             if crash_error:
-                error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch- {crash_branch} for repo-{resolved_repo[0]} : '{error_message['branch']}': {crash_error}"
+                error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch - '{crash_branch}' for repo - '{resolved_repo[0]}', 'branch - {error_message['branch']}'. Error: {crash_error}"
                 error_data["repo_resolution"]["repo"] = resolved_repo[0]
                 error_data["repo_resolution"]["branch"] = crash_branch
                 break
@@ -490,13 +497,20 @@ def ensure_orchestrator_yaml_is_online(
         return error_data
 
     print("\nWorkflow synchronized successfully on all required branches.")
-
-    return {
-        "status": "success",
-        "repo": resolved_repo[0],
-        "message": "Successfully synchronized workflow",
-        "branches": [default_branch, target_branch],
-    }
+    if did_not_match_exactly:
+        return {
+            "status": "success",
+            "repo": f"{resolved_repo[0]} instead of {repo_name}",
+            "message": "Successfully synchronized workflow",
+            "branches": target_branch
+        }
+    else:
+        return {
+            "status": "success",
+            "repo": resolved_repo[0],
+            "message": "Successfully synchronized workflow",
+            "branches": target_branch
+        }
 
 
 
