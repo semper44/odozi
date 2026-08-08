@@ -500,8 +500,8 @@ def ensure_orchestrator_yaml_is_online(
     if did_not_match_exactly:
         return {
             "status": "success",
-            "repo": f"{resolved_repo[0]} instead of {repo_name}",
-            "message": "Successfully synchronized workflow",
+            "repo": resolved_repo[0],
+            "message": f"Successfully synchronized workflow. Matched '{repo_name}' to '{resolved_repo[0]}'.",
             "branches": target_branch
         }
     else:
@@ -573,7 +573,9 @@ Example Summary Output:
 1. When a user requests any tool execution run or rule assignment, you must find explicit branch context names in the text (e.g., 'main', 'master', 'test', 'new').
 2. **NEVER ASSUME OR FACTORY-DEFAULT A BRANCH NAME.** You are completely forbidden from guessing, inventing, or automatically filling a default branch name (like 'master' or 'main') if it was not explicitly provided by the user.
 3. If the user provides a list of branches and repositories, use logical sequential mapping (e.g., Repository 1 -> Branch 1, Repository 2 -> Branch 2).
-4. **CRITICAL INTENT OVERRIDE GATE FOR CLARIFICATIONS:**
+4. Identify repository targets from the CURRENT execution request. NEVER automatically reuse the repository list from a previous execution.
+5. If the user says "same thing", "same checks", or similar, reuse the PREVIOUS CHECK STRATEGIES only. Do NOT automatically reuse the previous repository scope.
+6. **CRITICAL INTENT OVERRIDE GATE FOR CLARIFICATIONS:**
    - If the user requests an execution but provides NO branch keyword, or if the branch layout mapping is ambiguous, you MUST IMMEDIATELY HALT ALL PIPELINE EXECUTION.
    - You MUST overwrite the 'intents' list to contain strictly ONE single token: ["technical_query"]. You are completely FORBIDDEN from including "run_static_analysis", "create_repo_env", "delete_workspace", or "delete_repo_env" in the intents array when a branch clarification is happening.
    - Set 'ui_layout_route' to "CHAT".
@@ -588,7 +590,7 @@ Example Summary Output:
 - "delete_repo_env": Select this intent if the user requests the removal, dropping, stripping, or deletion of keys from environment lists.
 - "run_static_analysis": Select this intent ONLY if the user uses explicit, active commands ordering you to kick off, launch, run, or execute a test block run immediately (e.g., "Run pytest now", "Execute security audit"). You MUST populate the active_rules array mapping strategies to their target repositories.
 - "technical_query": Select this intent if the user is asking a general question about options, capabilities, configurations, or checking what is possible without explicitly ordering a live execution run right now (e.g., "Can you run tests?", "How do I check types?"). When this intent is selected, the active_rules list MUST remain empty.
-- Deduce smart engineering defaults if specific parameters or repository targets are omitted from the request context.
+
 
 ### UI LAYOUT CODES:
 Set 'ui_layout_route' to:

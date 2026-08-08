@@ -509,11 +509,6 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                     {/* live terminal component */}
                                     {/* 🌟 FIX: Remove 'isProcessingRequest' from the outer mounting gate rule */}
                                     {!isAiOpen && (
-                                    streamingMessage?.raw_output?.ui_layout_route === "TERM" ? (
-                                        <div className="w-full h-[80%]">
-                                        <LiveTerminal />
-                                        </div>
-                                    ) : (
                                         <div className="w-full h-[80%]">
                                         {/* The Chat box stays mounted on your dashboard screen layout permanently */}
                                         <AIChat 
@@ -523,7 +518,6 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                             isAiLoading={isProcessing} 
                                         />
                                         </div>
-                                    )
                                     )}
 
                                         
