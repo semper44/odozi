@@ -8,20 +8,38 @@ from typing import List, Optional, Dict, Any
 
 
 class RepoEnvKeyCreationTask(BaseModel):
-    """Maps fields directly to your create_repo_env_keys_service function parameter footprint."""
-    workspace_name: str = Field(
-        default="default",
-        description="The target workspace context. Set to 'default' if not specified."
+    workspace_name: Optional[str] = Field(
+        default=None,
+        description="""
+        Workspace target for the environment keys.
+
+        Set this ONLY when the user explicitly targets a workspace.
+        If repositories are targeted, this MUST be null.
+
+        Workspace and repository scope are mutually exclusive.
+        """
     )
+
     key_names: List[str] = Field(
-        description="List of environment key strings to inject (e.g., ['STRIPE_API_KEY', 'DB_PASSWORD'])"
+        description="""
+        List of environment key names to create.
+        Example: ['db', 'cloudflare']
+        """
     )
 
     repositories: List[str] = Field(
-        description="The name of the exact repository (e.g., 'Taskmaster')"
+        default=[],
+        description="""
+        Exact repository names to target.
+
+        Set this ONLY when the user explicitly targets repositories.
+        If workspace_name is provided, this MUST be [].
+
+        Workspace and repository scope are mutually exclusive.
+        """
     )
 
-
+    
 class RepoEnvKeyDeletionTask(BaseModel):
     """Maps fields directly to your polymorphic delete_repo_env_keys_service function parameter footprint."""
     
@@ -115,7 +133,7 @@ class OrchestratorAction(BaseModel):
         description="When evict_prior_history is True, compile a high-utility context summary."
     )
     ui_layout_route: str = Field(
-        description="Select layout mode code. Must be: 'CHAT', 'CARD', or 'TERM'."
+        description="Select layout mode code. Must be: 'CHAT',  or 'FINISHED'."
     )
     chat_response: str = Field(
         description="Your natural, friendly response explaining your actions and technical insights."

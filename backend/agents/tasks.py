@@ -591,13 +591,6 @@ Example Summary Output:
 - "run_static_analysis": Select this intent ONLY if the user uses explicit, active commands ordering you to kick off, launch, run, or execute a test block run immediately (e.g., "Run pytest now", "Execute security audit"). You MUST populate the active_rules array mapping strategies to their target repositories.
 - "technical_query": Select this intent if the user is asking a general question about options, capabilities, configurations, or checking what is possible without explicitly ordering a live execution run right now (e.g., "Can you run tests?", "How do I check types?"). When this intent is selected, the active_rules list MUST remain empty.
 
-
-### UI LAYOUT CODES:
-Set 'ui_layout_route' to:
-- "CHAT": Conversational chat, questions, greetings, or branch clarifications.
-- "CARD": Infrastructure changes (workspaces/repositories) with no testing tools.
-- "TERM": Active CI/CD test runner pipelines (pytest, bandit, pip_audit, ruff, AST) are triggered.
-
 """
 
 
@@ -1633,7 +1626,7 @@ def agentic_chat_follow_up(
        - env_keys_to_create=[]
        - env_keys_to_delete=[]
     6. ALWAYS set:
-       ui_layout_route="CHAT"
+       ui_layout_route="FINISHED"
        intents=["technical_query"]
     """
 
@@ -1787,7 +1780,7 @@ def handle_backend_error_followup( self,
         ### 🛡️ CRITICAL SECURITY & OUTPUT BOUNDARIES:
         1. NEVER expose raw technical dictionary structures, IDs, or database stack trace strings to the user. Translate anomalies into clear, human-friendly guidance.
         2. ALWAYS keep 'active_rules', 'workspaces_to_delete', 'env_keys_to_create', and 'env_keys_to_delete' completely EMPTY [].
-        3. ALWAYS force 'ui_layout_route' to "CHAT" and overwrite your 'intents' list to contain strictly one token: ["technical_query"].
+        3. ALWAYS set 'ui_layout_route' to "CHAT" and overwrite your 'intents' list to contain strictly one token: ["technical_query"].
 
         ### 📂 ERROR CONTEXT HANDLERS:
         - If 'repo_resolution' is present: State that you couldn't match the repository name cleanly. If multiple options are provided in the telemetry metrics, output them as a numbered list and ask the user to clarify which exact one they meant.
