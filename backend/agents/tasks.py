@@ -547,20 +547,17 @@ When a user requests analysis, you must cross-reference their keywords to popula
 - Keywords: "transaction atomic", "db wrapper", "docstrings", "documentation comments"
 - Trigger Rules: Map these precisely to "check_transaction_atomic" or "check_docstrings" using your parameters interface setup mapping block.
 
+
 ### ENVIRONMENT VARIABLE INJECTION & CONTEXT BOUNDARY RULES
 
-You must parse exactly where environment keys should be sourced from based on user specifications:
-
-1. WORKSPACE SCOPE: If the user explicitly commands to pull, load, or use environment keys from the "workspace tree", you must populate the 'workspace_name' in the creation/deletion task payloads to point to that specific workspace entity layout.
-2. REPOSITORY SCOPE: If the user explicitly asks to use environment keys from "individual repos", map the parameters precisely into the 'selected_repo_ids' or 'repositories_data' metadata scopes. If matching repository database IDs are requested by the schema payload but not explicitly provided in the chat text, look them up by their string names or manufacture placeholder integer defaults (like `0`) inside the ID field.
-3. CONTEXT OMISSION GUARD: If the user requests an environmental key operation but provides absolutely zero contextual details indicating whether they want it from the workspace tree or from individual repositories, you must:
-   - Check if the targeted strategy or execution engine run natively requires environment parameters to operate.
-   - If env keys are explicitly needed but the scope is missing, you MUST halt execution, switch 'ui_layout_route' to "CHAT", and cleanly prompt the user inside your 'chat_response' to clarify using their string names (e.g., "I see you want to configure environment variables. Would you like to map these keys across the entire workspace tree or target individual repositories?").
-4    ATOMIC TASK SPLITTING RULE FOR DELETIONS:
-    - If a single user prompt requests environment deletions targeting multiple different scopes at the same time (e.g., "delete keys from semper workspace and django-channels repo"), you MUST treat them as completely separate atomic operations.
-    - You MUST generate multiple, individual independent RepoEnvKeyDeletionTask objects inside the 'env_keys_to_delete' list. 
-    - NEVER bundle or combine a workspace target and a repository target inside the same object block. If delete_which is 'workspace', repositories MUST be empty. If delete_which is 'repo', workspace_name MUST be null.
-
+Environment-key operations have one target scope per task: workspace OR repo. Never both.
+Workspace target: when the user names a workspace, set workspace_name to that name and repositories = []. Do not ask for repositories. The workspace itself is the target.
+Repository target: when the user names one or more repositories, set workspace_name = null and put the repo names in repositories. Do not ask for a workspace.
+The schema fields are optional scope fields; their presence does not make the other scope required. Never invent or infer a workspace/repository that the user did not specify.
+If the user gives no scope, stop and ask whether the operation should target a workspace or repository.
+For deletion, use separate RepoEnvKeyDeletionTask objects when the prompt contains different scopes. A workspace deletion must have repositories = []; a repo deletion must have workspace_name = null.
+If repository IDs are required internally, resolve them from the repository names; never ask the user for database IDs.
+    
 ### CONTEXT EVOLUTION & HISTORY OVERHAUL PROTOCOL:
 - For standard casual chats or technical inquiries, leave 'evict_prior_history' as False and 'condensed_history_summary' as None.
 - The exact moment the user issues an operational execution command (e.g., "Run the first 2"), map the references to 'active_rules', set 'evict_prior_history' to True, and use your intelligence to populate 'condensed_history_summary'.
@@ -1001,6 +998,19 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
         return
     
     channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+            channel_name, # Targets the static room name string
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route":ui_layout, 
+                        "chat_response":"Processing Workspace creation task",
+                    }
+                }
+            }
+        )
 
     # 1. 🚀 FIX: Store the whole raw repo dict tied to its lowercase matching key
     # If parent_repo_list is just a list of strings, match the string directly
@@ -1038,23 +1048,14 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
             else:
                 repos_not_found.append(raw_repo)
                 error_data["repo_resolution_for_workspace_creation_not_found"] = {
-                    "type": "error",
+                    "status": "error",
                     "message": f"Repository '{user_input}' not found."
                 }
 
         # 3. Safe validation pass execution
         if len(repos_found) > 0:
             workspace_and_repo_result = create_workspace_with_repos(user, ws_name, repos_found)
-            async_to_sync(channel_layer.group_send)(
-            channel_name, # Targets the static room name string
-            {
-                "type": "chat_message",
-                "payload": {
-                    "type": "orchestration_result",
-                    "raw_output": {"ui_layout_route":ui_layout, "chat_response":str(workspace_and_repo_result)},
-                }
-            }
-        )
+            
         else:
             print(f"ogbemudia - No repos found for workspace: {ws_name}")
             
@@ -1085,6 +1086,19 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
         return "No workspaces provided for deletion"
 
     channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        channel_name,
+        {
+            "type": "chat_message",
+            "payload": {
+                "type": "orchestration_result",
+                "raw_output": {
+                    "ui_layout_route": ui_layout,
+                    "chat_response": "Processing Workspace deletion Request",
+                },
+            }
+        }
+    )
     workspace_id = None
     workspace_not_found = []
     # Ensure standard list structure handling even if a singular dictionary lands
@@ -1092,64 +1106,52 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
     print(f"daaluuu-{deletion_list}")
     
     deletion_summaries = []
+    deletion_error_summaries = []
 
-    for ws_task in deletion_list:
-        # Support lookups via 'workspace_id' integer keys, falling back to name parameters if required
-        # Adjust these parameter keys to match your exact Pydantic schema naming structure!
-        workspace_name = ws_task.get("workspace_name")
-        print(f"oh chim- {workspace_name}")
+    if len(deletion_list)>0:
+        for ws_task in deletion_list:
+            # Support lookups via 'workspace_id' integer keys, falling back to name parameters if required
+            # Adjust these parameter keys to match your exact Pydantic schema naming structure!
+            workspace_name = ws_task.get("workspace_name")
+            print(f"oh chim- {workspace_name}")
 
-        # Fallback tracking resolution step: If the LLM only gave a string name, look it up in the database
-        if workspace_name:
-            db_workspace = Workspace.objects.filter(name=workspace_name.strip(), owner=user).first()
-            if db_workspace:
-                workspace_id = db_workspace.pk
-            else:
-                workspace_not_found.append(workspace_name)
-            print("gang",db_workspace, "old")
+            # Fallback tracking resolution step: If the LLM only gave a string name, look it up in the database
+            if workspace_name:
+                db_workspace = Workspace.objects.filter(name=workspace_name.strip(), owner=user).first()
+                if db_workspace:
+                    workspace_id = db_workspace.pk
+                else:
+                    workspace_not_found.append(workspace_name)
+                print("gang",db_workspace, "old")
 
 
-        if not workspace_id:
-            print(f"⚠️ Deletion Skipped: Could not resolve a valid target ID for context: {workspace_name}")
-            continue
-        print("workspace_id", workspace_id)
-        try:
-            # 1. Fire your decoupled service processing transaction logic block
-            execution_result = delete_workspace_with_repos(
-                user=user,
-                workspace_id=int(workspace_id)
-            )
-            deletion_summaries.append(execution_result)
+            if not workspace_id:
+                print(f"⚠️ Deletion Skipped: Could not resolve a valid target ID for context: {workspace_name}")
+                continue
+            print("workspace_id", workspace_id)
+            try:
+                # 1. Fire your decoupled service processing transaction logic block
+                execution_result = delete_workspace_with_repos(
+                    user=user,
+                    workspace_id=int(workspace_id)
+                )
+                if workspace_not_found:
+                    execution_result.update({"workspace_not_found":execution_result})
+                deletion_summaries.append(execution_result)
 
-        except Exception as deletion_error:
-            print(f"🚨 Failed processing deletion thread loop for ID {workspace_id}: {str(deletion_error)}")
-            continue
-    print("before", workspace_not_found)
-    # 2. 🚀 BROADCAST RESULTS: Shoot the structured processing metrics back down the WebSocket pipe
-    if deletion_summaries:
-        # Build a neat string summary description or return raw payload arrays based on your layout requirement
-        chat_summary_text = (
-            f"Successfully purged {len(deletion_summaries)} workspace environments from your account registries. "
-            f"Any associated repositories that do not belong to other workflows have been unlinked globally."
-        )
+            except Exception as deletion_error:
+                print(f"🚨 Failed processing deletion thread loop for ID {workspace_id}: {str(deletion_error)}")
+                deletion_error_summaries.append(f"Failed processing deletion thread loop for ID {workspace_id}: {str(deletion_error)}")
+                continue
 
-        async_to_sync(channel_layer.group_send)(
-            channel_name,
-            {
-                "type": "chat_message",
-                "payload": {
-                    "type": "orchestration_result",
-                    "raw_output": {
-                        "ui_layout_route": ui_layout,
-                        "chat_response": chat_summary_text,
-                        "deletion_details": deletion_summaries # Rich metrics payload data for your React UI components
-                    },
-                }
-            }
-        )
-        return "Workspace deletion and asset purging loops processed clean."
+        if len(deletion_summaries)>0:       
+            return deletion_summaries
+        # if error
+        if deletion_error_summaries:       
+            return deletion_error_summaries
         
-    return "No deletion signatures executed"
+    else:
+        return "No deletion list for backend"
 
 
 
@@ -1176,6 +1178,21 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
         return "No configuration data provided"
 
     channel_layer = get_channel_layer()
+        # 🚀 IMMEDIATE BROADCAST: Push the success summary metrics right out to the client browser
+    async_to_sync(channel_layer.group_send)(
+        channel_name,
+        {
+            "type": "chat_message",
+            "payload": {
+                "type": "orchestration_result",
+                "raw_output": {
+                    "ui_layout_route": ui_layout,
+                    "chat_response": "Processing Repo creation request",
+                },
+            }
+        }
+    )
+
     
     # Ensure list type checking compliance even if a single dict object lands from the LLM
     requests_list = env_key_requests if isinstance(env_key_requests, list) else [env_key_requests]
@@ -1184,105 +1201,86 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
     cached_map = [(repo.get('name', '').lower().strip(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
     print("env_key_requests", requests_list)
 
-    for req in requests_list:
-        # 🌟 INITIALIZE VARIABLES INSIDE THE LOOP BODY PER REQUEST CONTEXT
-        workspace_name = req.get("workspace_name")
-        raw_key_names = req.get("key_names", [])
-        raw_target_repos = req.get("repositories", [])
-        
-        selected_repo_ids = []
-        repos_not_found = []
-        print("lisa",  raw_target_repos)
+    if len(requests_list)>0:
+        for req in requests_list:
+            # 🌟 INITIALIZE VARIABLES INSIDE THE LOOP BODY PER REQUEST CONTEXT
+            workspace_name = req.get("workspace_name")
+            raw_key_names = req.get("key_names", [])
+            raw_target_repos = req.get("repositories", [])
+            
+            selected_repo_ids = []
+            repos_not_found = []
+            print("lisa",  raw_target_repos)
 
-        # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
-                # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
-        if raw_target_repos:
-            for raw_item in raw_target_repos:
-                # 🌟 FIX A: Extract the repository name string safely depending on data type
-                if isinstance(raw_item, dict):
-                    repo_name_str = raw_item.get("repo_name", "")
-                else:
-                    repo_name_str = str(raw_item)
-
-                user_input = repo_name_str.lower().replace(" ", "-").strip()
-                
-                # Execute the safe tuple-list match wrapper clean
-                matched_repo_dict = next((repo for low_name, repo in cached_map if user_input in low_name), None)
-                print("matched_repo_dict", matched_repo_dict)
-                
-                if matched_repo_dict:
-                    matched_id = matched_repo_dict.get("id")
-                    if matched_id:
-                        selected_repo_ids.append(matched_id)
-                else:
-                    # 🌟 FIX B: Fallback directly to the incoming layout metadata payload 
-                    # if the cache does not have this repository loaded yet
+            # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
+                    # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
+            if raw_target_repos:
+                for raw_item in raw_target_repos:
+                    # 🌟 FIX A: Extract the repository name string safely depending on data type
                     if isinstance(raw_item, dict):
-                        incoming_id = raw_item.get("repo_id")
-                        # Only append if it's a real database primary key (not placeholder 0)
-                        if incoming_id and incoming_id != 0:
-                            selected_repo_ids.append(incoming_id)
-                            continue
-                    
-                    repos_not_found.append(user_input)
-                    error_data["repo_resolution_for_key_creation_not_found"] = {
-                        "type": "error",
-                        "message": f"Repository '{user_input}' not found."
-                    }
+                        repo_name_str = raw_item.get("repo_name", "")
+                    else:
+                        repo_name_str = str(raw_item)
 
-            # If user targeted specific repos but none could be verified, halt this specific request
-            if not selected_repo_ids:
-                print(f"⚠️ Env Key Warning: Explicit repositories targeted but none verified for: {raw_target_repos}")
+                    user_input = repo_name_str.lower().replace(" ", "-").strip()
+                    
+                    # Execute the safe tuple-list match wrapper clean
+                    matched_repo_dict = next((repo for low_name, repo in cached_map if user_input in low_name), None)
+                    print("matched_repo_dict", matched_repo_dict)
+                    
+                    if matched_repo_dict:
+                        matched_id = matched_repo_dict.get("id")
+                        if matched_id:
+                            selected_repo_ids.append(matched_id)
+                    else:
+                        # 🌟 FIX B: Fallback directly to the incoming layout metadata payload 
+                        # if the cache does not have this repository loaded yet
+                        if isinstance(raw_item, dict):
+                            incoming_id = raw_item.get("repo_id")
+                            # Only append if it's a real database primary key (not placeholder 0)
+                            if incoming_id and incoming_id != 0:
+                                selected_repo_ids.append(incoming_id)
+                                continue
+                        
+                        repos_not_found.append(user_input)
+                        error_data["repo_resolution_for_key_creation_not_found"] = {
+                            "status": "error",
+                            "message": f"Repository '{user_input}' not found."
+                        }
+
+                # If user targeted specific repos but none could be verified, halt this specific request
+                if not selected_repo_ids:
+                    print(f"⚠️ Env Key Warning: Explicit repositories targeted but none verified for: {raw_target_repos}")
+                    continue
+
+
+            # 2. ⚡ MOVE TRY BLOCK INSIDE THE LOOP CONTEXT
+            try:
+                print("qqqqqqqqqqqqqqqq - Target scope verified online.")
+                
+                # Invoke your business service function natively inside the loop
+                service_result = create_repo_env_keys_service(
+                    user=user,
+                    repositories_data=parent_repo_list, 
+                    key_names=raw_key_names,
+                    workspace_name=workspace_name,
+                    selected_repo_ids=selected_repo_ids  # Passes empty list cleanly if workspace scope is targeted
+                )
+
+                return service_result
+
+                
+            except Exception as service_error:
+                error_data.update({
+                    "status": "error",
+                    "message": f"Background worker environmental key creation failure: {str(service_error)}."
+                })
+                print(f"🚨 Background worker environmental key processing failure: {str(service_error)}")
                 continue
 
-
-        # 2. ⚡ MOVE TRY BLOCK INSIDE THE LOOP CONTEXT
-        try:
-            print("qqqqqqqqqqqqqqqq - Target scope verified online.")
-            
-            # Invoke your business service function natively inside the loop
-            service_result = create_repo_env_keys_service(
-                user=user,
-                repositories_data=parent_repo_list, 
-                key_names=raw_key_names,
-                workspace_name=workspace_name,
-                selected_repo_ids=selected_repo_ids  # Passes empty list cleanly if workspace scope is targeted
-            )
-
-            # Determine response descriptive summary text depending on polymorphic execution scope return
-            if service_result.get("scope") == "workspace":
-                chat_confirmation_text = (
-                    f"Successfully injected {service_result['environment_keys_created_count']} reusable keys "
-                    f"globally across the entire '{workspace_name}' workspace tree configuration profile."
-                )
-            else:
-                chat_confirmation_text = (
-                    f"Successfully injected {service_result['environment_keys_created_count']} new environment keys "
-                    f"across {len(selected_repo_ids)} repositories under the '{workspace_name}' workspace environment context."
-                )
-
-            # 🚀 IMMEDIATE BROADCAST: Push the success summary metrics right out to the client browser
-            async_to_sync(channel_layer.group_send)(
-                channel_name,
-                {
-                    "type": "chat_message",
-                    "payload": {
-                        "type": "orchestration_result",
-                        "raw_output": {
-                            "ui_layout_route": ui_layout,
-                            "chat_response": chat_confirmation_text,
-                            "key_injection_details": service_result 
-                        },
-                    }
-                }
-            )
-
-        except Exception as service_error:
-            print(f"🚨 Background worker environmental key processing failure: {str(service_error)}")
-            continue
-
-    return "Environmental variable configuration pipeline loop complete"
-
+        return error_data
+    else:
+        return "No Request list for backend" 
 
 
 
@@ -1312,78 +1310,88 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
     print("patty")
 
     channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        channel_name,
+        {
+            "type": "chat_message",
+            "payload": {
+                "type": "orchestration_result",
+                "raw_output": {
+                    "ui_layout_route": ui_layout,
+                    "chat_response": "Processing Env Key deletion task" ,
+                },
+            }
+        }
+    )
+
+
     requests_list = env_key_requests if isinstance(env_key_requests, list) else [env_key_requests]
 
     # Map the full repository array cache list natively for safe matching bounds
     cached_map = [(repo.get('name', '').lower().strip(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
-    for req in requests_list:
-        raw_key_names = req.get("key_names", [])
-        raw_target_repos = req.get("repositories", []) or req.get("repo_names", [])
-        delete_which= req.get("delete_which", None)
-        workspace_name= req.get("workspace_name", None)
-        selected_repo_ids = []
-        selected_repo_names = set()
+    if len(requests_list)>0:
+        for req in requests_list:
+            raw_key_names = req.get("key_names", [])
+            raw_target_repos = req.get("repositories", []) or req.get("repo_names", [])
+            delete_which= req.get("delete_which", None)
+            workspace_name= req.get("workspace_name", None)
+            selected_repo_ids = []
+            selected_repo_names = set()
 
-        print("ev-requests_list", requests_list,"rrr")
+            print("ev-requests_list", requests_list,"rrr")
 
-        # Match loose string inputs to your parent cached array list items to gather specific IDs
-        for raw_name in raw_target_repos:
-            user_input = str(raw_name).lower().replace(" ", "-").strip()
-            
-            matched_repo_dict = next((repo for low_name, repo in cached_map if user_input in low_name), None)
+            # Match loose string inputs to your parent cached array list items to gather specific IDs
+            for raw_name in raw_target_repos:
+                user_input = str(raw_name).lower().replace(" ", "-").strip()
+                
+                matched_repo_dict = next((repo for low_name, repo in cached_map if user_input in low_name), None)
 
-            print("matched_repo_dict", matched_repo_dict, "env-raw_name", raw_name)
-            if matched_repo_dict:
-                matched_id = matched_repo_dict.get("id")
-                if matched_id:
-                    selected_repo_ids.append(matched_id)
-                    selected_repo_names.add(matched_repo_dict.get("name"))
-        print("diamond",workspace_name,"raw_key_names", raw_key_names, "masked", selected_repo_ids)
-        if not selected_repo_ids and not raw_key_names and not workspace_name:
-            print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
-            continue
+                print("matched_repo_dict", matched_repo_dict, "env-raw_name", raw_name)
+                if matched_repo_dict:
+                    matched_id = matched_repo_dict.get("id")
+                    if matched_id:
+                        selected_repo_ids.append(matched_id)
+                        selected_repo_names.add(matched_repo_dict.get("name"))
+            print("diamond",workspace_name,"raw_key_names", raw_key_names, "masked", selected_repo_ids)
+            if not selected_repo_ids and not raw_key_names and not workspace_name:
+                print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
+                continue
 
-        try:
-            # Execute the core transaction service function natively inside the background task loop
-            service_result = delete_repo_env_keys_service(
-                user=user,
-                key_names=raw_key_names,
-                delete_which=delete_which,
-                workspace_name = workspace_name,
-                selected_repo_ids=selected_repo_ids,
-                selected_repo_names= selected_repo_names
-            )
+            try:
+                # Execute the core transaction service function natively inside the background task loop
+                service_result = delete_repo_env_keys_service(
+                    user=user,
+                    key_names=raw_key_names,
+                    delete_which=delete_which,
+                    workspace_name = workspace_name,
+                    selected_repo_ids=selected_repo_ids,
+                    selected_repo_names= selected_repo_names
+                )
 
-            print("service_result", service_result)
+                print("service_result", service_result)
 
-            # 🚀 IMMEDIATE BROADCAST: Inform the React frontend layout what keys were purged
-            # chat_confirmation_text = (
-            #     f"Successfully wiped out {service_result['deleted_count']} environment keys "
-            #     f"across {service_result['affected_repositories_count']} repositories."
-            # )
+                # 🚀 IMMEDIATE BROADCAST: Inform the React frontend layout what keys were purged
+                # chat_confirmation_text = (
+                #     f"Successfully wiped out {service_result['deleted_count']} environment keys "
+                #     f"across {service_result['affected_repositories_count']} repositories."
+                # )
 
-            async_to_sync(channel_layer.group_send)(
-                channel_name,
-                {
-                    "type": "chat_message",
-                    "payload": {
-                        "type": "orchestration_result",
-                        "raw_output": {
-                            "ui_layout_route": ui_layout,
-                            "chat_response": service_result.get("message", "Environment key deletion completed."),
-                            "key_deletion_details": service_result
-                        },
-                    }
-                }
-            )
+                return service_result
 
 
-        except Exception as service_error:
-            print(f"🚨 Background worker environmental key deletion failure: {str(service_error)}")
-            continue
 
-    return "Environmental variable removal pipeline loop complete"
+            except Exception as service_error:
+                error_data.update({
+                    "status": "error",
+                    "message": f"Background worker environmental key deletion failure: {str(service_error)}."
+                })
+                print(f"🚨 Background worker environmental key deletion failure: {str(service_error)}")
+                continue
+
+        return error_data
+    else:
+        return "No Request list for backend" 
 
 
 
