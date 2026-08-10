@@ -28,7 +28,7 @@ import { GitHubInstallation } from "../../../pages/registrationorlogin/install_g
 export default function Dashboard() {
     const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || 'http://127.0.0.1:8000';
     useAutonomicTokenRefresh();
-    const [isAiOpen, setIsAiOpen] = useState(false);
+    const [isAiOpen, setIsAiChatOpen] = useState(false);
     const [isPending, setIsPending] = useState(false);
     const [isProcessingRequest, setIsProcessingRequest] = useState(false);
     const [isOn, setIsOn] = useState(false);
@@ -40,7 +40,6 @@ export default function Dashboard() {
     const [selectedWorkspace, setSelectedWorkspace] = useState(""); // "" means "All Workspaces"
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [showInstallModal, setShowInstallModal] = useState(true);
-    const [hasCheckedInstallPrompt, setHasCheckedInstallPrompt] = useState(false);
 
     const [activeLeftTab, setActiveLeftTab] = useState("Home");
     const leftTabs = [
@@ -256,7 +255,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
     setIsPending(true);
     setIsProcessingRequest(true);
-    setIsAiOpen(false);
+    setIsAiChatOpen(true);
     console.log(activeModel,"buzz",activeProvider, "77")
 
     // Append user bubble instantly to the UI tree layout
@@ -299,10 +298,10 @@ const createEnvVar = (keyList: string[], workspace:string) => {
     function ClickBackIconTasks(){
         if (isProcessingRequest) {
             setIsProcessingRequest(false);
-            setIsAiOpen(true);
+            setIsAiChatOpen(true);
         }
         if (isAiOpen) {
-            setIsAiOpen(false);
+            setIsAiChatOpen(false);
             setIsProcessingRequest(false);
         }
     }
@@ -387,7 +386,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                             </div>
 
                             {/* <!-- chat support icon --> */}
-                            <div onClick={() => {setIsAiOpen(!isAiOpen)}} id="ai-chat-support" className="md:w-[100px] w-fit p-4 mt-auto shadow-md rounded-full cursor-pointer grid items-center justify-center ">
+                            <div onClick={() => {setIsAiChatOpen(!isAiOpen)}} id="ai-chat-support" className="md:w-[100px] w-fit p-4 mt-auto shadow-md rounded-full cursor-pointer grid items-center justify-center ">
                                 <div className="w-full flex justify-center">
                                     <Bot className="material-icons-outlined text-[12px]" />
                                 </div>
@@ -506,9 +505,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                         </div>
                                     </div>}
 
-                                    {/* live terminal component */}
-                                    {/* 🌟 FIX: Remove 'isProcessingRequest' from the outer mounting gate rule */}
-                                    {!isAiOpen && (
+                                    {isAiOpen && (
                                         <div className="w-full h-[80%]">
                                         {/* The Chat box stays mounted on your dashboard screen layout permanently */}
                                         <AIChat 

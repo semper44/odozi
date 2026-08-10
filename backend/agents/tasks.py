@@ -231,11 +231,26 @@ user_payload = {
 
 
 
-def find_matching_repos_from_redis(all_repos, user_provided_input):
+def find_matching_repos_from_redis(all_repos, user_provided_input, channel_name):
     """
     Finds all potential repository matches from Redis.
     Returns a list of unique, case-preserved GitHub repository names.
     """
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route": "CHAT",
+                        "chat_response": "Matching Repos" ,
+                    },
+                }
+            }
+        )
     did_not_match_exactly = True
     raw_search = user_provided_input.strip().lower()
     # Strip symbols entirely to catch missing hyphens/underscores
@@ -345,9 +360,24 @@ def ensure_orchestrator_yaml_is_online(
     repo_name,
     target_branch,
     git_token,
-    all_repos
+    all_repos,
+    channel_name
 ):
-    matching_results = find_matching_repos_from_redis(all_repos, repo_name)
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route": "CHAT",
+                        "chat_response": "Verifying Repo name and branch on github" ,
+                    },
+                }
+            }
+        )
+    matching_results = find_matching_repos_from_redis(all_repos, repo_name, channel_name)
     resolved_repo = matching_results["matched_names"]
     did_not_match_exactly = matching_results["did_not_match_exactly"]
 
@@ -833,10 +863,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
 
                         repo_data=cached_repositories,
 
-                        commit_sha=matched_repo.get(
-                            "default_branch",
-                            "main"
-                        ),
 
                         target_branch=(
                             rule.target_branch
@@ -844,11 +870,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                                 "default_branch",
                                 "main"
                             )
-                        ),
-
-                        ref_string=(
-                            f"refs/heads/"
-                            f"{rule.target_branch or matched_repo.get('default_branch','main')}"
                         ),
 
                         installation_id=installed_github_code,
@@ -1012,54 +1033,55 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
             }
         )
 
-    # 1. 🚀 FIX: Store the whole raw repo dict tied to its lowercase matching key
-    # If parent_repo_list is just a list of strings, match the string directly
+    # Storing the whole raw repo dict tied to its lowercase matching key
     cached_pairs = [(repo.get('name', '').lower(), repo) for repo in parent_repo_list if isinstance(repo, dict)]
 
     
     workspace_list = workspaces if isinstance(workspaces, list) else [workspaces]
 
-    for ws in workspace_list:
-        ws_name = ws.get("new_workspace_name")
-        raw_repos = ws.get("repositories", [])
-        
-        repos_found = []
-        repos_not_found = []
-
-        for raw_repo in raw_repos:
-            user_input = raw_repo.lower().replace(" ", "-").strip()
+    if len(workspace_list)>0:
+        for ws in workspace_list:
+            ws_name = ws.get("new_workspace_name")
+            raw_repos = ws.get("repositories", [])
             
-            # Find the full repository dictionary payload match from Redis cache
-            matched_repo_dict = next((repo for low_name, repo in cached_pairs if user_input in low_name), None)
-            
-            if matched_repo_dict:
-                # 2. 🚀 FIX: Structure the exact schema fields your Serializer expects!
-                # Adjust these keys ('repo_id', 'repo_name', etc.) to match your actual serializer fields
-                full_name = matched_repo_dict.get("full_name", "")
-                repo_owner = full_name.split("/")[0] if "/" in full_name else user.username
+            repos_found = []
+            repos_not_found = []
 
-                serializer_ready_data = {
-                    "repo_id": matched_repo_dict.get("id"),
-                    "repo_name": matched_repo_dict.get("name"),
-                    "repo_full_name": full_name,
-                    "repo_owner": repo_owner
-                }
-                repos_found.append(serializer_ready_data)
+            for raw_repo in raw_repos:
+                user_input = raw_repo.lower().replace(" ", "-").strip()
+                
+                # Find the full repository dictionary payload match from Redis cache
+                matched_repo_dict = next((repo for low_name, repo in cached_pairs if user_input in low_name), None)
+                
+                if matched_repo_dict:
+                    # 2. 🚀 FIX: Structure the exact schema fields your Serializer expects!
+                    # Adjust these keys ('repo_id', 'repo_name', etc.) to match your actual serializer fields
+                    full_name = matched_repo_dict.get("full_name", "")
+                    repo_owner = full_name.split("/")[0] if "/" in full_name else user.username
+
+                    serializer_ready_data = {
+                        "repo_id": matched_repo_dict.get("id"),
+                        "repo_name": matched_repo_dict.get("name"),
+                        "repo_full_name": full_name,
+                        "repo_owner": repo_owner
+                    }
+                    repos_found.append(serializer_ready_data)
+                else:
+                    repos_not_found.append(raw_repo)
+                    error_data["repo_resolution_for_workspace_creation_not_found"] = {
+                        "status": "error",
+                        "message": f"Repository '{user_input}' not found."
+                    }
+
+            # 3. Safe validation pass execution
+            if len(repos_found) > 0:
+                workspace_and_repo_result = create_workspace_with_repos(user, ws_name, repos_found)
+                error_data.update(workspace_and_repo_result)
+                return error_data
             else:
-                repos_not_found.append(raw_repo)
-                error_data["repo_resolution_for_workspace_creation_not_found"] = {
-                    "status": "error",
-                    "message": f"Repository '{user_input}' not found."
-                }
-
-        # 3. Safe validation pass execution
-        if len(repos_found) > 0:
-            workspace_and_repo_result = create_workspace_with_repos(user, ws_name, repos_found)
-            
-        else:
-            print(f"ogbemudia - No repos found for workspace: {ws_name}")
-            
-    return "Workspace processing completed"
+                error_data.update({"No_repos_found":f"No repos found for workspace: {ws_name}"})
+                
+    return "No workspace list"
 
 
 
@@ -1193,6 +1215,8 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
         }
     )
 
+    key_creation_summaries = []
+    key_creation_error_summaries = []
     
     # Ensure list type checking compliance even if a single dict object lands from the LLM
     requests_list = env_key_requests if isinstance(env_key_requests, list) else [env_key_requests]
@@ -1267,18 +1291,24 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
                     selected_repo_ids=selected_repo_ids  # Passes empty list cleanly if workspace scope is targeted
                 )
 
-                return service_result
+                key_creation_summaries.append(service_result)
 
                 
             except Exception as service_error:
-                error_data.update({
-                    "status": "error",
-                    "message": f"Background worker environmental key creation failure: {str(service_error)}."
-                })
+                key_creation_error_summaries.append(service_error)
                 print(f"🚨 Background worker environmental key processing failure: {str(service_error)}")
                 continue
 
-        return error_data
+        if key_creation_error_summaries:
+            error_data.update({
+                "status": "error",
+                "message": f"Background worker environmental key creation failure: {str(service_error)}."
+            })   
+            return error_data
+        
+        if key_creation_summaries:
+            error_data.update({"key_creation_summaries":key_creation_summaries })   
+            return error_data
     else:
         return "No Request list for backend" 
 
@@ -1323,6 +1353,8 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
             }
         }
     )
+    key_deletion_summaries = []
+    key_deletion_error_summaries = []
 
 
     requests_list = env_key_requests if isinstance(env_key_requests, list) else [env_key_requests]
@@ -1370,26 +1402,25 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                 )
 
                 print("service_result", service_result)
-
-                # 🚀 IMMEDIATE BROADCAST: Inform the React frontend layout what keys were purged
-                # chat_confirmation_text = (
-                #     f"Successfully wiped out {service_result['deleted_count']} environment keys "
-                #     f"across {service_result['affected_repositories_count']} repositories."
-                # )
-
-                return service_result
+                key_deletion_summaries.append(service_result)
 
 
 
             except Exception as service_error:
-                error_data.update({
-                    "status": "error",
-                    "message": f"Background worker environmental key deletion failure: {str(service_error)}."
-                })
+                key_deletion_error_summaries.append(service_error)
                 print(f"🚨 Background worker environmental key deletion failure: {str(service_error)}")
                 continue
 
-        return error_data
+        if key_deletion_error_summaries:
+            error_data.update({
+                "status": "error",
+                "message": f"Background worker environmental key creation failure: {str(service_error)}."
+            })   
+            return error_data
+        
+        if key_deletion_summaries:
+            error_data.update({"key_deletion_summaries":key_deletion_summaries })   
+            return error_data
     else:
         return "No Request list for backend" 
 
@@ -1403,11 +1434,24 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
     retry_backoff=True,         
     retry_backoff_max=15        
 )
-def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branch, repo_data,commit_sha, target_branch,ref_string, installation_id, user_requested_rules):
+def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branch, repo_data,target_branch,installation_id, user_requested_rules):
     """
     Asynchronous platform dispatcher.
     """
     channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route": "CHAT",
+                        "chat_response": "Started processing on github" ,
+                    },
+                }
+            }
+        )
     # =========================================================================
     # ✅ STEP 0: GENERATE DYNAMIC 1-HOUR TOKEN VIA PRIVATE KEY
     # =========================================================================
@@ -1421,7 +1465,7 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     # =========================================================================
     # STEP 1: SCRIPT STITCHING ENGINE (Your existing logic)
     # =========================================================================
-    resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, target_branch, git_token, repo_data)
+    resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, target_branch, git_token, repo_data, channel_name)
     print("as-what_nah", resolved_repo_name)
     if resolved_repo_name.get("status") != "success":
         print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
@@ -1517,6 +1561,19 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
     # =========================================================================
     # STEP 2: DISPATCH TO LIVE GITHUB API (Uncomment when ready to go live)
     # =========================================================================
+    async_to_sync(channel_layer.group_send)(
+                channel_name,
+                {
+                    "type": "chat_message",
+                    "payload": {
+                        "type": "orchestration_result",
+                        "raw_output": {
+                            "ui_layout_route": "CHAT",
+                            "chat_response": "Dispatching to Github" ,
+                        },
+                    }
+                }
+            )
     print("user_requested_rules", user_requested_rules)
      # 1. Start a clean flat list for your GitHub Actions YAML checkboxes
     yaml_tools_list = []

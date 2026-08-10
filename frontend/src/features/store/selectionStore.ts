@@ -75,7 +75,7 @@ interface SocketState {
    activeToast: string | null;
   streamingMessage: any | null;  // ✅ Global streaming data
   
-  // Actions to mutate state from your WebSocket manager
+  // Actions to mutate state from my WebSocket manager
   setConnectionStatus: (status: boolean) => void;
   setProcessingStatus: (isProcessing: boolean, message?: string) => void;
   setSocketError: (message: string, isImportant?: boolean) => void;
