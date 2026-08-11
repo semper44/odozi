@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { SendHorizontal } from "lucide-react"; // Adjust path to match your layout icon pack
+import { SendHorizontal } from "lucide-react"; 
 import { Typewriter } from "./Typewriter";
 
 export interface ChatMessage {
@@ -55,8 +55,8 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
                 <img src="images/gradient.jpg" alt="AI Avatar" className="rounded-full w-[35px] h-[35px] object-cover" />
                 <div className="bg-blue-50 border border-blue-100 text-sm p-3 rounded-lg text-gray-800">
                   
-                  {/* 🌟 PASS THE SCROLL LOGIC IN HERE */}
-                  <Typewriter text={msg.text} speed={15} onCharacterTyped={scrollToBottom} />
+                  {/* THE SCROLL LOGIC */}
+                  <Typewriter text={msg.text} speed={30} onCharacterTyped={scrollToBottom} />
                 </div>
               </div>
             )}

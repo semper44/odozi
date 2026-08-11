@@ -1794,16 +1794,13 @@ def agentic_chat_follow_up(
                 role="ai",
                 content=result.chat_response
             )
-
-        # -----------------------------------------------------------------
-        # Push response to websocket
-        # -----------------------------------------------------------------
+        print(f"stunned-{channel_name}")
         async_to_sync(get_channel_layer().group_send)(
             channel_name,
             {
                 "type": "chat_message",
                 "payload": {
-                    "type": "orchestration_result",
+                    "type": "follow_up_result",
                     "raw_output": {
                         "ui_layout_route": result.ui_layout_route,
                         "chat_response": result.chat_response,
@@ -1813,6 +1810,7 @@ def agentic_chat_follow_up(
             },
         )
 
+        print("follow-up-done")
         return result.model_dump()
 
     except Exception as e:

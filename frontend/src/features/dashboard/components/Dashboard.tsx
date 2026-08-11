@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { Bot,House, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, Plus } from "lucide-react";
+import { Bot,House, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
 import LiveTerminal from "@/features/streaming/components/LiveTerminal";
@@ -42,6 +42,8 @@ export default function Dashboard() {
     const [showInstallModal, setShowInstallModal] = useState(true);
 
     const [activeLeftTab, setActiveLeftTab] = useState("Home");
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const historyItems = ["Repository setup", "Environment variables", "Deploy checklist"];
     const leftTabs = [
         { id: "Home", label: "Home", icon: <House className="cursor-pointer" /> },
         { id: "Chat", label: "Chat", icon: <Bot className="cursor-pointer" /> },
@@ -306,6 +308,18 @@ const createEnvVar = (keyList: string[], workspace:string) => {
         }
     }
 
+    const handleLeftTabClick = (tabId: string) => {
+        setActiveLeftTab(tabId);
+
+        if (tabId === "Chat") {
+            setIsAiChatOpen((isOpen) => !isOpen);
+        }
+
+        if (tabId === "History") {
+            setIsHistoryOpen((isOpen) => !isOpen);
+        }
+    };
+
     // if (isLoading) {
     //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
     // }
@@ -327,12 +341,29 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                         {leftTabs.map((tab) => {
                             const isActive = activeLeftTab === tab.id;
                             return (
-                                <div
-                                    key={tab.id}
-                                    onClick={() => setActiveLeftTab(tab.id)}
-                                    className={`cursor-pointer w-full px-3 py-2 rounded-lg flex items-center justify-start gap-3 transition-colors ${isActive ? "bg-purple-300 text-black" : "bg-transparent hover:bg-purple-200 hover:text-black"}`}>
-                                    {tab.icon}
-                                    <p>{tab.label}</p>
+                                <div key={tab.id}>
+                                    <div
+                                        onClick={() => handleLeftTabClick(tab.id)}
+                                        className={`cursor-pointer w-full px-3 py-2 rounded-lg flex items-center justify-start gap-3 transition-colors ${isActive ? "bg-purple-300 text-black" : "bg-transparent hover:bg-purple-200 hover:text-black"}`}>
+                                        {tab.icon}
+                                        <p>{tab.label}</p>
+                                        {tab.id === "History" && (
+                                            <ChevronDown className={`ml-auto h-4 w-4 transition-transform duration-200 ${isHistoryOpen ? "rotate-180" : ""}`} />
+                                        )}
+                                    </div>
+                                    {tab.id === "History" && isHistoryOpen && (
+                                        <div className="mt-3 ml-9 space-y-2 border-l border-purple-200 pl-3">
+                                            {historyItems.map((item) => (
+                                                <button
+                                                    key={item}
+                                                    type="button"
+                                                    className="block w-full text-left text-xs text-gray-600 hover:text-purple-700"
+                                                >
+                                                    {item}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}
@@ -340,16 +371,33 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
                     {/* <!-- second tab  --> */}
                     <div className="top-tabs w-full grid xl:hidden gap-2">
-                        {leftTabs.map((tab, index) => {
+                        {leftTabs.map((tab) => {
                             const isActive = activeLeftTab === tab.id;
                             return (
-                                <p
-                                    key={tab.id}
-                                    onClick={() => setActiveLeftTab(tab.id)}
-                                    className={`cursor-pointer w-full px-3 py-2 rounded-lg flex items-center justify-start gap-3 transition-colors ${isActive ? "bg-purple-300 text-black" : "bg-transparent hover:bg-purple-200 hover:text-black"}`}>
-                                    {tab.icon}
-                                    {tab.label}
-                                </p>
+                                <div key={tab.id}>
+                                    <div
+                                        onClick={() => handleLeftTabClick(tab.id)}
+                                        className={`cursor-pointer w-full px-3 py-2 rounded-lg flex items-center justify-start gap-3 transition-colors ${isActive ? "bg-purple-300 text-black" : "bg-transparent hover:bg-purple-200 hover:text-black"}`}>
+                                        {tab.icon}
+                                        <p>{tab.label}</p>
+                                        {tab.id === "History" && (
+                                            <ChevronDown className={`ml-auto h-4 w-4 transition-transform duration-200 ${isHistoryOpen ? "rotate-180" : ""}`} />
+                                        )}
+                                    </div>
+                                    {tab.id === "History" && isHistoryOpen && (
+                                        <div className="mt-3 ml-3 space-y-2 border-l border-purple-200 pl-3">
+                                            {historyItems.map((item) => (
+                                                <button
+                                                    key={item}
+                                                    type="button"
+                                                    className="block w-full text-left text-xs text-gray-600 hover:text-purple-700"
+                                                >
+                                                    {item}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             );
                         })}
                     </div>
@@ -531,9 +579,9 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                         <WorkspaceModal
                             isOpen={isModalOpen}
                             onClose={() => setIsModalOpen(false)}
-                            allRepositories={items || []} // ✅ Feed the entire collection into the modal!
-                            selectedIds={selectedIdsSet}               // ✅ Pass the store selection tracker reference
-                            onToggleSelect={toggleSelect}               // ✅ Pass the action selection click modifier handler
+                            allRepositories={items || []} 
+                            selectedIds={selectedIdsSet}               
+                            onToggleSelect={toggleSelect}               
                             onSubmit={handleCreateWorkspace}
                             isPending={useCreateRepos.isPending}
                         />

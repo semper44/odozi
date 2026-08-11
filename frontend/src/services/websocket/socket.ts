@@ -119,7 +119,7 @@ class SocketService {
         }
 
         else if (packet.type === "orchestration_result") {
-          useSocketStore.getState().setProcessingStatus(false);
+          useSocketStore.getState().setProcessingStatus(true);
           let cleanPayload = packet;
 
           if (packet.raw_output && typeof packet.raw_output === "string") {
@@ -136,6 +136,36 @@ class SocketService {
             this.messageCallback(cleanPayload);
           }
         }
+
+        else if (packet.type === "follow_up_result") {
+          // 🎯 Turn off your processing loading animations across the React application canvas
+          useSocketStore.getState().setProcessingStatus(false);
+          
+          let cleanFollowUpPayload = packet;
+
+          // Safely unpack the nested stringified JSON block from your Celery follow-up task
+          if (packet.raw_output) {
+            if (typeof packet.raw_output === "string") {
+              try {
+                cleanFollowUpPayload = JSON.parse(packet.raw_output);
+              } catch (parseErr) {
+                console.error("🚨 Failed unpacking nested follow_up raw_output payload:", parseErr);
+              }
+            } else if (typeof packet.raw_output === "object") {
+              cleanFollowUpPayload = packet.raw_output;
+            }
+          }
+
+          console.log("🎯 Unpacked Follow-up Payload:", cleanFollowUpPayload);
+
+          // Updating my chat messaging streams so the user sees the explanation question
+          useSocketStore.getState().setStreamingMessage(cleanFollowUpPayload);
+          
+          if (this.messageCallback) {
+            this.messageCallback(cleanFollowUpPayload);
+          }
+        }
+
       } catch (err) {
         console.error("⚠️ Failed parsing incoming WebSocket JSON data frame payload:", err);
       }
