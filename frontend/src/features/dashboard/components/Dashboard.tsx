@@ -131,15 +131,6 @@ export default function Dashboard() {
         }
     }, [error, navigate]);
 
-    if (isLoading) {
-        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
-    }
-
-    if (error) {
-        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
-    }
-
-    
     console.log(data, "selected repos in dashboard")
 
     // useEffect(() => {
@@ -202,6 +193,17 @@ export default function Dashboard() {
     const { activeProvider, activeModel } = useLLMStore();
     console.log("could",activeProvider, activeModel)
     const activeToast = useSocketStore((state) => state.activeToast);
+
+    // Keep every hook above these conditional returns. A repository request can
+    // change from loading to resolved between renders, but React still needs the
+    // same hook order on both renders.
+    if (isLoading) {
+        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
+    }
+
+    if (error) {
+        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
+    }
 
    
 

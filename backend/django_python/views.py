@@ -71,7 +71,7 @@ def dashboard_view(request):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed. Must use POST for security verification."}, status=405)
 
-    # 1. RETRIEVE INCOMING IDENTIFICATION CONTAINERS
+    # RETRIEVE INCOMING IDENTIFICATION CONTAINERS
     ticket_id = request.COOKIES.get("ticket_id")
     stored_jwt_access_token = request.COOKIES.get("jwt_access_token")
     browser_family = get_browser_family(request)
@@ -106,13 +106,12 @@ def dashboard_view(request):
             cache.delete(redis_ticket_key)
             return JsonResponse({"error": "Fingerprint validation failed."}, status=403)
         print("passed fingerprint check")
-        # Destructure and decrypt your signed application JWT access token string
+        # Destructure and decrypt of my signed application JWT access token string
         try:
             jwt_encrypted_access = raw_payload["jwt_access_token"]
             jwt_decrypted_bytes = decrypt_token(jwt_encrypted_access)
             token_string = jwt_decrypted_bytes.decode("utf-8") if isinstance(jwt_decrypted_bytes, bytes) else jwt_decrypted_bytes
             print(1111)
-            # Parse claims map variables locally
             parsed_jwt = AccessToken(token_string) # type: ignore
             username = parsed_jwt.get("username")
             user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
@@ -123,8 +122,8 @@ def dashboard_view(request):
             github_access_token = github_decrypted_bytes.decode("utf-8") if isinstance(github_decrypted_bytes, bytes) else github_decrypted_bytes
             print(3333)
             jwt_encrypted_refresh = raw_payload["jwt_refresh_token"]
-            jwt_decrypted_bytes = decrypt_token(jwt_encrypted_refresh)
-            token_refresh_string = jwt_decrypted_bytes.decode("utf-8") if isinstance(jwt_decrypted_bytes, bytes) else jwt_decrypted_bytes
+            token_refresh_string = decrypt_token(jwt_encrypted_refresh)
+            # token_refresh_string = jwt_decrypted_bytes_refresh.decode("utf-8") if isinstance(jwt_decrypted_bytes, bytes) else jwt_decrypted_bytes
 
             expires_at = raw_payload["expires_at"]
 
@@ -148,7 +147,7 @@ def dashboard_view(request):
         try:
             # If your cookie stores raw unencrypted text, read directly; if encrypted, run decrypt_token()
             github_access_token = stored_jwt_access_token.decode("utf-8") if isinstance(stored_jwt_access_token, bytes) else stored_jwt_access_token
-            # token_refresh_string = request.COOKIES.get("jwt_refresh_token")
+            token_refresh_string = request.COOKIES.get("jwt_refresh_token")
 
             print("22222",stored_jwt_access_token)
             parsed_jwt = AccessToken(stored_jwt_access_token) # type: ignore
