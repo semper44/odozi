@@ -1,9 +1,11 @@
 // useAutonomicTokenRefresh.ts
 import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { tokenStore } from "@/services/auth/tokenStore";
 
 export const useAutonomicTokenRefresh = () => {
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
+  const navigate = useNavigate();
 
   useEffect(() => {
     const performBackgroundLifespanScrape = async () => {
@@ -44,6 +46,10 @@ export const useAutonomicTokenRefresh = () => {
           }
         } else {
           console.error(`❌ Refresh flight aborted by Django backend server. Status: ${response.status}`);
+          if (response.status === 401 || response.status === 403) {
+            tokenStore.clear();
+            navigate("/login", { replace: true });
+          }
         }
       } catch (err) {
         console.error("🚨 Background proactive rotation flight failed:", err);
@@ -58,5 +64,5 @@ export const useAutonomicTokenRefresh = () => {
     const intervalId = setInterval(performBackgroundLifespanScrape, testIntervalMs);
 
     return () => clearInterval(intervalId); // Clean up active timers cleanly on component unmount
-  }, [backendUrl]);
+  }, [backendUrl, navigate]);
 };

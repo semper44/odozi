@@ -130,6 +130,8 @@ class SocketService {
             }
           }
 
+          console.log("dripppp", cleanPayload)
+
           useSocketStore.getState().setStreamingMessage(cleanPayload);
           
           if (this.messageCallback) {
@@ -144,16 +146,14 @@ class SocketService {
           let cleanFollowUpPayload = packet;
 
           // Safely unpack the nested stringified JSON block from your Celery follow-up task
-          if (packet.raw_output) {
+          if(packet.raw_output) {
             if (typeof packet.raw_output === "string") {
               try {
                 cleanFollowUpPayload = JSON.parse(packet.raw_output);
               } catch (parseErr) {
                 console.error("🚨 Failed unpacking nested follow_up raw_output payload:", parseErr);
               }
-            } else if (typeof packet.raw_output === "object") {
-              cleanFollowUpPayload = packet.raw_output;
-            }
+            } 
           }
 
           console.log("🎯 Unpacked Follow-up Payload:", cleanFollowUpPayload);

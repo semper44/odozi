@@ -35,6 +35,13 @@ class TokenStore {
     return jwt_token_store ? JSON.parse(jwt_token_store).token : null;
   }
 
+  public clear() {
+    this.accessToken = null;
+    this.refreshToken = null;
+    localStorage.removeItem("gh_token_expires_at");
+    localStorage.removeItem("jwt_token_expires_at");
+  }
+
   public isNearingExpiration(): boolean {
     console.log("expiry not working")
     const standardIsoStr = this.getExpiresAtTimestamp();

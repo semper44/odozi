@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bot,House, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
@@ -27,6 +28,7 @@ import { GitHubInstallation } from "../../../pages/registrationorlogin/install_g
 
 export default function Dashboard() {
     const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || 'http://127.0.0.1:8000';
+    const navigate = useNavigate();
     useAutonomicTokenRefresh();
     const [isAiOpen, setIsAiChatOpen] = useState(false);
     const [isPending, setIsPending] = useState(false);
@@ -43,11 +45,12 @@ export default function Dashboard() {
 
     const [activeLeftTab, setActiveLeftTab] = useState("Home");
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const historyItems = ["Repository setup", "Environment variables", "Deploy checklist"];
     const leftTabs = [
         { id: "Home", label: "Home", icon: <House className="cursor-pointer" /> },
         { id: "Chat", label: "Chat", icon: <Bot className="cursor-pointer" /> },
-        { id: "History", label: "History", icon: <CheckCheck className="cursor-pointer" /> },
+        { id: "History", label: "History", icon: <ChevronDown className={`cursor-pointer ${isHistoryOpen ? "rotate-180" : ""}`} /> },
     ];
 
     const selected = useSelectionStore((state) => state.selected);
@@ -97,6 +100,14 @@ export default function Dashboard() {
         error,
     } = useRepos();
 
+    // Covers a session that expires after the protected route has mounted.
+    useEffect(() => {
+        const status = (error as { status?: number } | null)?.status;
+        if (status === 401 || status === 403) {
+            navigate("/login", { replace: true });
+        }
+    }, [error, navigate]);
+
     // useEffect(() => {
     //     if (isLoading) return;
 
@@ -119,17 +130,20 @@ export default function Dashboard() {
         }
     }, [streamingMessage]);
 
-    console.log( "alagbara", error)
-    localStorage.setItem("gh_token_expires_at", data?.expires_at);
-    const get_time_obj = localStorage.getItem("jwt_token_expires_at");
-    if (!get_time_obj && !get_time_obj["token"]) {
-        const manualExpiryTimeMs = Date.now() + 90000;
-        localStorage.setItem("jwt_token_expires_at", JSON.stringify({ token: String(manualExpiryTimeMs), dont_touch: true }));
-        console.log("ran_tokennnnn")
-    } else {
-        console.log("Existing JWT expiry timestamp found in localStorage:", get_time_obj);
-    }
-    console.log("🔒 Tokens captured in RAM. Timestamp cached to localStorage.", localStorage.getItem("gh_token_expires_at"));
+    useEffect(() => {
+        if (data?.expires_at) {
+            localStorage.setItem("gh_token_expires_at", data.expires_at);
+        }
+
+        const jwtExpiry = localStorage.getItem("jwt_token_expires_at");
+        if (!jwtExpiry) {
+            const manualExpiryTimeMs = Date.now() + 90000;
+            localStorage.setItem(
+                "jwt_token_expires_at",
+                JSON.stringify({ token: String(manualExpiryTimeMs), dont_touch: true }),
+            );
+        }
+    }, [data?.expires_at]);
 
      // Normalizing data to avoid null errors
     const filteredRepositories = useMemo(() => {
@@ -298,6 +312,8 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
 
     function ClickBackIconTasks(){
+        setActiveLeftTab("Home");
+
         if (isProcessingRequest) {
             setIsProcessingRequest(false);
             setIsAiChatOpen(true);
@@ -310,6 +326,11 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
     const handleLeftTabClick = (tabId: string) => {
         setActiveLeftTab(tabId);
+        setIsMobileMenuOpen(false);
+
+        if (tabId === "Home") {
+            ClickBackIconTasks();
+        }
 
         if (tabId === "Chat") {
             setIsAiChatOpen((isOpen) => !isOpen);
@@ -337,40 +358,9 @@ const createEnvVar = (keyList: string[], workspace:string) => {
             <div className=" xl:mr-0 w-[11.5%] h-full flex flex-col hidden md:block pt-3">
 
                 <div className="tabs flex flex-col h-full">
-                    <div id="project-tabs" className="w-full hidden xl:grid top-tabs gap-2">
-                        {leftTabs.map((tab) => {
-                            const isActive = activeLeftTab === tab.id;
-                            return (
-                                <div key={tab.id}>
-                                    <div
-                                        onClick={() => handleLeftTabClick(tab.id)}
-                                        className={`cursor-pointer w-full px-3 py-2 rounded-lg flex items-center justify-start gap-3 transition-colors ${isActive ? "bg-purple-300 text-black" : "bg-transparent hover:bg-purple-200 hover:text-black"}`}>
-                                        {tab.icon}
-                                        <p>{tab.label}</p>
-                                        {tab.id === "History" && (
-                                            <ChevronDown className={`ml-auto h-4 w-4 transition-transform duration-200 ${isHistoryOpen ? "rotate-180" : ""}`} />
-                                        )}
-                                    </div>
-                                    {tab.id === "History" && isHistoryOpen && (
-                                        <div className="mt-3 ml-9 space-y-2 border-l border-purple-200 pl-3">
-                                            {historyItems.map((item) => (
-                                                <button
-                                                    key={item}
-                                                    type="button"
-                                                    className="block w-full text-left text-xs text-gray-600 hover:text-purple-700"
-                                                >
-                                                    {item}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
 
                     {/* <!-- second tab  --> */}
-                    <div className="top-tabs w-full grid xl:hidden gap-2">
+                    <div className="top-tabs w-full sm:grid hidden gap-2">
                         {leftTabs.map((tab) => {
                             const isActive = activeLeftTab === tab.id;
                             return (
@@ -380,9 +370,6 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                         className={`cursor-pointer w-full px-3 py-2 rounded-lg flex items-center justify-start gap-3 transition-colors ${isActive ? "bg-purple-300 text-black" : "bg-transparent hover:bg-purple-200 hover:text-black"}`}>
                                         {tab.icon}
                                         <p>{tab.label}</p>
-                                        {tab.id === "History" && (
-                                            <ChevronDown className={`ml-auto h-4 w-4 transition-transform duration-200 ${isHistoryOpen ? "rotate-180" : ""}`} />
-                                        )}
                                     </div>
                                     {tab.id === "History" && isHistoryOpen && (
                                         <div className="mt-3 ml-3 space-y-2 border-l border-purple-200 pl-3">
@@ -408,8 +395,18 @@ const createEnvVar = (keyList: string[], workspace:string) => {
             {/* center, topbar and right bar  */}
             <div className="w-[80%] left-right-container flex-grow">
                 {/* topbar */}
-                <div className="w-full pt-[10px]">
+                <div className="relative w-full pt-[10px]">
                     <div className="w-full flex items-center gap-6 pl-2 pr-4">
+
+                        <button
+                            type="button"
+                            onClick={() => setIsMobileMenuOpen((isOpen) => !isOpen)}
+                            className="relative z-[60] md:hidden rounded-lg p-2 text-black hover:bg-purple-200"
+                            aria-label="Toggle navigation menu"
+                            aria-expanded={isMobileMenuOpen}
+                        >
+                            <Menu className="h-6 w-6" />
+                        </button>
 
                         {/*  my proj */}
                         <div className="my-proj w-fit hidden md:flex items-center gap-2">
@@ -440,6 +437,47 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                 </div>
                                     <p className="text-[12px] hidden md:flex">Support</p>
                             </div>
+                        </div>
+                    </div>
+
+                    <div
+                        className={`fixed inset-y-0 left-0 z-50 h-screen w-72 border-r border-gray-200 bg-white px-3 pb-6 pt-16 shadow-xl transition-transform duration-300 ease-in-out md:hidden ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full pointer-events-none"}`}
+                        aria-hidden={!isMobileMenuOpen}
+                    >
+                        <div className="space-y-2">
+                            {leftTabs.map((tab) => (
+                                <div key={tab.id}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (tab.id === "History") {
+                                                setActiveLeftTab(tab.id);
+                                                setIsHistoryOpen((isOpen) => !isOpen);
+                                                return;
+                                            }
+                                            handleLeftTabClick(tab.id);
+                                        }}
+                                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${activeLeftTab === tab.id ? "bg-purple-300 text-black" : "hover:bg-purple-200"}`}
+                                    >
+                                        {tab.icon}
+                                        <span>{tab.label}</span>
+                                    </button>
+                                    {tab.id === "History" && isHistoryOpen && (
+                                        <div className="mt-3 ml-4 space-y-2 border-l border-purple-200 pl-3">
+                                            {historyItems.map((item) => (
+                                                <button
+                                                    key={item}
+                                                    type="button"
+                                                    onClick={() => setIsMobileMenuOpen(false)}
+                                                    className="block w-full text-left text-xs text-gray-600 hover:text-purple-700"
+                                                >
+                                                    {item}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>
@@ -482,9 +520,6 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                         {(isAiOpen || isProcessingRequest) && (<div className="AI-menu w-full h-full flex flex-col items-center justify-center gap-4">
                                                     <div className="w-full md:w-[75%] px-3 py-4 h-full">
                                 <div className="flex items-center justify-between">
-                                    <div className="md:hidden">
-                                        <Menu id="expand-history" className="cursor-pointer"/>
-                                    </div>
                                     <ChevronLeft onClick={() => ClickBackIconTasks()} className="cursor-pointer"/>
                                 </div>
                                 {/* ai-chat-placeholder */}

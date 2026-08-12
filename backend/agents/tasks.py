@@ -1499,12 +1499,12 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
             # DEFENSIVE ACCIDENT PROTECTION: Ensure rule_payload is a dictionary
             payload_data = rule_payload if isinstance(rule_payload, dict) else {}
             
-            # SAFE FALLBACK: Extract target and constraints safely using .get()
-            # If the user passed nothing (like for third-party scripts), it defaults to safe empty nodes
-            sanitised_payload = {
-                "target": payload_data.get("target", {}),
-                "constraints": payload_data.get("constraints", {})
-            }
+            # Preserve rule-specific options (for example ``required_auth``),
+            # while guaranteeing the common nested dictionaries expected by the
+            # constraint visitors.
+            sanitised_payload = dict(payload_data)
+            sanitised_payload.setdefault("target", {})
+            sanitised_payload.setdefault("constraints", {})
             
             # Stitch the class initialization line safely using valid layout arguments
             line = f"            {class_name}({json.dumps(sanitised_payload)}),"
@@ -1534,16 +1534,38 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
                         with open(full_path, "r", encoding="utf-8") as f:
                             code = f.read()
                         
+                        # The generated checks are ``ast.NodeVisitor`` classes.
+                        # They expose ``visit`` and a ``findings`` list; they do
+                        # not implement an ``analyze_file`` method.
+                        tree = ast.parse(code, filename=full_path)
+
                         for visitor in visitors:
-                            findings = visitor.analyze_file(full_path, code)
-                            print(
-                                visitor.__class__.__name__,
-                                "found",
-                                len(findings),
-                                "issues in",
-                                full_path
-                            )
-                            all_findings.extend(findings)
+                            try:
+                                # A visitor instance is reused for every file,
+                                # so reset its findings before visiting this AST.
+                                visitor.findings = []
+                                visitor.visit(tree)
+                                findings = visitor.findings
+
+                                for finding in findings:
+                                    if isinstance(finding, dict):
+                                        finding.setdefault("file", full_path)
+
+                                print(
+                                    visitor.__class__.__name__,
+                                    "found",
+                                    len(findings),
+                                    "issues in",
+                                    full_path
+                                )
+                                all_findings.extend(findings)
+                            except Exception as visitor_error:
+                                # A faulty rule must not stop other visitors
+                                # from analysing the current file.
+                                print(
+                                    f"ERROR running {{visitor.__class__.__name__}} "
+                                    f"on {{full_path}}: {{visitor_error}}"
+                                )
                     except Exception as e:
                         print(
                             f"ERROR processing {{full_path}}: {{e}}"
