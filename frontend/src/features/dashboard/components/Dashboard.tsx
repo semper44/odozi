@@ -1,9 +1,8 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bot,House, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
-import LiveTerminal from "@/features/streaming/components/LiveTerminal";
 import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMessage";
 import { useSelectionStore } from "../../store/selectionStore";
 import { useLLMStore } from "../../store/selectionStore";
@@ -27,7 +26,7 @@ import { GitHubInstallation } from "../../../pages/registrationorlogin/install_g
 
 
 export default function Dashboard() {
-    const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || 'http://127.0.0.1:8000';
+    const AI_RESPONSE_TIMEOUT_MS = 90_000;
     const navigate = useNavigate();
     useAutonomicTokenRefresh();
     const [isAiOpen, setIsAiChatOpen] = useState(false);
@@ -38,6 +37,7 @@ export default function Dashboard() {
     const [showLlmModal, setShowLlmModal] = useState(false);
     const [prompt, setPrompt] = useState("");
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const aiResponseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedWorkspace, setSelectedWorkspace] = useState(""); // "" means "All Workspaces"
     const [isModalOpen, setIsModalOpen] = useState(false)
@@ -57,13 +57,30 @@ export default function Dashboard() {
     const useCreateRepos = useCreateReposMutation();
     const useCreateEnv = useCreateEnvKeysMutation();
     const socketError = useSocketStore((state) => state.socketError);
-    const streamingMessage = useSocketStore((state) => state.streamingMessage);  // ✅ Access from store
     const isProcessing = useSocketStore((state) => state.isProcessing);
     // const statusMessage = useSocketStore((state) => state.statusMessage);
+   
+    const clearAiResponseTimeout = () => {
+        if (aiResponseTimeoutRef.current) {
+            clearTimeout(aiResponseTimeoutRef.current);
+            aiResponseTimeoutRef.current = null;
+        }
+    };
+
     const { sendMessage } = useStreamingSocket((packet) => {
         console.log(socketError, "🎯 Caught incoming orchestration block payload:", packet);
+
+        // An orchestration packet proves the server accepted the request, so
+        // replace the initial full-screen state with the regular chat panel.
+        setIsProcessingRequest(false);
+
+        // Intermediate orchestration updates are not completion. Keep the
+        // watchdog alive until the final Celery follow-up result arrives.
+        if (packet?.type === "follow_up_result") {
+            clearAiResponseTimeout();
+        }
         
-        if (packet.raw_output.chat_response) {
+        if (packet?.raw_output?.chat_response) {
             // Create and append the AI reply text frame
             const newAiMessage: ChatMessage = {
                 id: crypto.randomUUID(),
@@ -76,7 +93,13 @@ export default function Dashboard() {
     });
 
     useEffect(() => {
+        return () => clearAiResponseTimeout();
+    }, []);
+
+    useEffect(() => {
         if (socketError) {
+            clearAiResponseTimeout();
+            setIsProcessingRequest(false);
             console.log("🚨 Dashboard caught background worker crash or API block:", socketError);
             
             // Append a system or error message to your chat interface display window
@@ -92,7 +115,6 @@ export default function Dashboard() {
         }
     }, [socketError]);
 
-    console.log(selected, "selected repos in dashboard")
     
     const {
         data,
@@ -101,12 +123,24 @@ export default function Dashboard() {
     } = useRepos();
 
     // Covers a session that expires after the protected route has mounted.
+    // This must run before loading/error returns so auth failures can redirect.
     useEffect(() => {
         const status = (error as { status?: number } | null)?.status;
         if (status === 401 || status === 403) {
             navigate("/login", { replace: true });
         }
     }, [error, navigate]);
+
+    if (isLoading) {
+        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
+    }
+
+    if (error) {
+        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
+    }
+
+    
+    console.log(data, "selected repos in dashboard")
 
     // useEffect(() => {
     //     if (isLoading) return;
@@ -124,11 +158,7 @@ export default function Dashboard() {
 
     
     // ✅ Console log streaming messages in Dashboard
-    useEffect(() => {
-        if (streamingMessage) {
-            console.log("🎯 Dashboard caught streaming packet:", streamingMessage);
-        }
-    }, [streamingMessage]);
+
 
     useEffect(() => {
         if (data?.expires_at) {
@@ -229,69 +259,85 @@ export default function Dashboard() {
     };
 
 
-const createEnvVar = (keyList: string[], workspace:string) => {
-};
+    const createEnvVar = (keyList: string[], workspace:string) => {
+    };
 
 
- const handleSendRequest = async (textInput: string) => {
-     console.log(activeToast !== null,"activetoast", activeToast)
-     console.log({"yyyyyyyyyyy":activeProvider, "activeModel":activeModel})
-     if(activeProvider === '' || activeModel === ''){
-         toast.error("Please fill in the LLM details first", {
-             position: "top-right",
+    const handleSendRequest = async (textInput: string) => {
+        console.log(activeToast !== null,"activetoast", activeToast)
+        console.log({"yyyyyyyyyyy":activeProvider, "activeModel":activeModel})
+        if(activeProvider === '' || activeModel === ''){
+            toast.error("Please fill in the LLM details first", {
+                position: "top-right",
+                    autoClose: 4000,
+                    theme: "colored"
+                });
+
+                return
+            }  
+        if (activeToast !== null){
+                alert(9999999)
+                toast.error(activeToast.message || "Gateway terminated connection: Reconnecting", {
+                position: "top-right",
                 autoClose: 4000,
                 theme: "colored"
             });
 
             return
-        }  
-    if (activeToast !== null){
-            alert(9999999)
-            toast.error(activeToast.message || "Gateway terminated connection: Reconnecting", {
-            position: "top-right",
-            autoClose: 4000,
-            theme: "colored"
+        }
+
+        // alert(`${prompt}---${!textInput}-${textInput}`)
+
+        const cleanedInput = textInput.trim();
+        if(!cleanedInput){
+            alert("none")
+            return
+        }
+
+        // alert(textInput) 
+
+        useSocketStore.getState().setProcessingStatus(true, "AI is spinning up orchestration jobs...");
+
+
+        setIsPending(true);
+        setIsProcessingRequest(true);
+        setIsAiChatOpen(true);
+        console.log(activeModel,"buzz",activeProvider, "77")
+
+        // Append user bubble instantly to the UI tree layout
+        const newUserMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        sender: "user",
+        text: cleanedInput,
+        };
+        setMessages((prev) => [...prev, newUserMessage]);
+
+        sendMessage({
+            type: "start_processing",
+            prompt: cleanedInput,
+            provider: activeProvider,
+            model_name: activeModel,
         });
 
-        return
-    }
+        clearAiResponseTimeout();
+        aiResponseTimeoutRef.current = setTimeout(() => {
+            useSocketStore.getState().setProcessingStatus(false);
+            setIsProcessingRequest(false);
+            setIsPending(false);
+            setMessages((previousMessages) => [
+                ...previousMessages,
+                {
+                    id: crypto.randomUUID(),
+                    sender: "ai",
+                    text: "The AI worker did not respond in time. Please try again in a moment.",
+                },
+            ]);
+            toast.error("The AI request timed out. Please try again.");
+            aiResponseTimeoutRef.current = null;
+        }, AI_RESPONSE_TIMEOUT_MS);
 
-    // alert(`${prompt}---${!textInput}-${textInput}`)
-
-    const cleanedInput = textInput.trim();
-    if(!cleanedInput){
-        alert("none")
-        return
-    }
-
-    // alert(textInput) 
-
-    useSocketStore.getState().setProcessingStatus(true, "AI is spinning up orchestration jobs...");
-
-
-    setIsPending(true);
-    setIsProcessingRequest(true);
-    setIsAiChatOpen(true);
-    console.log(activeModel,"buzz",activeProvider, "77")
-
-    // Append user bubble instantly to the UI tree layout
-    const newUserMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      sender: "user",
-      text: cleanedInput,
+        setIsPending(false);
     };
-    setMessages((prev) => [...prev, newUserMessage]);
-
-    sendMessage({
-        type: "start_processing",
-        prompt: cleanedInput,
-        provider: activeProvider,
-        model_name: activeModel,
-    });
-
-
-    setIsPending(false);
-  };
 
 
     console.log(selected,"filteredRep", selectedWorkspace)
@@ -341,14 +387,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
         }
     };
 
-    // if (isLoading) {
-    //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
-    // }
-
-    // if (error) {
-    //     return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
-    // }
-
+    
 
     return (
         <>
@@ -493,7 +532,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
 
                         {/* repo List */}
                             <div className="space-y-4">
-                                {items.map((repo) => {
+                                {data.repositories.map((repo) => {
                                 // It is "ticked" if all are shown (no single match) OR if it is the single match
                                 const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
 
@@ -543,7 +582,7 @@ const createEnvVar = (keyList: string[], workspace:string) => {
                                                 }
                                                 }}
                                                 placeholder="Type your message..."
-                                                className={`pl-4 rounded-xl border red-800 mt-4 w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
+                                                className={`pl-4 pr-12 rounded-xl border red-800 mt-4 w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
                                                 style={{ borderColor: "black" }}
                                             />
                                             <div className="">

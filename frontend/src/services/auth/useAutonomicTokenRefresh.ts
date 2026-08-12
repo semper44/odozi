@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { tokenStore } from "@/services/auth/tokenStore";
 
 export const useAutonomicTokenRefresh = () => {
-  const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
+  const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || "http://127.0.0.1:8000";
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -30,10 +30,9 @@ export const useAutonomicTokenRefresh = () => {
           const data = await response.json();
           console.log("📥 Raw refresh data payload received from Django:", data);
 
-          // ✅ FIX: SimpleJWT outputs 'access' and 'refresh'. 
-          // Match your calculated timestamp strategy to whatever key handles your absolute expiration date string
-          const freshAccess = data.access;
-          const freshRefresh = data.refresh || "";
+          // GitHubRefreshView returns the JWT fields under these names.
+          const freshAccess = data.jwt_access_token;
+          const freshRefresh = data.jwt_refresh_token || "";
           
           // Fallback timestamp generation if your refresh view doesn't explicitly return an 'expiresAt' field
           const futureTimestamp = data.expires_at || new Date(Date.now() + 15 * 60 * 1000).toISOString();
