@@ -12,10 +12,14 @@ import requests
 import traceback
 import subprocess
 import textwrap
+import ast
 from toon import encode
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Optional, cast
+from django.utils import timezone
 
 from celery import shared_task, group, chord, signature
+
+from general.models import AuditJob
 
 from .custom_functions.rules_registry import AST_TOOL_REGISTRY
 from .custom_functions import rule_classes
@@ -363,6 +367,7 @@ def ensure_orchestrator_yaml_is_online(
     all_repos,
     channel_name
 ):
+    error_data = {}
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
             channel_name,
@@ -386,7 +391,7 @@ def ensure_orchestrator_yaml_is_online(
     if len(resolved_repo) == 0:
         error_data["repo_resolution_not_found"] = {
             "status": "failed",
-            "repo":resolved_repo[0],
+            "repo": repo_name,
             "message": f"You typed '{repo_name}', but I couldn't find any matching repository."
         }
 
@@ -396,7 +401,7 @@ def ensure_orchestrator_yaml_is_online(
     if len(resolved_repo) > 1:
         error_data["repo_resolution"] = {
             "status": "failed",
-            "repo":resolved_repo[0],
+            "repo": repo_name,
             "message": f"Multiple repositories matched your input. Which one did you mean?\n{matching_results}"
         }
 
@@ -419,7 +424,8 @@ def ensure_orchestrator_yaml_is_online(
     headers = {
         "Authorization": f"Bearer {git_token}",
         "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Django-Application-Gateway"
     }
 
     yaml_file_path = os.path.join(
@@ -508,20 +514,22 @@ def ensure_orchestrator_yaml_is_online(
         for error_message in errors:
             print(f"5k---{error_message}")
             error_string = error_message.get('body')
+            crash_error = None
+            if error_string:
+                try:
+                    parsed_error_string = json.loads(error_string)
+                    crash_error = parsed_error_string.get('message', None)
+                except Exception:
+                    crash_error = str(error_string)
+            if not crash_error:
+                crash_error = error_message.get('error', f"HTTP status {error_message.get('status')}")
 
-            # Parse the string into a Python dictionary
-            parsed_error_string = json.loads(error_string)
-
-            # Extract just the message
-            print("wwwwwwwwwwwwwwww", parsed_error_string)
-            crash_error = parsed_error_string.get('message', None)
             crash_branch = error_message.get('branch')
-            if crash_error:
-                error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch - '{crash_branch}' for repo - '{resolved_repo[0]}', 'branch - {error_message['branch']}'. Error: {crash_error}"
-                error_data["repo_resolution"]["repo"] = resolved_repo[0]
-                error_data["repo_resolution"]["branch"] = crash_branch
-                break
-
+            repo_display = resolved_repo[0] if resolved_repo else repo_name
+            error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch - '{crash_branch}' for repo - '{repo_display}'. Error: {crash_error}"
+            error_data["repo_resolution"]["repo"] = repo_display
+            error_data["repo_resolution"]["branch"] = crash_branch
+            break
 
         print("mum-dad2", error_data)
         return error_data
@@ -620,9 +628,304 @@ Example Summary Output:
 
 """
 
+# ============================================================================
+# REDIS-DRIVEN AGENTIC PIPELINE STATE ENGINE
+# ============================================================================
+
+PIPELINE_STATE_TTL = 60 * 15  # 15 minutes
+PIPELINE_TIMEOUT_SECONDS = 60 * 14
+FOLLOW_UP_LOCK_TTL = 60 * 5
 
 
+def pipeline_redis_key(pipeline_id: str) -> str:
+    """
+    Main Redis state key for one complete user orchestration.
+    """
+    return f"agentic_pipeline:{pipeline_id}"
 
+
+def create_pipeline_state(
+    pipeline_id: str,
+    provider: str,
+    model_name: str,
+    api_key: str,
+    channel_name: str,
+    session_id: int,
+    history_payload: List[Dict[str, str]],
+    local_results_expected: bool = False,
+    auditjob_id: Optional[str] = None,
+):
+    """Creates the single Redis state used by a GitHub-backed orchestration."""
+    state = {
+        "pipeline_id": pipeline_id,
+        "provider": provider,
+        "model_name": model_name,
+        "api_key": api_key,
+        "channel_name": channel_name,
+        "session_id": session_id,
+        "history_payload": history_payload,
+        "local_results": [],
+        "local_results_ready": not local_results_expected,
+        "github_results": [],
+        "expected_github_results": [],
+        "follow_up_started": False,
+        "github_dispatches": 0,
+        "auditjob_id": auditjob_id,
+        "created_at": timezone.now().isoformat(),
+    }
+    cache.set(pipeline_redis_key(pipeline_id), state, timeout=PIPELINE_STATE_TTL)
+    print(f"🧠 REDIS PIPELINE CREATED: pipeline_id={pipeline_id} local_results_expected={local_results_expected} auditjob_id={auditjob_id}")
+    return state
+
+
+def get_pipeline_state(pipeline_id: str):
+    return cache.get(pipeline_redis_key(pipeline_id))
+
+
+def save_pipeline_state(pipeline_id: str, state: dict):
+    cache.set(pipeline_redis_key(pipeline_id), state, timeout=PIPELINE_STATE_TTL)
+
+
+def extract_pipeline_tools(user_requested_rules) -> List[str]:
+    """Extracts the list of tool names that would run on GitHub from user_requested_rules."""
+    strategies_dict = {}
+    if isinstance(user_requested_rules, dict):
+        strategies_dict = user_requested_rules
+    elif isinstance(user_requested_rules, list):
+        for item in user_requested_rules:
+            if isinstance(item, dict) and "rule_key" in item:
+                strategies_dict[item["rule_key"]] = item.get("params", {})
+
+    yaml_tools_list = []
+    for rule_key in strategies_dict.keys():
+        if rule_key in AST_TOOL_REGISTRY:
+            if "odozi_visitors" not in yaml_tools_list:
+                yaml_tools_list.append("odozi_visitors")
+        else:
+            if rule_key not in yaml_tools_list:
+                yaml_tools_list.append(rule_key)
+    return yaml_tools_list
+
+
+def register_expected_github_result(pipeline_id: str, repository: str, tool: str):
+    """Registers one exact repo:tool event expected from GitHub."""
+    state = get_pipeline_state(pipeline_id)
+    if not state:
+        raise RuntimeError(f"Redis pipeline state missing: {pipeline_id}")
+    event_key = f"{repository}:{tool}"
+    expected = state.setdefault("expected_github_results", [])
+    if event_key not in expected:
+        expected.append(event_key)
+        save_pipeline_state(pipeline_id, state)
+    print(f"📝 EXPECTED GITHUB RESULT REGISTERED: {event_key} pipeline={pipeline_id}")
+
+
+def add_local_results_to_pipeline(pipeline_id: str, results: List[Any]):
+    """Stores all completed local Celery results and closes the local gate."""
+    state = get_pipeline_state(pipeline_id)
+    if not state:
+        print(f"⚠️ Cannot add local results. Pipeline missing: {pipeline_id}")
+        return False
+    existing = state.setdefault("local_results", [])
+    if results:
+        existing.extend(results)
+    state["local_results_ready"] = True
+    state["local_results_completed_at"] = timezone.now().isoformat()
+    save_pipeline_state(pipeline_id, state)
+    print(f"📦 LOCAL RESULTS STORED: pipeline={pipeline_id} count={len(results or [])}")
+    return True
+
+
+def add_github_result_to_pipeline(pipeline_id: str, repository: str, tool: str, result: dict):
+    """Stores one GitHub result using the exact repo:tool correlation key."""
+    state = get_pipeline_state(pipeline_id)
+    if not state:
+        print(f"⚠️ GitHub result arrived for unknown pipeline: {pipeline_id}")
+        return False
+    event_key = f"{repository}:{tool}"
+    expected_list = state.get("expected_github_results", [])
+    expected = set(expected_list)
+
+    actual_event_key = event_key
+    if expected and event_key not in expected:
+        for exp in expected:
+            if exp.lower() == event_key.lower():
+                actual_event_key = exp
+                break
+        else:
+            print(f"⚠️ UNEXPECTED GITHUB RESULT IGNORED: {event_key} pipeline={pipeline_id}")
+            return False
+
+    received = state.setdefault("github_results", [])
+    for existing in received:
+        if existing.get("event_key") == actual_event_key:
+            print(f"♻️ DUPLICATE GITHUB RESULT IGNORED: {actual_event_key}")
+            return False
+    received.append({
+        "event_key": actual_event_key,
+        "repository": repository,
+        "tool": tool,
+        "result": result,
+        "received_at": timezone.now().isoformat(),
+    })
+    save_pipeline_state(pipeline_id, state)
+    print(f"📥 GITHUB RESULT STORED: {actual_event_key} pipeline={pipeline_id}")
+    return True
+
+
+def record_github_dispatch_failure(
+    pipeline_id: str,
+    repository: str,
+    error_message: str,
+    target_branch: Optional[str] = None,
+    tools: Optional[List[str]] = None,
+    error_details: Optional[dict] = None,
+) -> bool:
+    """
+    Marks expected GitHub results as failed in Redis when workflow synchronization or dispatch fails.
+    Immediately triggers the pipeline follow-up if all other events are satisfied.
+    """
+    state = get_pipeline_state(pipeline_id)
+    if not state:
+        print(f"⚠️ Cannot record dispatch failure. Pipeline missing: {pipeline_id}")
+        return False
+
+    expected_events = state.get("expected_github_results", [])
+    recorded_any = False
+    tool_list = tools or []
+
+    # Find matching event keys in expected_github_results
+    matching_events = []
+    for event_key in expected_events:
+        if ":" in event_key:
+            ev_repo, ev_tool = event_key.split(":", 1)
+            repo_matches = (
+                ev_repo.lower() == repository.lower()
+                or repository.lower() in ev_repo.lower()
+                or ev_repo.lower() in repository.lower()
+            )
+            tool_matches = not tool_list or ev_tool in tool_list
+            if repo_matches and tool_matches:
+                matching_events.append((event_key, ev_repo, ev_tool))
+
+    # If no specific matches were found by repo name, but tool_list matched
+    if not matching_events and expected_events:
+        for event_key in expected_events:
+            if ":" in event_key:
+                ev_repo, ev_tool = event_key.split(":", 1)
+                if not tool_list or ev_tool in tool_list:
+                    matching_events.append((event_key, ev_repo, ev_tool))
+
+    # For each matching event, add a failure result to Redis pipeline state
+    for event_key, ev_repo, ev_tool in matching_events:
+        failure_result = {
+            "type": "github_workflow_dispatch_failure",
+            "status": "failed",
+            "workflow_conclusion": "dispatch_failed",
+            "tool": ev_tool,
+            "repo": ev_repo,
+            "branch": target_branch,
+            "pipeline_id": pipeline_id,
+            "error": error_message,
+            "details": error_details or {},
+            "message": error_message,
+        }
+        add_github_result_to_pipeline(
+            pipeline_id=pipeline_id,
+            repository=ev_repo,
+            tool=ev_tool,
+            result=failure_result,
+        )
+        recorded_any = True
+        print(f"❌ RECORDED GITHUB DISPATCH FAILURE IN REDIS: {event_key} -> {error_message}")
+
+    # If no expected events were matched, record as local result so error is never lost
+    if not recorded_any:
+        fallback_result = {
+            "type": "github_workflow_dispatch_failure",
+            "status": "failed",
+            "workflow_conclusion": "dispatch_failed",
+            "repo": repository,
+            "branch": target_branch,
+            "pipeline_id": pipeline_id,
+            "error": error_message,
+            "details": error_details or {},
+            "message": error_message,
+        }
+        add_local_results_to_pipeline(pipeline_id, [fallback_result])
+        print(f"❌ RECORDED FALLBACK DISPATCH FAILURE IN LOCAL RESULTS: pipeline={pipeline_id}")
+
+    # Immediately check and trigger follow-up if ready
+    follow_up_launched = trigger_pipeline_follow_up_if_ready(pipeline_id)
+    print(f"🚀 PIPELINE CHECK AFTER DISPATCH FAILURE: pipeline={pipeline_id} follow_up_launched={follow_up_launched}")
+    return True
+
+
+def pipeline_is_ready(pipeline_id: str) -> bool:
+    """Returns True only after local work and every expected GitHub event finish."""
+    state = get_pipeline_state(pipeline_id)
+    if not state:
+        return False
+    local_ready = bool(state.get("local_results_ready", True))
+    expected = set(state.get("expected_github_results", []))
+    received = {item.get("event_key") for item in state.get("github_results", [])}
+    github_ready = expected.issubset(received)
+    ready = local_ready and github_ready
+    print(
+        f"🔎 PIPELINE CHECK: pipeline={pipeline_id} local_ready={local_ready} "
+        f"expected_github={len(expected)} received_github={len(received)} ready={ready}"
+    )
+    return ready
+
+
+def build_pipeline_follow_up_results(pipeline_id: str):
+    """Combines local and GitHub results for agentic_chat_follow_up."""
+    state = get_pipeline_state(pipeline_id)
+    if not state:
+        return []
+    combined = list(state.get("local_results", []))
+    combined.extend(item.get("result", {}) for item in state.get("github_results", []))
+    return combined
+
+
+def trigger_pipeline_follow_up_if_ready(pipeline_id: str):
+    """Idempotent Redis-gated follow-up launcher."""
+    state = get_pipeline_state(pipeline_id)
+    if not state:
+        print(f"⚠️ FOLLOW-UP CHECK: pipeline not found {pipeline_id}")
+        return False
+    if state.get("follow_up_started"):
+        print(f"♻️ FOLLOW-UP ALREADY STARTED: {pipeline_id}")
+        return False
+    if not pipeline_is_ready(pipeline_id):
+        return False
+
+    lock_key = f"agentic_pipeline:followup_lock:{pipeline_id}"
+    if not cache.add(lock_key, "1", timeout=FOLLOW_UP_LOCK_TTL):
+        print(f"♻️ FOLLOW-UP LOCKED BY ANOTHER WORKER: {pipeline_id}")
+        return False
+
+    state = get_pipeline_state(pipeline_id)
+    if not state or state.get("follow_up_started") or not pipeline_is_ready(pipeline_id):
+        return False
+
+    state["follow_up_started"] = True
+    state["follow_up_started_at"] = timezone.now().isoformat()
+    save_pipeline_state(pipeline_id, state)
+    combined_results = build_pipeline_follow_up_results(pipeline_id)
+
+    print(f"🚀 ALL PIPELINE EVENTS COMPLETE: Launching follow-up pipeline={pipeline_id}")
+    agentic_chat_follow_up.delay(
+        task_results=combined_results,
+        provider=state.get("provider", ""),
+        model_name=state.get("model_name", ""),
+        api_key=state.get("api_key", ""),
+        channel_name=state.get("channel_name", ""),
+        session_id=state.get("session_id"),
+        history_payload=state.get("history_payload", []),
+        auditjob_id=state.get("auditjob_id")
+    )
+    return True
 @shared_task(
     bind=True,
     autoretry_for= UNIVERSAL_NETWORK_ERRORS,
@@ -630,183 +933,382 @@ Example Summary Output:
     retry_backoff=True,        
     retry_backoff_max=30
 )
-def process_agentic_chat_turn_task(self, channel_name, user_id, username, token, session_id, prompt_text, repos, provider, model_name, api_key):
+
+def process_agentic_chat_turn_task(
+    self,
+    channel_name,
+    user_id,
+    username,
+    token,
+    session_id,
+    prompt_text,
+    repos,
+    provider,
+    model_name,
+    api_key
+):
     channel_layer = get_channel_layer()
-    
+    auditjob_id = None
+
     # -------------------------------------------------------------------------
     # PHASE 1: FAST DATABASE READ (Get past records instantly)
     # -------------------------------------------------------------------------
     if not prompt_text:
         return
-    
+
     with transaction.atomic():
         user = User.objects.get(pk=user_id)
-        session, _ = ChatSession.objects.get_or_create(pk=session_id, defaults={"user": user})
-        past_messages = list(session.messages.all().order_by('created_at')[:15])
+
+        session, _ = ChatSession.objects.get_or_create(
+            pk=session_id,
+            defaults={"user": user}
+        )
+
+        past_messages = list(
+            session.messages.all()
+            .order_by('created_at')[:15]
+        )
+
         past_messages.reverse()
 
     history_messages = []
     history_payload = []
+
     for msg in past_messages:
+
         if msg.role == "user":
+
             history_messages.append(
                 HumanMessage(content=msg.content)
             )
-            history_payload.append({"role": "user", "content": msg.content})
+
+            history_payload.append({
+                "role": "user",
+                "content": msg.content
+            })
+
         elif msg.role == "ai":
+
             history_messages.append(
                 AIMessage(content=msg.content)
             )
-            history_payload.append({"role": "ai", "content": msg.content})
+
+            history_payload.append({
+                "role": "ai",
+                "content": msg.content
+            })
 
 
-    # Assemble your structural Prompt Template using ONE clean system message entry
+    # -------------------------------------------------------------------------
+    # PROMPT TEMPLATE
+    # -------------------------------------------------------------------------
+
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", system_instruction_text),
-        # 🚀 THE NATIVE FIX: Pass history as an explicit, independent structural message entry block!
-        MessagesPlaceholder(variable_name="history"),
-        ("human", "{input}")                                        
+
+        MessagesPlaceholder(
+            variable_name="history"
+        ),
+
+        ("human", "{input}")
     ])
 
-    # Dynamic model vendor factory setup based on your Zustand selection state
-    if provider == "openai":
-        llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
-    else:
-        key = settings.GEMINI_API_KEY
-        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0, google_api_key=key)
 
-    # Bind the Pydantic schema class structure natively to the model runner engine
-    structured_llm = llm.with_structured_output(OrchestratorAction)
+    # -------------------------------------------------------------------------
+    # LLM FACTORY
+    # -------------------------------------------------------------------------
+
+    if provider == "openai":
+
+        llm = ChatOpenAI(
+            model=model_name,
+            temperature=0,
+            api_key=api_key
+        )
+
+    else:
+
+        key = settings.GEMINI_API_KEY
+
+        llm = ChatGoogleGenerativeAI(
+            model=model_name,
+            temperature=0,
+            google_api_key=key
+        )
+
+
+    # -------------------------------------------------------------------------
+    # STRUCTURED OUTPUT
+    # -------------------------------------------------------------------------
+
+    structured_llm = llm.with_structured_output(
+        OrchestratorAction
+    )
+
     chain = prompt_template | structured_llm
 
+
     try:
-        # -------------------------------------------------------------------------
-        # PHASE 2: LONG NETWORK API CALL (Token Tracking Context - No DB Lock)
-        # -------------------------------------------------------------------------
+
+        # ---------------------------------------------------------------------
+        # PHASE 2: LONG NETWORK API CALL
+        # ---------------------------------------------------------------------
+
         with get_openai_callback() as cb:
-            result = cast(OrchestratorAction , chain.invoke({
-                "history": history_messages, 
-                "input": prompt_text.strip()
-            }))
-            
+
+            result = cast(
+                OrchestratorAction,
+                chain.invoke({
+                    "history": history_messages,
+                    "input": prompt_text.strip()
+                })
+            )
+
             prompt_tokens = cb.prompt_tokens
             completion_tokens = cb.completion_tokens
             total_cost = cb.total_cost
 
-            print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
-            print(result.active_rules)
-            # print(json.dumps(result.model_dump(), indent=2)) 
-            print(prompt_tokens, "chim", completion_tokens, "uche", total_cost)
-            print(result)
-            print("============================================================\n")
+
+        print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
+        print(result.active_rules)
+
+        print(
+            prompt_tokens,
+            "chim",
+            completion_tokens,
+            "uche",
+            total_cost
+        )
+
+        print(result)
+
+        print(
+            "============================================================\n"
+        )
 
 
-        # -------------------------------------------------------------------------
+        # ---------------------------------------------------------------------
         # PHASE 3: CONTEXT CONVERSATION OVERHAUL & BASELINE SEEDING
-        # -------------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+
         ui_layout_route = result.ui_layout_route
         chat_response = result.chat_response
 
         with transaction.atomic():
+
             if result.evict_prior_history:
-                # 1. 🧹 THE OVERHAUL: Instantly wipe out all past messages for this session
-                session.messages.all().delete()                
-                # 2. Save the current user text prompt as the first record of the new era
-                ChatMessage.objects.create(session=session, role="user", content=prompt_text)
-                
-                # Saving the LLM's own high-utility condensed text summary
-                # This becomes the single baseline row memory anchor for the next message turn!
+
+                # -------------------------------------------------------------
+                # OVERHAUL
+                # -------------------------------------------------------------
+
+                session.messages.all().delete()
+
+                ChatMessage.objects.create(
+                    session=session,
+                    role="user",
+                    content=prompt_text
+                )
+
                 summary_marker = f"""
                     [ACTIVE SYSTEM CONTEXT BASELINE]:
                     The following infrastructure states were successfully verified and created by you in previous turns:
                     {result.condensed_history_summary}
                 """
-                ChatMessage.objects.create(session=session, role="ai", content=summary_marker)
+
+                ChatMessage.objects.create(
+                    session=session,
+                    role="ai",
+                    content=summary_marker
+                )
+
             else:
-                # 📥 STANDARD WORKING MEMORY: Save strings sequentially during casual Q&A phases
-                ChatMessage.objects.create(session=session, role="user", content=prompt_text)
-                ChatMessage.objects.create(session=session, role="ai", content=result.chat_response)
+
+                # -------------------------------------------------------------
+                # STANDARD WORKING MEMORY
+                # -------------------------------------------------------------
+
+                ChatMessage.objects.create(
+                    session=session,
+                    role="user",
+                    content=prompt_text
+                )
+
+                ChatMessage.objects.create(
+                    session=session,
+                    role="ai",
+                    content=result.chat_response
+                )
 
 
+        # ---------------------------------------------------------------------
+        # PHASE 3.5: USER / GITHUB REPOSITORY CONTEXT
+        # ---------------------------------------------------------------------
 
-        # -------------------------------------------------------------------------
-        # 🚀 BRIDGE PLUG: INTERCEPT THE DESIGN INTENTS & TRIGGER YOUR CORE PIPELINE
-        # -------------------------------------------------------------------------
-        # We look up the GitHub owner/username from the active authenticated user profile context
-        repo_owner = user.username 
+        repo_owner = user.username
 
-        print(result.intents, "and", result.active_rules)
+        print(
+            result.intents,
+            "and",
+            result.active_rules
+        )
+
         details_cache_key = f"user:repos:{user_id}"
-        cached_details = cache.get(details_cache_key)
-        # print(token,"cached_repos", cached_details, "bro")
-        # Check if data exists and is the correct format (list or dict of repos)
+
+        cached_details = cache.get(
+            details_cache_key
+        )
+
+
+        # ---------------------------------------------------------------------
+        # LOAD REPOSITORIES FROM CACHE
+        # ---------------------------------------------------------------------
+
         if cached_details is not None:
-            # Process your cached_repos directly here
-            cached_repos = cached_details.get("repo_names", {})
-            print(f"⚡ [CACHE HIT] Celery successfully loaded repositories for key: {cached_repos}")
+
+            cached_repos = cached_details.get(
+                "repo_names",
+                {}
+            )
+
+            print(
+                f"⚡ [CACHE HIT] Celery successfully loaded repositories for key: {cached_repos}"
+            )
+
         else:
-            print(f"⚠️ Cache Miss or Invalid Type for key: {details_cache_key}. Falling back to standard processing.")
-         
-            repos_url = f"https://api.github.com/users/{username}/repos"
+
+            print(
+                f"⚠️ Cache Miss or Invalid Type for key: "
+                f"{details_cache_key}. "
+                f"Falling back to standard processing."
+            )
+
+            repos_url = (
+                f"https://api.github.com/users/"
+                f"{username}/repos"
+            )
+
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "Django-Application-Gateway" # GitHub drops headers lacking identifiers
+                "User-Agent": "Django-Application-Gateway"
             }
 
+
             try:
-                github_res = requests.get(repos_url, headers=headers, params={"per_page": 100, "sort": "updated"}, timeout=5.0)
-                print(f"📊 [GITHUB API] External status responded: {github_res.status_code}")
-                repositories_data = github_res.json() if github_res.status_code == 200 else []
+
+                github_res = requests.get(
+                    repos_url,
+                    headers=headers,
+                    params={
+                        "per_page": 100,
+                        "sort": "updated"
+                    },
+                    timeout=5.0
+                )
+
+                print(
+                    f"📊 [GITHUB API] External status responded: "
+                    f"{github_res.status_code}"
+                )
+
+                repositories_data = (
+                    github_res.json()
+                    if github_res.status_code == 200
+                    else []
+                )
+
                 github_res_status = github_res.status_code
-                print("github repositories_data", repositories_data)
+
+                print(
+                    "github repositories_data",
+                    repositories_data
+                )
+
                 cleaned_repos = []
-                # for easy access in tasks.py
                 repo_names = []
 
+
                 for r in repositories_data:
-                    # 1. Defensive type check
+
                     if not isinstance(r, dict):
                         continue
-                        
+
                     name = r.get("name")
-                    
-                    # 2. Append to full structured list
+
                     cleaned_repos.append({
                         "id": r.get("id"),
                         "name": name,
                         "full_name": r.get("full_name"),
-                        "default_branch": r.get('default_branch') 
+                        "default_branch": r.get(
+                            "default_branch"
+                        )
                     })
-                    
-                    # 3. Simultaneously append to the flat name list
+
                     if name:
                         repo_names.append(name)
 
 
-                # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
                 if github_res_status == 200:
+
                     cached_details["repositories"] = cleaned_repos
-                    cache.set(details_cache_key, cached_details, timeout=28800)
+
+                    cache.set(
+                        details_cache_key,
+                        cached_details,
+                        timeout=28800
+                    )
+
 
             except requests.RequestException as e:
-                print(f"Error occurred while fetching repositories: {e}")
-                async_to_sync(channel_layer.group_send)(
+
+                print(
+                    f"Error occurred while fetching repositories: {e}"
+                )
+
+                async_to_sync(
+                    channel_layer.group_send
+                )(
                     channel_name,
                     {
                         "type": "chat_message",
-                        "payload": {"type": "error", "message": f"❌ [GITHUB API] Error occurred while fetching repositories: {e}"}
+                        "payload": {
+                            "type": "error",
+                            "message": (
+                                "❌ [GITHUB API] Error occurred "
+                                f"while fetching repositories: {e}"
+                            )
+                        }
                     }
                 )
-                
+
                 return
 
-        
-        # 2. BuildIing concurrent execution canvas signature list array
+
+        # ---------------------------------------------------------------------
+        # PHASE 4: BUILD ASYNCHRONOUS EXECUTION PLAN
+        # ---------------------------------------------------------------------
+        pipeline_id = uuid.uuid4().hex
+
+        # ---------------------------------------------------------------------
+        # PHASE 4A: BUILD TASK SIGNATURES
+        # ---------------------------------------------------------------------
+
         intent_signatures = []
-        cached_repositories = cached_details.get("repositories", [])
+
+        cached_repositories = cached_details.get("repositories",[])
 
 
+        # ---------------------------------------------------------------------
+        # GITHUB PIPELINE SIGNATURES
+        # ---------------------------------------------------------------------
+
+        github_pipeline_signatures = []
+        github_expected_events = []
+
+        if result.intents:
+            auditjob = AuditJob.objects.create()
+            auditjob_id = str(auditjob.id)
 
         if "run_static_analysis" in result.intents:
 
@@ -816,17 +1318,20 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                 .installation_id
             )
 
+
             cached_pairs = [
                 (
                     repo.get("name", "").lower(),
                     repo
                 )
+
                 for repo in cached_repositories
+
                 if isinstance(repo, dict)
             ]
 
-            for rule in result.active_rules:
 
+            for rule in result.active_rules:
                 repo_name = (
                     rule.repo_name
                     .lower()
@@ -834,19 +1339,34 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                     .strip()
                 )
 
+
                 matched_repo = next(
                     (
                         repo
-                        for low_name, repo in cached_pairs
+
+                        for low_name, repo
+                        in cached_pairs
+
                         if repo_name in low_name
                     ),
-                    None,
+                    None
                 )
 
+
                 if not matched_repo:
+
                     continue
 
-                intent_signatures.append(
+
+                # -------------------------------------------------------------
+                # <<< CHANGED >>>
+                #
+                # GitHub tasks are kept separately from local tasks.
+                #
+                # Most importantly, NO follow-up callback is attached to them.
+                # -------------------------------------------------------------
+
+                github_pipeline_signatures.append(
 
                     run_agentic_pipeline.s(
 
@@ -863,7 +1383,6 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
 
                         repo_data=cached_repositories,
 
-
                         target_branch=(
                             rule.target_branch
                             or matched_repo.get(
@@ -876,79 +1395,231 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
 
                         user_requested_rules=rule.strategies,
 
+                        # <<< CHANGED >>>
+                        # This must eventually reach GitHub's workflow input.
+                        pipeline_id=pipeline_id
                     )
                 )
 
+                strategies = rule.strategies
+                strategy_keys = []
+                if isinstance(strategies, dict):
+                    strategy_keys = list(strategies.keys())
+                elif isinstance(strategies, list):
+                    strategy_keys = [
+                        item.get("rule_key")
+                        for item in strategies
+                        if isinstance(item, dict) and item.get("rule_key")
+                    ]
+
+                actual_repository = matched_repo.get("name")
+                for rule_key in strategy_keys:
+                    tool_name = (
+                        "odozi_visitors"
+                        if rule_key in AST_TOOL_REGISTRY
+                        else rule_key
+                    )
+                    event_key = f"{actual_repository}:{tool_name}"
+                    if event_key not in github_expected_events:
+                        github_expected_events.append(event_key)
+
+
+        # ---------------------------------------------------------------------
+        # LOCAL WORKSPACE TASKS
+        # ---------------------------------------------------------------------
 
         if "create_workspace" in result.intents:
-            # 🚀 PASS THE CACHED REPO LIST DIRECTLY AS A PARAMETER HERE TOO!
-            
-            
-            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
-            # You pass the task path name string and your parameters directly inside signature()
+
             result_dict = result.model_dump()
-            serializable_workspaces = result_dict.get('workspaces_to_create', [])
-            ui_layout = result_dict.get('ui_layout', [])
-            cached_repositories = cached_details.get("repositories", [])
+
+            serializable_workspaces = (
+                result_dict.get(
+                    "workspaces_to_create",
+                    []
+                )
+            )
+
+            ui_layout = result_dict.get(
+                "ui_layout",
+                []
+            )
+
+            cached_repositories = (
+                cached_details.get(
+                    "repositories",
+                    []
+                )
+            )
+
+
             intent_signatures.append(
+
                 signature(
                     "agents.tasks.async_handle_workspace_creation_task",
-                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout) # 📥 Pass your variables as an ordered tuple
+
+                    args=(
+                        serializable_workspaces,
+                        channel_name,
+                        user_id,
+                        cached_repositories,
+                        ui_layout
+                    )
                 )
             )
 
-        
-        if "delete_workspace" in result.intents:            
-            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
-            # You pass the task path name string and your parameters directly inside signature()
+
+        # ---------------------------------------------------------------------
+        # LOCAL WORKSPACE DELETION
+        # ---------------------------------------------------------------------
+
+        if "delete_workspace" in result.intents:
+
             result_dict = result.model_dump()
-            serializable_workspaces = result_dict.get('workspaces_to_delete', [])
-            print("serializable_workspaces", serializable_workspaces)
-            ui_layout = result_dict.get('ui_layout', [])
-            cached_repositories = cached_details.get("repositories", [])
+
+            serializable_workspaces = (
+                result_dict.get(
+                    "workspaces_to_delete",
+                    []
+                )
+            )
+
+            print(
+                "serializable_workspaces",
+                serializable_workspaces
+            )
+
+            ui_layout = result_dict.get(
+                "ui_layout",
+                []
+            )
+
+            cached_repositories = (
+                cached_details.get(
+                    "repositories",
+                    []
+                )
+            )
+
+
             intent_signatures.append(
+
                 signature(
                     "agents.tasks.async_handle_workspace_deletion_task",
-                    args=(serializable_workspaces, channel_name,user_id, cached_repositories, ui_layout)
+
+                    args=(
+                        serializable_workspaces,
+                        channel_name,
+                        user_id,
+                        cached_repositories,
+                        ui_layout
+                    )
                 )
             )
 
+
+        # ---------------------------------------------------------------------
+        # LOCAL ENVIRONMENT CREATION
+        # ---------------------------------------------------------------------
 
         if "create_repo_env" in result.intents:
-            
-            # 2. 🚀 THE TYPE-SAFE FIX: No square brackets used! 
-            # You pass the task path name string and your parameters directly inside signature()
+
             result_dict = result.model_dump()
-            env_key_requests = result_dict.get('env_keys_to_create', [])
-            ui_layout = result_dict.get('ui_layout', [])
-            cached_repositories = cached_details.get("repositories", [])
+
+            env_key_requests = (
+                result_dict.get(
+                    "env_keys_to_create",
+                    []
+                )
+            )
+
+            ui_layout = result_dict.get(
+                "ui_layout",
+                []
+            )
+
+            cached_repositories = (
+                cached_details.get(
+                    "repositories",
+                    []
+                )
+            )
+
+
             intent_signatures.append(
+
                 signature(
                     "agents.tasks.async_handle_env_key_creation_task",
-                    args=(env_key_requests, channel_name,user_id, ui_layout, cached_repositories) 
+
+                    args=(
+                        env_key_requests,
+                        channel_name,
+                        user_id,
+                        ui_layout,
+                        cached_repositories
+                    )
                 )
             )
 
-       
+
+        # ---------------------------------------------------------------------
+        # LOCAL ENVIRONMENT DELETION
+        # ---------------------------------------------------------------------
+
         if "delete_repo_env" in result.intents:
-            
-            # passing the task path name string and  parameters directly inside signature()
             result_dict = result.model_dump()
-            env_key_requests = result_dict.get('env_keys_to_delete', [])
-            ui_layout = result_dict.get('ui_layout', [])
-            cached_repositories = cached_details.get("repositories", [])
+            env_key_requests = (
+                result_dict.get(
+                    "env_keys_to_delete",
+                    []
+                )
+            )
+
+            ui_layout = result_dict.get(
+                "ui_layout",
+                []
+            )
+
+            cached_repositories = (
+                cached_details.get(
+                    "repositories",
+                    []
+                )
+            )
+
+
             intent_signatures.append(
+
                 signature(
                     "agents.tasks.async_handle_env_key_deletion_task",
-                    args=(env_key_requests, channel_name,user_id, ui_layout, cached_repositories) # 📥 Pass your variables as an ordered tuple
+
+                    args=(
+                        env_key_requests,
+                        channel_name,
+                        user_id,
+                        ui_layout,
+                        cached_repositories
+                    )
                 )
             )
 
 
+        # ---------------------------------------------------------------------
+        # PHASE 5: DETERMINE WHICH ORCHESTRATION PATH WE HAVE
+        # ---------------------------------------------------------------------
+        has_github_pipeline = bool(github_pipeline_signatures)
+        has_local_tasks = bool(intent_signatures)
 
-        # Fire all intent tasks concurrently and run follow-up only after they're done.
-        if intent_signatures:
-            print(f"intent-error-{error_data}")
+        print("\n" + "=" * 80)
+        print("🔀 ORCHESTRATION ROUTING")
+        print(f"   GitHub pipeline : {has_github_pipeline}")
+        print(f"   Local tasks     : {has_local_tasks}")
+        print(f"   Pipeline ID     : {pipeline_id}")
+        print("=" * 80)
+
+        # =====================================================================
+        # CASE A: LOCAL TASKS ONLY
+        # =====================================================================
+        if has_local_tasks and not has_github_pipeline:
             callback_signature = signature(
                 "agents.tasks.agentic_chat_follow_up",
                 kwargs={
@@ -957,26 +1628,103 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
                     "api_key": api_key,
                     "channel_name": channel_name,
                     "session_id": session_id,
-                    "history_payload": history_payload
+                    "history_payload": history_payload,
+                    "auditjob_id": auditjob_id
                 },
             )
             workflow_canvas = group(intent_signatures) | callback_signature
             workflow_canvas.apply_async()
+            print("✅ LOCAL-ONLY PIPELINE DISPATCHED WITH CELERY CHORD.")
 
-        
-        print("coat", "swaaaaa")
+        # =====================================================================
+        # CASE B: GITHUB PIPELINE EXISTS
+        # =====================================================================
+        elif has_github_pipeline:
+            create_pipeline_state(
+                pipeline_id=pipeline_id,
+                provider=provider,
+                model_name=model_name,
+                api_key=api_key,
+                channel_name=channel_name,
+                session_id=session_id,
+                history_payload=history_payload,
+                local_results_expected=has_local_tasks,
+                auditjob_id=auditjob_id,
+            )
 
-        # The follow-up task will be dispatched as a chord callback and therefore
-        # will execute after all intent tasks complete.
-        
-        # 🚀 FIXED: Swapped from .send to .group_send to connect to group_user_room static strings safely!
-        async_to_sync(channel_layer.group_send)(
-            channel_name, # Targets the static room name string
+            # Register every exact repo:tool event BEFORE dispatching anything.
+            for event_key in github_expected_events:
+                repository, tool = event_key.split(":", 1)
+                register_expected_github_result(
+                    pipeline_id=pipeline_id,
+                    repository=repository,
+                    tool=tool,
+                )
+
+            print("\n" + "=" * 80)
+            print("📦 GITHUB PIPELINE STATE STORED")
+            print(f"   PIPELINE ID    : {pipeline_id}")
+            print(f"   EXPECTED       : {github_expected_events}")
+            print(f"   LOCAL TASKS    : {has_local_tasks}")
+            print("=" * 80)
+
+            if intent_signatures:
+                print("🚀 Dispatching local tasks asynchronously...")
+                local_canvas = (
+                    group(intent_signatures)
+                    | signature(
+                        "agents.tasks.collect_local_pipeline_results",
+                        kwargs={"pipeline_id": pipeline_id},
+                    )
+                )
+                local_canvas.apply_async()
+
+            print("🚀 Dispatching GitHub pipeline tasks asynchronously...")
+            group(github_pipeline_signatures).apply_async()
+
+            pipeline_timeout_check.apply_async(
+                args=[pipeline_id],
+                countdown=PIPELINE_TIMEOUT_SECONDS,
+            )
+
+            print(
+                "⏳ GitHub pipeline handed off. "
+                "Waiting for webhook results before follow-up."
+            )
+
+        # =====================================================================
+        # CASE C: NO EXECUTION TASKS
+        # =====================================================================
+        else:
+            print("ℹ️ No executable intents were generated.")
+
+
+        # ---------------------------------------------------------------------
+        # FRONTEND STATUS MESSAGE
+        # ---------------------------------------------------------------------
+
+        print(
+            "coat",
+            "swaaaaa"
+        )
+
+
+        async_to_sync(
+            channel_layer.group_send
+        )(
+            channel_name,
             {
                 "type": "chat_message",
+
                 "payload": {
+
                     "type": "orchestration_result",
-                    "raw_output": {"ui_layout_route":ui_layout_route, "chat_response":chat_response},
+
+                    "raw_output": {
+                        "ui_layout_route": ui_layout_route,
+                        "chat_response": chat_response
+                    },
+
                     "usage": {
                         "input_tokens": prompt_tokens,
                         "output_tokens": completion_tokens,
@@ -986,23 +1734,116 @@ def process_agentic_chat_turn_task(self, channel_name, user_id, username, token,
             }
         )
 
+
     except Exception as e:
-        print("=" * 80)
-        print("EXCEPTION TYPE:", type(e))
-        print("EXCEPTION:", repr(e))
+
+        print(
+            "=" * 80
+        )
+
+        print(
+            "EXCEPTION TYPE:",
+            type(e)
+        )
+
+        print(
+            "EXCEPTION:",
+            repr(e)
+        )
+
         traceback.print_exc()
-        print("=" * 80)
-        
-        # 🚀 FIXED: Swapped from .send to .group_send for fallback alerts too!
-        async_to_sync(channel_layer.group_send)(
-            channel_name,
-            {
-                "type": "chat_message",
-                "payload": {"type": "error", "message": str(e)}
-            }
+
+        print(
+            "=" * 80
         )
 
 
+        async_to_sync(
+            channel_layer.group_send
+        )(
+            channel_name,
+            {
+                "type": "chat_message",
+
+                "payload": {
+                    "type": "error",
+                    "message": str(e)
+                }
+            }
+        )
+
+@shared_task
+def collect_local_pipeline_results(local_results, pipeline_id):
+    """Chord callback that records local results and checks the same Redis gate."""
+    print(f"\n📦 COLLECTING LOCAL RESULTS\npipeline={pipeline_id}")
+    add_local_results_to_pipeline(
+        pipeline_id=pipeline_id,
+        results=local_results or [],
+    )
+    trigger_pipeline_follow_up_if_ready(pipeline_id)
+    return {
+        "status": "local_results_recorded",
+        "pipeline_id": pipeline_id,
+    }
+
+
+@shared_task
+def pipeline_timeout_check(pipeline_id):
+    """Enqueues one partial follow-up if the GitHub-backed pipeline times out."""
+    state = get_pipeline_state(pipeline_id)
+    if not state:
+        print(f"⏱️ TIMEOUT CHECK: state already expired {pipeline_id}")
+        return
+    if state.get("follow_up_started"):
+        print(f"⏱️ TIMEOUT CHECK: follow-up already started {pipeline_id}")
+        return
+
+    expected = set(state.get("expected_github_results", []))
+    received = {item.get("event_key") for item in state.get("github_results", [])}
+    missing_github = sorted(expected - received)
+    local_incomplete = not state.get("local_results_ready", True)
+
+    if not missing_github and not local_incomplete:
+        trigger_pipeline_follow_up_if_ready(pipeline_id)
+        return
+
+    lock_key = f"agentic_pipeline:followup_lock:{pipeline_id}"
+    if not cache.add(lock_key, "1", timeout=FOLLOW_UP_LOCK_TTL):
+        print(f"♻️ TIMEOUT: another worker owns follow-up lock {pipeline_id}")
+        return
+
+    state = get_pipeline_state(pipeline_id)
+    if not state or state.get("follow_up_started"):
+        return
+
+    print(
+        f"⏱️ GITHUB PIPELINE TIMEOUT\npipeline={pipeline_id}\n"
+        f"missing_github={missing_github}\nlocal_incomplete={local_incomplete}"
+    )
+
+    state["follow_up_started"] = True
+    state["follow_up_started_at"] = timezone.now().isoformat()
+    state["timed_out"] = True
+
+    partial_results = build_pipeline_follow_up_results(pipeline_id)
+    partial_results.append({
+        "status": "timeout",
+        "message": "The pipeline did not return all expected results before the safety timeout.",
+        "missing_github_results": missing_github,
+        "local_results_incomplete": local_incomplete,
+    })
+    save_pipeline_state(pipeline_id, state)
+
+    agentic_chat_follow_up.delay( #type:ignore
+        task_results=partial_results,
+        provider=state.get("provider", ""),
+        model_name=state.get("model_name", ""),
+        api_key=state.get("api_key", ""),
+        channel_name=state.get("channel_name", ""),
+        session_id=state.get("session_id"),
+        history_payload=state.get("history_payload", []),
+        auditjob_id=state.get("auditjob_id"),
+    )
 
 
 @shared_task
@@ -1209,7 +2050,7 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
                 "type": "orchestration_result",
                 "raw_output": {
                     "ui_layout_route": ui_layout,
-                    "chat_response": "Processing Repo creation request",
+                    "chat_response": "Processing Key creation request",
                 },
             }
         }
@@ -1429,17 +2270,37 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
 
 @shared_task(
     bind=True,
-    autoretry_for=(OperationalError,),
-    retry_kwargs={'max_retries': 5},
-    retry_backoff=True,         
-    retry_backoff_max=15        
+    autoretry_for=UNIVERSAL_NETWORK_ERRORS,
+    retry_kwargs={"max_retries": 3},
+    retry_backoff=True,
+    retry_backoff_max=30,
 )
-def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branch, repo_data,target_branch,installation_id, user_requested_rules):
+def run_agentic_pipeline(
+    self,
+    channel_name,
+    repo_owner,
+    repo_name,
+    default_branch,
+    repo_data,
+    target_branch,
+    installation_id,
+    user_requested_rules,
+    pipeline_id,  # <<< CHANGED
+):
     """
     Asynchronous platform dispatcher.
+
+    IMPORTANT:
+    This task dispatches the GitHub Actions workflow.
+    If dispatch fails (non-existent branch, token error, network error, rejection),
+    it records the failure in Redis and triggers follow-up immediately.
     """
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
+    yaml_tools_list = extract_pipeline_tools(user_requested_rules)
+
+    try:
+        channel_layer = get_channel_layer()
+
+        async_to_sync(channel_layer.group_send)(
             channel_name,
             {
                 "type": "chat_message",
@@ -1447,232 +2308,593 @@ def run_agentic_pipeline(self,channel_name,  repo_owner, repo_name,default_branc
                     "type": "orchestration_result",
                     "raw_output": {
                         "ui_layout_route": "CHAT",
-                        "chat_response": "Started processing on github" ,
+                        "chat_response": (
+                            f"Started processing on github "
+                            f"(pipeline {pipeline_id})"
+                        ),
                     },
                 }
             }
         )
-    # =========================================================================
-    # ✅ STEP 0: GENERATE DYNAMIC 1-HOUR TOKEN VIA PRIVATE KEY
-    # =========================================================================
-    try:
-        # Trade installation_id + private key file for an active execution token
-        git_token = get_installation_access_token(installation_id)
-    except Exception as e:
-        print(f"CRITICAL: Token generation failed: {str(e)}")
-        return {"status": "error", "message": "Authentication token exchange failure"}
 
-    # =========================================================================
-    # STEP 1: SCRIPT STITCHING ENGINE (Your existing logic)
-    # =========================================================================
-    resolved_repo_name = ensure_orchestrator_yaml_is_online(repo_owner, repo_name, target_branch, git_token, repo_data, channel_name)
-    print("as-what_nah", resolved_repo_name)
-    if resolved_repo_name.get("status") != "success":
-        print(f"CRITICAL: Orchestrator YAML validation failed - {resolved_repo_name.get('message')}")
-        return resolved_repo_name
+        print("\n" + "=" * 80)
+        print("🚀 GITHUB AGENTIC PIPELINE DISPATCHER")
+        print(f"PIPELINE ID : {pipeline_id}")
+        print(f"REPOSITORY  : {repo_owner}/{repo_name}")
+        print(f"TARGET      : {target_branch}")
+        print("=" * 80)
 
-    print("")
-    print("amapiano",default_branch,{"default_branch": user_requested_rules})
-    base_classes_text = inspect.getsource(rule_classes)
-    
-    # Strip any local manual __main__ loop if it exists in your file text
-    if 'if __name__ == "__main__":' in base_classes_text:
-        base_classes_text = base_classes_text.split('if __name__ == "__main__":')[0].strip()
+        # =========================================================================
+        # STEP 0: GENERATE INSTALLATION ACCESS TOKEN
+        # =========================================================================
 
-    visitor_instances_lines = []
-
-    strategies_dict = {}
-    if isinstance(user_requested_rules, dict):
-        strategies_dict = user_requested_rules
-    elif isinstance(user_requested_rules, list):
-        # Maps old format: [{"rule_key": "x", "params": {...}}] into flat dict keys
-        for item in user_requested_rules:
-            if isinstance(item, dict) and "rule_key" in item:
-                strategies_dict[item["rule_key"]] = item.get("params", {})
-    
-    
-    for rule_key, rule_payload in strategies_dict.items():
-        # Only process tools registered in our AST engine toolkit
-        if rule_key in AST_TOOL_REGISTRY:
-            class_name = AST_TOOL_REGISTRY[rule_key].__name__
-            
-            # DEFENSIVE ACCIDENT PROTECTION: Ensure rule_payload is a dictionary
-            payload_data = rule_payload if isinstance(rule_payload, dict) else {}
-            
-            # Preserve rule-specific options (for example ``required_auth``),
-            # while guaranteeing the common nested dictionaries expected by the
-            # constraint visitors.
-            sanitised_payload = dict(payload_data)
-            sanitised_payload.setdefault("target", {})
-            sanitised_payload.setdefault("constraints", {})
-            
-            # Stitch the class initialization line safely using valid layout arguments
-            line = f"            {class_name}({json.dumps(sanitised_payload)}),"
-            visitor_instances_lines.append(line)
-            
-    visitors_code_block = "\n".join(visitor_instances_lines)
-
-    raw_template = f"""
-    if __name__ == "__main__":
-        import os
-        import json
-        
-        visitors = [
-{visitors_code_block}
-        ]
-        print("VISITORS CREATED:", visitors)
-        all_findings = []
-        
-        for root, dirs, files in os.walk("."):
-            if "venv" in root or ".git" in root or "migrations" in root:
-                continue
-            for file in files:
-                if file.endswith(".py") and file != "odozi_runner.py":
-                    full_path = os.path.join(root, file)
-                    print("ANALYZING:", full_path)
-                    try:
-                        with open(full_path, "r", encoding="utf-8") as f:
-                            code = f.read()
-                        
-                        # The generated checks are ``ast.NodeVisitor`` classes.
-                        # They expose ``visit`` and a ``findings`` list; they do
-                        # not implement an ``analyze_file`` method.
-                        tree = ast.parse(code, filename=full_path)
-
-                        for visitor in visitors:
-                            try:
-                                # A visitor instance is reused for every file,
-                                # so reset its findings before visiting this AST.
-                                visitor.findings = []
-                                visitor.visit(tree)
-                                findings = visitor.findings
-
-                                for finding in findings:
-                                    if isinstance(finding, dict):
-                                        finding.setdefault("file", full_path)
-
-                                print(
-                                    visitor.__class__.__name__,
-                                    "found",
-                                    len(findings),
-                                    "issues in",
-                                    full_path
-                                )
-                                all_findings.extend(findings)
-                            except Exception as visitor_error:
-                                # A faulty rule must not stop other visitors
-                                # from analysing the current file.
-                                print(
-                                    f"ERROR running {{visitor.__class__.__name__}} "
-                                    f"on {{full_path}}: {{visitor_error}}"
-                                )
-                    except Exception as e:
-                        print(
-                            f"ERROR processing {{full_path}}: {{e}}"
-                        )
-                                            
-        print(json.dumps({{"tool": "odozi_visitors", "findings": all_findings}}))
-    """
-
-    execution_loop_template = textwrap.dedent(raw_template)
-    final_payload_string = base_classes_text.strip() + "\n\n" + execution_loop_template.strip()
-    encoded_script = base64.b64encode(
-        final_payload_string.encode()
-    ).decode()
-    
-    # =========================================================================
-    # STEP 2: DISPATCH TO LIVE GITHUB API (Uncomment when ready to go live)
-    # =========================================================================
-    async_to_sync(channel_layer.group_send)(
-                channel_name,
-                {
-                    "type": "chat_message",
-                    "payload": {
-                        "type": "orchestration_result",
-                        "raw_output": {
-                            "ui_layout_route": "CHAT",
-                            "chat_response": "Dispatching to Github" ,
-                        },
-                    }
-                }
+        try:
+            git_token = get_installation_access_token(
+                installation_id
             )
-    print("user_requested_rules", user_requested_rules)
-     # 1. Start a clean flat list for your GitHub Actions YAML checkboxes
-    yaml_tools_list = []
+        except Exception as e:
+            err_msg = f"Authentication token exchange failure: {str(e)}"
+            print(f"CRITICAL: Token generation failed: {str(e)}")
+            record_github_dispatch_failure(
+                pipeline_id=pipeline_id,
+                repository=repo_name,
+                error_message=err_msg,
+                target_branch=target_branch,
+                tools=yaml_tools_list,
+                error_details={"error": str(e)},
+            )
+            return {
+                "status": "error",
+                "pipeline_id": pipeline_id,
+                "message": err_msg
+            }
 
-    # 2. Iterate through whatever keys the user/LLM requested
-    for rule_key in strategies_dict.keys():
-        # A. If it's an internal AST check, append 'odozi_visitors' to light up Job 4
-        if rule_key in AST_TOOL_REGISTRY:
-            if "odozi_visitors" not in yaml_tools_list:
-                yaml_tools_list.append("odozi_visitors")
-        else:
-            # B. If it's a native runner rule (like 'bandit', 'pytest', or 'ruff'), 
-            # pass it straight through to light up its individual Job block
-            yaml_tools_list.append(rule_key)
+        # =========================================================================
+        # STEP 1: ENSURE ORCHESTRATOR YAML EXISTS
+        # =========================================================================
+
+        resolved_repo_name = (
+            ensure_orchestrator_yaml_is_online(
+                repo_owner,
+                repo_name,
+                target_branch,
+                git_token,
+                repo_data,
+                channel_name
+            )
+        )
+
+        print(
+            "Repository resolution result:",
+            resolved_repo_name
+        )
+
+        if resolved_repo_name.get("status") != "success":
+            err_msg = resolved_repo_name.get("message")
+            target_repo_for_failure = repo_name
+            target_branch_for_failure = target_branch
+
+            if not err_msg and isinstance(resolved_repo_name.get("repo_resolution"), dict):
+                repo_res = resolved_repo_name["repo_resolution"]
+                err_msg = repo_res.get("message")
+                target_repo_for_failure = repo_res.get("repo") or target_repo_for_failure
+                target_branch_for_failure = repo_res.get("branch") or target_branch_for_failure
+            elif not err_msg and isinstance(resolved_repo_name.get("repo_resolution_not_found"), dict):
+                repo_res = resolved_repo_name["repo_resolution_not_found"]
+                err_msg = repo_res.get("message")
+                target_repo_for_failure = repo_res.get("repo") or target_repo_for_failure
+
+            if not err_msg:
+                err_msg = f"Orchestrator YAML validation failed for repository '{repo_name}' on branch '{target_branch}'."
+
+            print(
+                f"CRITICAL: Orchestrator YAML validation failed - {err_msg}"
+            )
+
+            record_github_dispatch_failure(
+                pipeline_id=pipeline_id,
+                repository=target_repo_for_failure,
+                error_message=err_msg,
+                target_branch=target_branch_for_failure,
+                tools=yaml_tools_list,
+                error_details=resolved_repo_name,
+            )
+
+            return {
+                **resolved_repo_name,
+                "pipeline_id": pipeline_id,
+                "error": err_msg
+            }
+
+        # =========================================================================
+        # STEP 2: BUILD ODOZI VISITOR SCRIPT
+        # =========================================================================
+
+        print("")
+        print(
+            "Building Odozi visitor script:",
+            default_branch,
+            {
+                "default_branch": user_requested_rules
+            }
+        )
+
+        base_classes_text = inspect.getsource(
+            rule_classes
+        )
+
+        if 'if __name__ == "__main__":' in base_classes_text:
+            base_classes_text = (
+                base_classes_text
+                .split(
+                    'if __name__ == "__main__":'
+                )[0]
+                .strip()
+            )
+
+        visitor_instances_lines = []
+
+        strategies_dict = {}
+
+        if isinstance(
+            user_requested_rules,
+            dict
+        ):
+            strategies_dict = (
+                user_requested_rules
+            )
+
+        elif isinstance(
+            user_requested_rules,
+            list
+        ):
+            for item in user_requested_rules:
+                if (
+                    isinstance(item, dict)
+                    and "rule_key" in item
+                ):
+                    strategies_dict[
+                        item["rule_key"]
+                    ] = item.get(
+                        "params",
+                        {}
+                    )
+
+        for rule_key, rule_payload in strategies_dict.items():
+            if rule_key in AST_TOOL_REGISTRY:
+                class_name = (
+                    AST_TOOL_REGISTRY[
+                        rule_key
+                    ].__name__
+                )
+
+                payload_data = (
+                    rule_payload
+                    if isinstance(
+                        rule_payload,
+                        dict
+                    )
+                    else {}
+                )
+
+                sanitised_payload = dict(
+                    payload_data
+                )
+
+                sanitised_payload.setdefault(
+                    "target",
+                    {}
+                )
+
+                sanitised_payload.setdefault(
+                    "constraints",
+                    {}
+                )
+
+                line = (
+                    f"            "
+                    f"{class_name}"
+                    f"({json.dumps(sanitised_payload)}),"
+                )
+
+                visitor_instances_lines.append(
+                    line
+                )
+
+        visitors_code_block = "\n".join(
+            visitor_instances_lines
+        )
+
+        raw_template = f"""
+if __name__ == "__main__":
+    import os
+    import json
+
+    visitors = [
+{visitors_code_block}
+    ]
+
+    print("VISITORS CREATED:", visitors)
+
+    all_findings = []
+
+    for root, dirs, files in os.walk("."):
+
+        if (
+            "venv" in root
+            or ".git" in root
+            or "migrations" in root
+        ):
+            continue
+
+        for file in files:
+
+            if (
+                file.endswith(".py")
+                and file != "odozi_runner.py"
+            ):
+
+                full_path = os.path.join(
+                    root,
+                    file
+                )
+
+                print(
+                    "ANALYZING:",
+                    full_path
+                )
+
+                try:
+
+                    with open(
+                        full_path,
+                        "r",
+                        encoding="utf-8"
+                    ) as f:
+
+                        code = f.read()
 
 
-    
-    # 2. Fetch only the variable names registered for THIS specific repository
-    repo_merge = f'{repo_owner}/{repo_name}'
-    # repo_instance = GitHubRepository.objects.get(repo_name=repo_merge)
-    registered_keys = RepoEnvKey.objects.filter(
-         repo__repo_name=repo_merge
-    ).values_list('key_name', flat=True)
-    
-    # Example output string: '["DJANO_SECRET_KEY"]'
-    env_keys_payload = json.dumps(list(registered_keys)) if registered_keys else "[]"
-    matched_repo_name = resolved_repo_name.get('repo')
-    print(f"estavao-{matched_repo_name}")
-    url = (
-        f"https://api.github.com/repos/"
-        f"{repo_owner}/{matched_repo_name}/actions/workflows/"
-        f"orchestrator.yaml/dispatches"
-    )    
-    headers = {
-        "Authorization": f"Bearer {git_token}", 
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
-    }
-    
-    api_payload = {
-        "ref":  target_branch,  
-        "inputs": {
-            "tools_list": json.dumps(yaml_tools_list),
-            "custom_script_payload": encoded_script,
-            "env_keys_list": env_keys_payload
+                    tree = ast.parse(
+                        code,
+                        filename=full_path
+                    )
+
+
+                    for visitor in visitors:
+
+                        try:
+
+                            visitor.findings = []
+
+                            visitor.visit(
+                                tree
+                            )
+
+                            findings = (
+                                visitor.findings
+                            )
+
+
+                            for finding in findings:
+
+                                if isinstance(
+                                    finding,
+                                    dict
+                                ):
+
+                                    finding.setdefault(
+                                        "file",
+                                        full_path
+                                    )
+
+
+                            print(
+                                visitor.__class__.__name__,
+                                "found",
+                                len(findings),
+                                "issues in",
+                                full_path
+                            )
+
+
+                            all_findings.extend(
+                                findings
+                            )
+
+
+                        except Exception as visitor_error:
+
+                            print(
+                                f"ERROR running "
+                                f"{{visitor.__class__.__name__}} "
+                                f"on {{full_path}}: "
+                                f"{{visitor_error}}"
+                            )
+
+
+                except Exception as e:
+
+                    print(
+                        f"ERROR processing "
+                        f"{{full_path}}: "
+                        f"{{e}}"
+                    )
+
+
+    print(
+        json.dumps(
+            {{
+                "tool": "odozi_visitors",
+                "findings": all_findings
+            }}
+        )
+    )
+"""
+
+        execution_loop_template = (
+            textwrap.dedent(
+                raw_template
+            )
+        )
+
+        final_payload_string = (
+            base_classes_text.strip()
+            + "\n\n"
+            + execution_loop_template.strip()
+        )
+
+        encoded_script = (
+            base64.b64encode(
+                final_payload_string.encode()
+            ).decode()
+        )
+
+        # =========================================================================
+        # STEP 3: BUILD TOOL LIST
+        # =========================================================================
+
+        print(
+            "user_requested_rules",
+            user_requested_rules
+        )
+
+        print(
+            "TOOLS THAT WILL RUN:",
+            yaml_tools_list
+        )
+
+        # =========================================================================
+        # STEP 4: LOAD REGISTERED ENVIRONMENT KEYS
+        # =========================================================================
+
+        repo_merge = (
+            f"{repo_owner}/{repo_name}"
+        )
+
+        registered_keys = (
+            RepoEnvKey.objects
+            .filter(
+                repo__repo_name=repo_merge
+            )
+            .values_list(
+                "key_name",
+                flat=True
+            )
+        )
+
+        env_keys_payload = (
+            json.dumps(
+                list(registered_keys)
+            )
+            if registered_keys
+            else "[]"
+        )
+
+        # =========================================================================
+        # STEP 5: BUILD GITHUB DISPATCH URL
+        # =========================================================================
+
+        matched_repo_name = (
+            resolved_repo_name.get(
+                "repo"
+            ) or repo_name
+        )
+
+        print(
+            f"Resolved GitHub repository: "
+            f"{matched_repo_name}"
+        )
+
+        url = (
+            f"https://api.github.com/repos/"
+            f"{repo_owner}/"
+            f"{matched_repo_name}/actions/"
+            f"workflows/orchestrator.yaml/"
+            f"dispatches"
+        )
+
+        headers = {
+            "Authorization": (
+                f"Bearer {git_token}"
+            ),
+            "Accept": (
+                "application/vnd.github+json"
+            ),
+            "X-GitHub-Api-Version": (
+                "2022-11-28"
+            ),
+            "User-Agent": "Django-Application-Gateway"
         }
-    }
-    
-    print(matched_repo_name, "DEBUG: Dispatching to GitHub API with payload:", url)
-    print("=================== PROOF OF PAYLOAD FORMATS ===================")
-    print(f"1. RAW user_requested_rules (From LLM): {user_requested_rules}")
-    print(f"2. STRATEGIES DICT (Extracted): {strategies_dict}")
-    print(f"3. WHAT DISPATCH RECEIVED (tools_list): {json.dumps(user_requested_rules)}")
-    print("================================================================")
 
-    feedback_r = requests.post(url, json=api_payload, headers=headers)
-    if feedback_r.status_code == 204:
-        print("🎉 SUCCESS! GitHub successfully accepted the workflow dispatch request.")
-        resolved_repo_name.update({
-            "status": "success",
-            "tasks":"Deploy to Github",
-            "repo": matched_repo_name if matched_repo_name else "",
-            "message": "Repo and branch resolved. Pipeline launched on github successfully."
-        })
-        return resolved_repo_name
-        
-    else:
-        print(f"❌ GITHUB ERROR [{feedback_r.status_code}]: {feedback_r.text}")
-        resolved_repo_name.update({
-            "status": "validation_error",
-            "tasks":"Deploy to Github",
-            "repo":matched_repo_name if matched_repo_name else "",
-            "message": feedback_r.text
-        })
-        return resolved_repo_name
+        # =========================================================================
+        # STEP 6: DISPATCH GITHUB WORKFLOW
+        # =========================================================================
 
+        api_payload = {
+            "ref": target_branch,
+            "inputs": {
+                "tools_list": (
+                    json.dumps(
+                        yaml_tools_list
+                    )
+                ),
+                "custom_script_payload": (
+                    encoded_script
+                ),
+                "env_keys_list": (
+                    env_keys_payload
+                ),
+                "pipeline_id": pipeline_id
+            }
+        }
 
+        print(
+            "\n"
+            + "=" * 80
+        )
+        print(
+            "📡 DISPATCHING GITHUB WORKFLOW"
+        )
+        print(
+            f"PIPELINE ID : {pipeline_id}"
+        )
+        print(
+            f"REPOSITORY  : {matched_repo_name}"
+        )
+        print(
+            f"BRANCH      : {target_branch}"
+        )
+        print(
+            f"TOOLS       : {yaml_tools_list}"
+        )
+        print(
+            "=" * 80
+        )
+
+        try:
+            feedback_r = requests.post(
+                url,
+                json=api_payload,
+                headers=headers,
+                timeout=30
+            )
+        except requests.RequestException as e:
+            err_msg = f"GitHub workflow dispatch network error: {str(e)}"
+            print(
+                f"❌ GITHUB NETWORK ERROR: {e}"
+            )
+            record_github_dispatch_failure(
+                pipeline_id=pipeline_id,
+                repository=matched_repo_name or repo_name,
+                error_message=err_msg,
+                target_branch=target_branch,
+                tools=yaml_tools_list,
+                error_details={"error": str(e)},
+            )
+            return {
+                "status": "error",
+                "pipeline_id": pipeline_id,
+                "repo": matched_repo_name or "",
+                "message": err_msg
+            }
+
+        # =========================================================================
+        # STEP 7: GITHUB ACCEPTED DISPATCH
+        # =========================================================================
+
+        if feedback_r.status_code == 204:
+            print(
+                "🎉 SUCCESS!"
+            )
+            print(
+                "GitHub accepted the workflow dispatch."
+            )
+            print(
+                "⚠️ IMPORTANT:"
+            )
+            print(
+                "This means ONLY that GitHub accepted the job."
+            )
+            print(
+                "It does NOT mean the analysis has finished."
+            )
+            print(
+                f"Pipeline {pipeline_id} "
+                "is now waiting for webhook results."
+            )
+
+            resolved_repo_name.update({
+                "status": "success",
+                "pipeline_id": pipeline_id,
+                "tasks": "Deploy to Github",
+                "repo": (
+                    matched_repo_name
+                    if matched_repo_name
+                    else ""
+                ),
+                "message": (
+                    "Repo and branch resolved. "
+                    "Pipeline launched on github successfully. "
+                    "Waiting for final webhook results."
+                )
+            })
+
+            return resolved_repo_name
+
+        # =========================================================================
+        # STEP 8: GITHUB REJECTED DISPATCH
+        # =========================================================================
+
+        else:
+            err_msg = f"GitHub rejected workflow dispatch [{feedback_r.status_code}]: {feedback_r.text}"
+            print(
+                f"❌ GITHUB ERROR "
+                f"[{feedback_r.status_code}]: "
+                f"{feedback_r.text}"
+            )
+
+            resolved_repo_name.update({
+                "status": "validation_error",
+                "pipeline_id": pipeline_id,
+                "tasks": "Deploy to Github",
+                "repo": (
+                    matched_repo_name
+                    if matched_repo_name
+                    else repo_name
+                ),
+                "message": feedback_r.text
+            })
+
+            record_github_dispatch_failure(
+                pipeline_id=pipeline_id,
+                repository=matched_repo_name or repo_name,
+                error_message=err_msg,
+                target_branch=target_branch,
+                tools=yaml_tools_list,
+                error_details=resolved_repo_name,
+            )
+
+            return resolved_repo_name
+
+    except Exception as exc:
+        err_msg = f"Unexpected error during GitHub pipeline dispatch: {str(exc)}"
+        print(f"❌ UNEXPECTED ERROR IN run_agentic_pipeline: {exc}")
+        traceback.print_exc()
+        record_github_dispatch_failure(
+            pipeline_id=pipeline_id,
+            repository=repo_name,
+            error_message=err_msg,
+            target_branch=target_branch,
+            tools=yaml_tools_list,
+            error_details={"error": str(exc)},
+        )
+        return {
+            "status": "error",
+            "pipeline_id": pipeline_id,
+            "repo": repo_name,
+            "message": str(exc),
+        }
 
 @shared_task(
     bind=True,
@@ -1690,6 +2912,7 @@ def agentic_chat_follow_up(
     channel_name: str = "",
     session_id: int = None,
     history_payload: List[Dict[str, str]] = None,
+    auditjob_id: Optional[str] = None,
 ):
     # -------------------------------------------------------------------------
     # LIGHTWEIGHT SYSTEM INSTRUCTION
@@ -1816,6 +3039,11 @@ def agentic_chat_follow_up(
                 role="ai",
                 content=result.chat_response
             )
+        if auditjob_id:
+            auditjob = AuditJob.objects.filter(id=auditjob_id).first()
+            if auditjob:
+                auditjob.report = result.chat_response
+                auditjob.save()
         print(f"stunned-{channel_name}")
         async_to_sync(get_channel_layer().group_send)(
             channel_name,

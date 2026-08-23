@@ -60,6 +60,11 @@ export default function Dashboard() {
     const isProcessing = useSocketStore((state) => state.isProcessing);
     // const statusMessage = useSocketStore((state) => state.statusMessage);
    
+    useEffect(() => {
+        console.log(isProcessingRequest,"Dashboard mounted, initializing socket connection...", isAiOpen,"rihanna", isProcessingRequest);
+    }, [isAiOpen, isProcessingRequest]);
+
+
     const clearAiResponseTimeout = () => {
         if (aiResponseTimeoutRef.current) {
             clearTimeout(aiResponseTimeoutRef.current);
@@ -72,7 +77,7 @@ export default function Dashboard() {
 
         // An orchestration packet proves the server accepted the request, so
         // replace the initial full-screen state with the regular chat panel.
-        setIsProcessingRequest(false);
+        // setIsProcessingRequest(false);
 
         // Intermediate orchestration updates are not completion. Keep the
         // watchdog alive until the final Celery follow-up result arrives.
@@ -99,7 +104,7 @@ export default function Dashboard() {
     useEffect(() => {
         if (socketError) {
             clearAiResponseTimeout();
-            setIsProcessingRequest(false);
+            // setIsProcessingRequest(false);
             console.log("🚨 Dashboard caught background worker crash or API block:", socketError);
             
             // Append a system or error message to your chat interface display window
@@ -324,7 +329,7 @@ export default function Dashboard() {
         clearAiResponseTimeout();
         aiResponseTimeoutRef.current = setTimeout(() => {
             useSocketStore.getState().setProcessingStatus(false);
-            setIsProcessingRequest(false);
+            // setIsProcessingRequest(false);
             setIsPending(false);
             setMessages((previousMessages) => [
                 ...previousMessages,
@@ -558,8 +563,8 @@ export default function Dashboard() {
                         </div>)}
 
                         {/* AI menu */}
-                        {(isAiOpen || isProcessingRequest) && (<div className="AI-menu w-full h-full flex flex-col items-center justify-center gap-4">
-                                                    <div className="w-full md:w-[75%] px-3 py-4 h-full">
+                        <div className="AI-menu w-full h-full flex flex-col items-center justify-center gap-4">
+                            <div className="w-full md:w-[75%] px-3 py-4 h-full">
                                 <div className="flex items-center justify-between">
                                     <ChevronLeft onClick={() => ClickBackIconTasks()} className="cursor-pointer"/>
                                 </div>
@@ -584,7 +589,7 @@ export default function Dashboard() {
                                                 }
                                                 }}
                                                 placeholder="Type your message..."
-                                                className={`pl-4 pr-12 rounded-xl border red-800 mt-4 w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
+                                                className={`pl-4 pr-14 rounded-xl border red-800 mt-4 w-full h-full ${isProcessingRequest ? "hidden" : ""}`} 
                                                 style={{ borderColor: "black" }}
                                             />
                                             <div className="">
@@ -618,7 +623,7 @@ export default function Dashboard() {
                                                                 }
                                                                 }}
                                                                 id="send-icon" 
-                                                                className="absolute top-[50%] right-[5%] cursor-pointer bg-transparent border-none p-0 flex items-center justify-center"
+                                                                className="absolute top-[55%] right-[5%] cursor-pointer bg-transparent border-none p-0 flex items-center justify-center"
                                                             >
                                                                 <SendHorizontal />            
                                                             </button>
@@ -645,7 +650,7 @@ export default function Dashboard() {
                                 </div>
                                 
                             </div>
-                        </div>)}
+                        </div>
                     </div>
 
                     {/* right bar */}

@@ -1,6 +1,5 @@
 from django.contrib import admin
-from .models import AuditWorkflow, AuditJob
+from .models import  AuditJob
 
 # Register your models here.
 admin.site.register(AuditJob)
-admin.site.register(AuditWorkflow)

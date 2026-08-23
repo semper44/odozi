@@ -1,5 +1,6 @@
 # agents/views.py
 # dashboard/views.py
+import io
 import json
 import boto3
 import time
@@ -9,15 +10,22 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.parsers import JSONParser, MultiPartParser, BaseParser
-from general.models import AuditWorkflow, AuditJob
+from general.models import AuditJob
 
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.conf import settings
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
+import cloudinary
+import cloudinary.uploader
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from agents.tasks import (
+    add_github_result_to_pipeline,
+    trigger_pipeline_follow_up_if_ready,
+    get_pipeline_state
+)
 
 
 
@@ -63,184 +71,232 @@ class PlainTextParser(BaseParser):
     def parse(self, stream, media_type=None, parser_context=None):
         return stream.read().decode('utf-8')
 
+
+
+
 class OptimizedResultsReceiverView(APIView):
     """
-    Centralized Polymorphic Webhook Receiver.
-    Safely swallows application/json (live streams), multipart/form-data (final logs),
-    and raw text/plain traces (system crashes), routing content seamlessly to Cloudflare R2.
+    Centralized polymorphic GitHub results receiver.
+
+    Responsibilities:
+    1. Receive JSON streaming chunks.
+    2. Receive multipart final reports.
+    3. Receive raw crash traces.
+    4. Store reports in Cloudinary.
+    5. AuditJob.
+    6. Broadcast progress through Channels.
+    7. Record completion in Redis.
+    8. Trigger agentic_chat_follow_up ONLY when every expected
+       GitHub tool for the orchestration has reported.
     """
-    # Accept all three potential ingestion media frameworks natively
+
     parser_classes = [JSONParser, MultiPartParser, PlainTextParser]
     authentication_classes = []
     permission_classes = []
 
     def post(self, request, *args, **kwargs):
-        r2_client = boto3.client(
-            "s3",
-            endpoint_url=f"https://{settings.CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
-            aws_access_key_id=settings.CLOUDFLARE_R2_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
+        print("\n========== GITHUB RESULTS REQUEST ==========")
+        print("REQUEST RECEIVED")
+        print("Method:", request.method)
+        print("Content-Type:", request.content_type)
+        print("Headers:", dict(request.headers))
+        print("============================================\n")
+
+        cloudinary.config(
+            cloud_name=settings.CLOUDINARY_CLOUD_NAME,
+            api_key=settings.CLOUDINARY_API_KEY,
+            api_secret=settings.CLOUDINARY_API_SECRET,
+            secure=True,
         )
 
-        # ---------------------------------------------------------------------
-        # PHASE 1: POLYMORPHICING VARIABLE EXTRACTION
-        # ---------------------------------------------------------------------
+        # PHASE 1: VARIABLE EXTRACTION
+        pipeline_id = None
         run_id = None
         repo_name = None
-        tool_name = "pytest" # Fallback tool default
+        tool_name = "pytest"
         file_content = ""
         is_crash_trace = False
 
-        # --- CONDITION A: PROCESSING PYTHON CHUNKING STREAM PAYLOADS ---
-        if request.content_type == 'application/json':
-            run_id = request.data.get('run_id')
-            tool_name = request.data.get('tool', 'pytest')
-            raw_repo = request.data.get('repo', '')
-            repo_name = raw_repo.split("/")[-1].strip() if "/" in raw_repo else raw_repo
-            
-            logs_list = request.data.get('logs', [])
-            file_content = "\n".join(logs_list)
+        print(1111)
 
-        # --- CONDITION B: PROCESSING MULTIPART FORM DATA PAYLOADS (Bandit, Ruff, Odozi) ---
-        elif request.content_type and 'multipart/form-data' in request.content_type:
-            run_id = request.data.get('run_id')
-            tool_name = request.data.get('tool')
-            raw_repo = request.data.get('repo', '')
+        # CONDITION A: JSON
+        if request.content_type and request.content_type.startswith("application/json"):
+            print("2222", request.data)
+            pipeline_id = request.data.get("pipeline_id")
+            run_id = request.data.get("run_id")
+            tool_name = request.data.get("tool", "pytest")
+            raw_repo = request.data.get("repo", "")
             repo_name = raw_repo.split("/")[-1].strip() if "/" in raw_repo else raw_repo
             
+            logs_list = request.data.get("logs", [])
+            if isinstance(logs_list, list):
+                file_content = "\n".join(str(item) for item in logs_list)
+            else:
+                file_content = str(logs_list)
+
+        # CONDITION B: MULTIPART FINAL REPORT
+        elif request.content_type and "multipart/form-data" in request.content_type:
+            print("3333", request.data)
+            pipeline_id = request.data.get("pipeline_id")
+            run_id = request.data.get("run_id")
+            tool_name = request.data.get("tool")
+            raw_repo = request.data.get("repo", "")
+            repo_name = raw_repo.split("/")[-1].strip() if "/" in raw_repo else raw_repo
+
             if "file" in request.FILES:
                 uploaded_file = request.FILES["file"]
-                file_content = uploaded_file.read().decode("utf-8")
+                file_content = uploaded_file.read().decode("utf-8", errors="replace")
+            else:
+                file_content = ""
 
-        # --- CONDITION C: CRITICAL FALLBACK DUMP (Raw Trace/Bash Stack Rejection) ---
+        # CONDITION C: RAW CRASH TRACE
         else:
             is_crash_trace = True
-            file_content = str(request.data) # Intercepts the raw text stream body directly
-            
-            # Extract tracking variables out of network headers
-            run_id = request.headers.get('X-GitHub-Run-Id', uuid.uuid4().hex[:8])
-            raw_repo = request.headers.get('X-GitHub-Repository', 'unknown/repo')
+            file_content = str(request.data)
+            pipeline_id = request.headers.get("X-Odozi-Pipeline-Id")
+            run_id = request.headers.get("X-GitHub-Run-Id")
+
+            if not run_id:
+                run_id = uuid.uuid4().hex[:8]
+
+            raw_repo = request.headers.get("X-GitHub-Repository", "unknown/repo")
+            print("4444", request.data, "raw_repo", raw_repo)
             repo_name = raw_repo.split("/")[-1].strip()
-            tool_name = request.headers.get('X-Odozi-Failed-Tool', 'pytest')
+            tool_name = request.headers.get("X-Odozi-Failed-Tool", "pytest")
 
-        # ---------------------------------------------------------------------
-        # PHASE 2: ALIGN RELATIONAL DATABASE TRACKS (PostgreSQL Lookup)
-        # ---------------------------------------------------------------------
-        workflow = AuditWorkflow.objects.filter(
-            repository_name=repo_name, 
-            status="processing"
-        ).order_by("-created_at").first()
+        # VALIDATION
+        if not pipeline_id:
+            print("5555")
+            return Response(
+                {"error": "Missing pipeline_id. The GitHub workflow cannot be correlated with an active agentic pipeline."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if not workflow:
-            # Fallback historical search if job boundaries shuffled out of sync
-            workflow = AuditWorkflow.objects.filter(repository_name=repo_name).order_by("-created_at").first()
-            if not workflow:
-                return Response({"error": f"No active workflow mapped for repository: {repo_name}"}, status=status.HTTP_404_NOT_FOUND)
+        if not repo_name:
+            print("6666")
+            return Response(
+                {"error": "Missing repository name."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        job, _ = AuditJob.objects.get_or_create(workflow=workflow, tool_name=tool_name)
+        # IMPORTANT PIPELINE VALIDATION
+        pipeline_state = get_pipeline_state(pipeline_id)
+        if not pipeline_state:
+            print("7777")
+            return Response(
+                {"error": "Unknown or expired pipeline_id.", "pipeline_id": pipeline_id},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-        # ---------------------------------------------------------------------
-        # PHASE 3: DEFENSIVE COGNITIVE CRASH IDENTIFICATION (Regex Evaluator)
-        # ---------------------------------------------------------------------
-        injected_findings = None
-        
-        # If it came through as unformatted text, or contains standard terminal exception tokens:
-        if is_crash_trace or "Traceback" in file_content or "SyntaxError" in file_content:
-            job.status = "failure"
-            
-            if "UndefinedValueError" in file_content or "KeyError" in file_content:
-                msg = "Runtime infrastructure configuration error: Missing required environment variables."
-            elif "SyntaxError" in file_content:
-                msg = "Code execution blocked: Severe Python syntax error detected in repository code."
-            elif "psycopg2.OperationalError" in file_content or "SSL connection" in file_content:
-                msg = "Database handshake failure: Target environment database rejected connection strings."
-            else:
-                msg = f"Internal container runtime error: The {tool_name} processing engine terminated unexpectedly."
-                
-            injected_findings = {
-                "status": "tool_crash",
-                "reason_code": "EXCEPTION_INTERCEPTED",
-                "message": msg
-            }
-        else:
-            job.status = "success"
+        # RETRIEVE AUDITJOB FROM PIPELINE STATE
+        auditjob_id = pipeline_state.get("auditjob_id")
+        auditjob = None
+        if auditjob_id:
+            auditjob = AuditJob.objects.filter(id=auditjob_id).first()
 
-        # ---------------------------------------------------------------------
-        # PHASE 4: SECURE CORE ASSET STREAM FILE RETRIEVAL (Cloudflare R2 Node Upload)
-        # ---------------------------------------------------------------------
-        r2_object_key = f"workspaces/{workflow.workspace_id}/workflows/{workflow.id}/jobs/{tool_name}/final_report.json"
+        # CLOUDINARY STORAGE
+        cloudinary_public_id = f"auditjobs/{auditjob_id or pipeline_id}/jobs/{tool_name}/final_report.json"
 
-        # Attempt to clean code structures into native parsed objects before storage mapping
         try:
             payload_data_block = json.loads(file_content)
         except Exception:
-            # If it's a raw trace text string or flat stdout stream log dump
             payload_data_block = {"raw_terminal_stdout_stream": file_content.splitlines()}
 
-        final_r2_payload = {
-            "workflow_id": str(workflow.id),
-            "job_id": str(job.id),
+        final_cloudinary_payload = {
+            "auditjob_id": str(auditjob_id) if auditjob_id else None,
             "tool": tool_name,
             "run_id": run_id,
-            "system_findings_alert": injected_findings,
-            "content": payload_data_block
+            "pipeline_id": pipeline_id,
+            "content": payload_data_block,
         }
 
-        # Constant time O(1) storage write bypass block
-        r2_client.put_object(
-            Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME,
-            Key=r2_object_key,
-            Body=json.dumps(final_r2_payload, indent=2),
-            ContentType="application/json"
-        )
+        cloudinary_url = None
+        try:
+            cloudinary_upload = cloudinary.uploader.upload(
+                io.BytesIO(json.dumps(final_cloudinary_payload, indent=2).encode("utf-8")),
+                resource_type="raw",
+                type="upload",
+                public_id=cloudinary_public_id,
+                overwrite=True,
+            )
+            cloudinary_url = cloudinary_upload.get("secure_url")
+        except Exception as upload_err:
+            print(f"⚠️ Cloudinary upload warning: {upload_err}")
 
-        # ---------------------------------------------------------------------
-        # PHASE 5: REAL-TIME WEBSOCKET PROGRESS REPORTING AND BROADCAST
-        # ---------------------------------------------------------------------
+        # DATABASE FINALIZATION (AUDITJOB)
+        if auditjob and cloudinary_url:
+            auditjob.log_blob_path = cloudinary_url
+            auditjob.save()
+
+        job_status = "failure" if is_crash_trace else "success"
+
+        # WEBSOCKET PROGRESS
         channel_layer = get_channel_layer()
-        if channel_layer:
-            user_group = f"group_user_room_{workflow.workspace.owner_id}"
-            
-            # Compile decorative terminal banner block for frontend typewriters
+        channel_name = pipeline_state.get("channel_name")
+        if channel_layer and channel_name:
             styled_logs = [
                 "",
                 "┌──────────────────────────────────────────────────────────┐",
-                f"  ► INGESTION PIPELINE PARSER ARCHIVE SECURED: {tool_name.upper()} ",
-                f"  ► STATUS ENGINE COMPLETION DETERMINISTIC   : [ {job.status.upper()} ] ",
+                f"  ► INGESTION PIPELINE PARSER ARCHIVE SECURED: {tool_name.upper()}",
+                f"  ► STATUS ENGINE COMPLETION DETERMINISTIC: [ {job_status.upper()} ]",
                 "└──────────────────────────────────────────────────────────┘",
-                ""
+                "",
             ]
-            if injected_findings:
-                styled_logs.append(f"🚨 CRITICAL ERROR: {injected_findings['message']}")
-            
+
             async_to_sync(channel_layer.group_send)(
-                user_group,
+                channel_name,
                 {
                     "type": "chat_message",
                     "payload": {
                         "type": "status",
                         "message": f"Completed {tool_name} processing engine loop context.",
                         "live_logs": styled_logs,
-                        "tool": tool_name
-                    }
-                }
+                        "tool": tool_name,
+                        "pipeline_id": pipeline_id,
+                    },
+                },
             )
 
-        # ---------------------------------------------------------------------
-        # PHASE 6: FINALIZE PERSISTENCE LAYERS (PostgreSQL Database Saves)
-        # ---------------------------------------------------------------------
-        job.log_blob_path = f"{settings.CLOUDFLARE_R2_PUBLIC_URL}/{r2_object_key}"
-        job.completed_at = datetime.now()
-        job.save()
+        # REDIS RESULT
+        github_result = {
+            "status": job_status,
+            "scope_status": job_status,
+            "tool": tool_name,
+            "repo": repo_name,
+            "run_id": run_id,
+            "pipeline_id": pipeline_id,
+            "auditjob_id": str(auditjob_id) if auditjob_id else None,
+            "cloudinary_public_id": cloudinary_public_id,
+            "cloudinary_url": cloudinary_url,
+            "content": payload_data_block,
+        }
 
-        # If all sibling tool pipelines are closed, mark the master parent entry successful too!
-        if not workflow.jobs.filter(status="processing").exists():
-            workflow.status = "success" if not workflow.jobs.filter(status="failure").exists() else "failure"
-            workflow.save()
+        # The Redis completion gate decides when to launch the follow-up.
+        added = add_github_result_to_pipeline(
+            pipeline_id=pipeline_id,
+            repository=repo_name,
+            tool=tool_name,
+            result=github_result,
+        )
 
-        return Response({
-            "status": "processed", 
-            "scope_status": job.status,
-            "message": f"Data received via {request.content_type or 'text/plain'} matrix successfully."
-        }, status=status.HTTP_200_OK)
+        follow_up_started = trigger_pipeline_follow_up_if_ready(pipeline_id)
+
+        # FINAL RESPONSE
+        return Response(
+            {
+                "status": "processed",
+                "scope_status": job_status,
+                "pipeline_id": pipeline_id,
+                "tool": tool_name,
+                "auditjob_id": str(auditjob_id) if auditjob_id else None,
+                "result_recorded": added,
+                "follow_up_started": follow_up_started,
+                "message": f"Final {tool_name} result received and recorded.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+            
+
+
 
