@@ -240,7 +240,7 @@ def find_matching_repos_from_redis(all_repos, user_provided_input, channel_name)
     Finds all potential repository matches from Redis.
     Returns a list of unique, case-preserved GitHub repository names.
     """
-
+    raw_search = user_provided_input.strip().lower()
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
             channel_name,
@@ -250,13 +250,13 @@ def find_matching_repos_from_redis(all_repos, user_provided_input, channel_name)
                     "type": "orchestration_result",
                     "raw_output": {
                         "ui_layout_route": "CHAT",
-                        "chat_response": "Matching Repos" ,
+                        "chat_response": f"Matching Repos for {raw_search}" ,
                     },
                 }
             }
         )
     did_not_match_exactly = True
-    raw_search = user_provided_input.strip().lower()
+    
     # Strip symbols entirely to catch missing hyphens/underscores
     alphanumeric_search = "".join(c for c in raw_search if c.isalnum())
 
@@ -377,7 +377,7 @@ def ensure_orchestrator_yaml_is_online(
                     "type": "orchestration_result",
                     "raw_output": {
                         "ui_layout_route": "CHAT",
-                        "chat_response": "Verifying Repo name and branch on github" ,
+                        "chat_response": f"Verifying Repo name and branch on github for {repo_name}" ,
                     },
                 }
             }
@@ -2772,6 +2772,24 @@ if __name__ == "__main__":
             "=" * 80
         )
 
+        # 📡 Broadcast dispatching state
+        async_to_sync(channel_layer.group_send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route": "CHAT",
+                        "chat_response": (
+                            f"Dispatching workflow to GitHub for repository '{matched_repo_name}' "
+                            f"on branch '{target_branch}'..."
+                        ),
+                    },
+                }
+            }
+        )
+
         try:
             feedback_r = requests.post(
                 url,
@@ -2783,6 +2801,19 @@ if __name__ == "__main__":
             err_msg = f"GitHub workflow dispatch network error: {str(e)}"
             print(
                 f"❌ GITHUB NETWORK ERROR: {e}"
+            )
+            async_to_sync(channel_layer.group_send)(
+                channel_name,
+                {
+                    "type": "chat_message",
+                    "payload": {
+                        "type": "orchestration_result",
+                        "raw_output": {
+                            "ui_layout_route": "CHAT",
+                            "chat_response": f"❌ Failed to dispatch workflow to GitHub: {str(e)}",
+                        },
+                    }
+                }
             )
             record_github_dispatch_failure(
                 pipeline_id=pipeline_id,
@@ -2824,6 +2855,24 @@ if __name__ == "__main__":
                 "is now waiting for webhook results."
             )
 
+            # 📡 Broadcast successful dispatch and waiting state
+            async_to_sync(channel_layer.group_send)(
+                channel_name,
+                {
+                    "type": "chat_message",
+                    "payload": {
+                        "type": "orchestration_result",
+                        "raw_output": {
+                            "ui_layout_route": "CHAT",
+                            "chat_response": (
+                                "Workflow dispatched to GitHub successfully. "
+                                "Waiting for analysis results..."
+                            ),
+                        },
+                    }
+                }
+            )
+
             resolved_repo_name.update({
                 "status": "success",
                 "pipeline_id": pipeline_id,
@@ -2852,6 +2901,20 @@ if __name__ == "__main__":
                 f"❌ GITHUB ERROR "
                 f"[{feedback_r.status_code}]: "
                 f"{feedback_r.text}"
+            )
+
+            async_to_sync(channel_layer.group_send)(
+                channel_name,
+                {
+                    "type": "chat_message",
+                    "payload": {
+                        "type": "orchestration_result",
+                        "raw_output": {
+                            "ui_layout_route": "CHAT",
+                            "chat_response": f"❌ GitHub rejected workflow dispatch [{feedback_r.status_code}]: {feedback_r.text}",
+                        },
+                    }
+                }
             )
 
             resolved_repo_name.update({

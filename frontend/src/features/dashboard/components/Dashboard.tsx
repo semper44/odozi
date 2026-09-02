@@ -65,6 +65,12 @@ export default function Dashboard() {
     }, [isAiOpen, isProcessingRequest]);
 
 
+    const MESSAGE_PACING_DELAY_MS = 650;
+    const messageQueueRef = useRef<ChatMessage[]>([]);
+    const isProcessingQueueRef = useRef<boolean>(false);
+    const lastMessageRenderTimeRef = useRef<number>(0);
+    const queueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     const clearAiResponseTimeout = () => {
         if (aiResponseTimeoutRef.current) {
             clearTimeout(aiResponseTimeoutRef.current);
@@ -72,12 +78,52 @@ export default function Dashboard() {
         }
     };
 
+    const processMessageQueue = () => {
+        if (messageQueueRef.current.length === 0) {
+            isProcessingQueueRef.current = false;
+            return;
+        }
+
+        isProcessingQueueRef.current = true;
+        const nextMessage = messageQueueRef.current.shift()!;
+        lastMessageRenderTimeRef.current = Date.now();
+        setMessages((prev) => [...prev, nextMessage]);
+
+        if (messageQueueRef.current.length > 0) {
+            queueTimerRef.current = setTimeout(() => {
+                processMessageQueue();
+            }, MESSAGE_PACING_DELAY_MS);
+        } else {
+            isProcessingQueueRef.current = false;
+        }
+    };
+
+    const enqueueAiMessage = (text: string) => {
+        const newAiMessage: ChatMessage = {
+            id: crypto.randomUUID(),
+            sender: "ai",
+            text: text,
+        };
+
+        messageQueueRef.current.push(newAiMessage);
+
+        if (!isProcessingQueueRef.current) {
+            const timeSinceLast = Date.now() - lastMessageRenderTimeRef.current;
+            const remainingDelay = Math.max(0, MESSAGE_PACING_DELAY_MS - timeSinceLast);
+
+            if (remainingDelay > 0 && lastMessageRenderTimeRef.current > 0) {
+                isProcessingQueueRef.current = true;
+                queueTimerRef.current = setTimeout(() => {
+                    processMessageQueue();
+                }, remainingDelay);
+            } else {
+                processMessageQueue();
+            }
+        }
+    };
+
     const { sendMessage } = useStreamingSocket((packet) => {
         console.log(socketError, "🎯 Caught incoming orchestration block payload:", packet);
-
-        // An orchestration packet proves the server accepted the request, so
-        // replace the initial full-screen state with the regular chat panel.
-        // setIsProcessingRequest(false);
 
         // Intermediate orchestration updates are not completion. Keep the
         // watchdog alive until the final Celery follow-up result arrives.
@@ -86,19 +132,18 @@ export default function Dashboard() {
         }
         
         if (packet?.raw_output?.chat_response) {
-            // Create and append the AI reply text frame
-            const newAiMessage: ChatMessage = {
-                id: crypto.randomUUID(),
-                sender: "ai",
-                text: packet.raw_output.chat_response,
-            };
-            
-            setMessages((prev) => [...prev, newAiMessage]);
+            enqueueAiMessage(packet.raw_output.chat_response);
         }
     });
 
     useEffect(() => {
-        return () => clearAiResponseTimeout();
+        return () => {
+            clearAiResponseTimeout();
+            if (queueTimerRef.current) {
+                clearTimeout(queueTimerRef.current);
+                queueTimerRef.current = null;
+            }
+        };
     }, []);
 
     useEffect(() => {
@@ -109,13 +154,7 @@ export default function Dashboard() {
             
             // Append a system or error message to your chat interface display window
             if (socketError.isImportant) {
-                const errorSystemMessage: ChatMessage = {
-                    id: crypto.randomUUID(),
-                    sender: "ai", // or "system" depending on your layout style
-                    text: socketError.message || "An unexpected error occurred. Please try again.", 
-                };
-            
-            setMessages((prev) => [...prev, errorSystemMessage]);
+                enqueueAiMessage(socketError.message || "An unexpected error occurred. Please try again.");
             } 
         }
     }, [socketError]);
