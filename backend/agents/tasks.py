@@ -3332,11 +3332,11 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
             
             for item in raw_findings:
                 findings.append({
-                    'file': './backend/task/views.py',
+                    'file': item.get('file', './backend/task/views.py'),
                     'line': item.get('line'),
-                    'name': item.get('name'),
-                    'message': item.get('message'),
-                    'severity': 'HIGH' if item.get('rule') == 'missing_authentication' else 'LOW'
+                    'name': item.get('name') or item.get('type') or item.get('function'),
+                    'message': item.get('message') or f"{item.get('type')}: {item.get('function', '')}",
+                    'severity': 'HIGH' if item.get('rule') == 'missing_authentication' or item.get('type') == 'missing_authentication' else 'LOW'
                 })
 
         elif tool == 'pytest':

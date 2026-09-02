@@ -26,7 +26,7 @@ import { GitHubInstallation } from "../../../pages/registrationorlogin/install_g
 
 
 export default function Dashboard() {
-    const AI_RESPONSE_TIMEOUT_MS = 90_000;
+    const AI_RESPONSE_TIMEOUT_MS = 180_000;
     const navigate = useNavigate();
     useAutonomicTokenRefresh();
     const [isAiOpen, setIsAiChatOpen] = useState(false);

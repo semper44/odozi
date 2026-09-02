@@ -15,6 +15,7 @@ from .rule_classes import (
 AST_TOOL_REGISTRY = {
     "check_api_auth": APIAuthVisitor,
     "check_general_auth": GeneralAuthenticationVisitor,
+    "check_auth": GeneralAuthenticationVisitor,
     "check_transaction_atomic": FunctionConstraintVisitor,  # Handled by function constraints now!
     "check_required_call": FunctionConstraintVisitor,
     "check_class_length": ClassLengthAndConstraintVisitor,
@@ -22,5 +23,7 @@ AST_TOOL_REGISTRY = {
     "check_docstrings": DocstringConstraintVisitor,         # Brand new engine option!
     "check_error_handling": ErrorHandlingConstraintVisitor,
     "check_n_plus_one": NPlusOneQueryConstraintVisitor,
-    "check_pii": PiiLeakageConstraintVisitor
+    "check_pii": PiiLeakageConstraintVisitor,
+    "pii_leakage": PiiLeakageConstraintVisitor,
+    "check_pii_leakage": PiiLeakageConstraintVisitor,
 }

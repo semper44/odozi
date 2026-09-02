@@ -117,7 +117,7 @@ jobs:
 
           if [ -f "report.json" ]; then
 
-            curl -X POST \
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
               "${{ inputs.backend_url }}/general/results/" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "bypass-tunnel-reminder: true" \
@@ -127,15 +127,11 @@ jobs:
               -F "repo=${{ github.repository }}" \
               -F "tool=pytest" \
               -F "event_type=final" \
-              -F "file=@report.json"
-
-              # <<< CHANGED >>>
-              # Explicitly identifies this as the ONE FINAL pytest result.
-              # There is NO streaming/buffer payload here.
+              -F "file=@report.json" || true
 
           else
 
-            curl -X POST \
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
               "${{ inputs.backend_url }}/general/results/" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "bypass-tunnel-reminder: true" \
@@ -145,10 +141,8 @@ jobs:
               -F "repo=${{ github.repository }}" \
               -F "tool=pytest" \
               -F "event_type=final" \
-              -F "error=pytest did not produce report.json"
+              -F "error=pytest did not produce report.json" || true
 
-              # <<< CHANGED >>>
-              # Even the failure/no-report notification is explicitly FINAL.
           fi
 
 
@@ -182,26 +176,41 @@ jobs:
         run: |
           ruff check \
             --output-format json \
-            . > ruff_report.json || true
+            . > ruff_report.json 2>&1 || true
 
       - name: Send Ruff Report
         if: always()
         run: |
 
-          curl -X POST \
-            "${{ inputs.backend_url }}/general/results/" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "bypass-tunnel-reminder: true" \
-            -F "repo=${{ github.repository }}" \
-            -F "repo_owner=${{ github.repository_owner }}" \
-            -F "run_id=${{ github.run_id }}" \
-            -F "pipeline_id=${{ inputs.pipeline_id }}" \
-            -F "tool=ruff" \
-            -F "event_type=final" \
-            -F "file=@ruff_report.json"
+          if [ -f "ruff_report.json" ]; then
 
-            # <<< CHANGED >>>
-            # Explicitly marks Ruff's report as the final tool result.
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=ruff" \
+              -F "event_type=final" \
+              -F "file=@ruff_report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=ruff" \
+              -F "event_type=final" \
+              -F "error=ruff did not produce report.json" || true
+
+          fi
 
 
   # ================================================================
@@ -232,26 +241,41 @@ jobs:
 
       - name: Run Bandit
         run: |
-          bandit -r . -lll -f json > bandit_report.json || true
+          bandit -r . -lll -f json > bandit_report.json 2>&1 || true
 
       - name: Send Bandit Report
         if: always()
         run: |
 
-          curl -X POST \
-            "${{ inputs.backend_url }}/general/results/" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "bypass-tunnel-reminder: true" \
-            -F "repo=${{ github.repository }}" \
-            -F "repo_owner=${{ github.repository_owner }}" \
-            -F "run_id=${{ github.run_id }}" \
-            -F "pipeline_id=${{ inputs.pipeline_id }}" \
-            -F "tool=bandit" \
-            -F "event_type=final" \
-            -F "file=@bandit_report.json"
+          if [ -f "bandit_report.json" ]; then
 
-            # <<< CHANGED >>>
-            # Explicitly marks Bandit's report as the final tool result.
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=bandit" \
+              -F "event_type=final" \
+              -F "file=@bandit_report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=bandit" \
+              -F "event_type=final" \
+              -F "error=bandit did not produce report.json" || true
+
+          fi
 
 
   # ================================================================
@@ -288,27 +312,41 @@ jobs:
           echo "$CUSTOM_SCRIPT" |
             base64 -d > odozi_runner.py
 
-          python odozi_runner.py |
-            tee odozi_report.json
+          python odozi_runner.py > odozi_report.json 2>&1 || true
 
       - name: Send Odozi Report
         if: always()
         run: |
 
-          curl -X POST \
-            "${{ inputs.backend_url }}/general/results/" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "bypass-tunnel-reminder: true" \
-            -F "repo=${{ github.repository }}" \
-            -F "repo_owner=${{ github.repository_owner }}" \
-            -F "run_id=${{ github.run_id }}" \
-            -F "pipeline_id=${{ inputs.pipeline_id }}" \
-            -F "tool=odozi_visitors" \
-            -F "event_type=final" \
-            -F "file=@odozi_report.json"
+          if [ -f "odozi_report.json" ]; then
 
-            # <<< CHANGED >>>
-            # Explicitly marks Odozi's report as the final tool result.
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=odozi_visitors" \
+              -F "event_type=final" \
+              -F "file=@odozi_report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=odozi_visitors" \
+              -F "event_type=final" \
+              -F "error=odozi_visitors did not produce report.json" || true
+
+          fi
 
 
   # ================================================================
@@ -347,13 +385,13 @@ jobs:
             pip-audit \
               -r requirements.txt \
               -f json \
-              > pip_audit_report.json || true
+              > pip_audit_report.json 2>&1 || true
 
           else
 
             pip-audit \
               -f json \
-              > pip_audit_report.json || true
+              > pip_audit_report.json 2>&1 || true
 
           fi
 
@@ -361,17 +399,32 @@ jobs:
         if: always()
         run: |
 
-          curl -X POST \
-            "${{ inputs.backend_url }}/general/results/" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "bypass-tunnel-reminder: true" \
-            -F "repo=${{ github.repository }}" \
-            -F "repo_owner=${{ github.repository_owner }}" \
-            -F "run_id=${{ github.run_id }}" \
-            -F "pipeline_id=${{ inputs.pipeline_id }}" \
-            -F "tool=pip_audit" \
-            -F "event_type=final" \
-            -F "file=@pip_audit_report.json"
+          if [ -f "pip_audit_report.json" ]; then
 
-            # <<< CHANGED >>>
-            # Explicitly marks pip-audit's report as the final tool result.
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=pip_audit" \
+              -F "event_type=final" \
+              -F "file=@pip_audit_report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=pip_audit" \
+              -F "event_type=final" \
+              -F "error=pip_audit did not produce report.json" || true
+
+          fi
