@@ -19,12 +19,11 @@ const requireAuthenticatedSession = async () => {
     headers: { "Content-Type": "application/json" },
   });
 
-  // if (response.status === 401 || response.status === 403) {
-  //   throw redirect("/login");
-  // }
+  if (response.status === 401 || response.status === 403) {
+    throw redirect("/login");
+  }
 
-  // Do not redirect for server/network failures; those need a real error
-  // state instead of incorrectly telling a signed-in user to log in again.
+  // making sure to redirect only for a auth error
   if (!response.ok) {
     throw new Response("Unable to verify the current session.", {
       status: response.status,

@@ -3,7 +3,7 @@
 import io
 import json
 import boto3
-import time
+import requests
 import uuid
 from datetime import datetime
 from rest_framework.views import APIView
@@ -297,6 +297,47 @@ class OptimizedResultsReceiverView(APIView):
         )
 
             
+
+class CloudinaryHistoryReportView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, auditjob_id):
+        auditjob = AuditJob.objects.filter(id=auditjob_id).first()
+
+        if not auditjob:
+            return Response({"error": "AuditJob not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not auditjob.log_blob_path:
+            return Response({"error": "No Cloudinary report stored for this AuditJob."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            response = requests.get(auditjob.log_blob_path, timeout=30)
+
+            if response.status_code != 200:
+                return Response({
+                    "error": "Cloudinary report could not be retrieved.",
+                    "cloudinary_status": response.status_code,
+                    "cloudinary_url": auditjob.log_blob_path,
+                }, status=status.HTTP_502_BAD_GATEWAY)
+
+            try:
+                report = response.json()
+            except ValueError:
+                report = response.text
+
+            return Response({
+                "auditjob_id": str(auditjob.id),
+                "cloudinary_url": auditjob.log_blob_path,
+                "report": report,
+            }, status=status.HTTP_200_OK)
+
+        except requests.RequestException as e:
+            return Response({
+                "error": "Failed to contact Cloudinary.",
+                "details": str(e),
+            }, status=status.HTTP_502_BAD_GATEWAY)
+
 
 
 

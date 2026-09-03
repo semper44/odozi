@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bot,House, CheckCheck, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus } from "lucide-react";
+import { Bot,House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
 import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMessage";
@@ -59,7 +59,8 @@ export default function Dashboard() {
     const socketError = useSocketStore((state) => state.socketError);
     const isProcessing = useSocketStore((state) => state.isProcessing);
     // const statusMessage = useSocketStore((state) => state.statusMessage);
-   
+   console.log(messages, "pillar")
+
     useEffect(() => {
         console.log(isProcessingRequest,"Dashboard mounted, initializing socket connection...", isAiOpen,"rihanna", isProcessingRequest);
     }, [isAiOpen, isProcessingRequest]);
@@ -166,6 +167,8 @@ export default function Dashboard() {
         error,
     } = useRepos();
 
+    console.log("ogo", data)
+
     // Covers a session that expires after the protected route has mounted.
     // This must run before loading/error returns so auth failures can redirect.
     useEffect(() => {
@@ -214,7 +217,7 @@ export default function Dashboard() {
     const filteredRepositories = useMemo(() => {
         if (!data?.repositories) return [];
 
-        return items.filter((repo: any) => {
+        return data.repositories.filter((repo: any) => {
         // Filter Step A: Match Workspace selection boundaries
         if (selectedWorkspace && repo.workspaceName !== selectedWorkspace) {
             return false;
@@ -495,7 +498,7 @@ export default function Dashboard() {
 
                         {/*  my proj */}
                         <div className="my-proj w-fit hidden md:flex items-center gap-2">
-                            <p className="font-bold text-black pl-10">Welcome, John</p>
+                            <p className="font-bold text-black pl-10">Welcome, {data.username}</p>
                         </div>
 
                         {/* input box parent */}
@@ -589,7 +592,7 @@ export default function Dashboard() {
                                         name={repo.full_name}
                                         image={"repo.avatar_url"}
                                         isActive={isActive} // Pass the tick/active state to your card
-                                        workspaceName={"repo.workspaceName"}
+                                        workspaceName={repo.workspaceName}
                                     />
                                 );
                                 })}

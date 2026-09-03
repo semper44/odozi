@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import {SendHorizontal} from "lucide-react";
+import ChatResponse from "../../dashboard/components/ui/Markdown";
+import { data } from "react-router-dom";
 
 
 export interface ChatMessage {
@@ -40,6 +42,7 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
     if (e.key === "Enter") handleSend();
   };
 
+  console.log(messages, "rodegers")
 
   return (
     <div id="ai-chat-body-parent" className="flex flex-col w-full" style={{ height: "100vh" }}>
@@ -57,6 +60,7 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
                 <img src="images/gradient.jpg" alt="AI Avatar" className="rounded-full w-[35px] h-[35px] object-cover" />
                 <div className="bg-blue-50 border border-blue-100 text-sm p-3 rounded-lg text-gray-800">
                   {msg.text}
+                  <ChatResponse response={msg.text} />
                 </div>
               </div>
             )}

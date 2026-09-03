@@ -335,6 +335,8 @@ def dashboard_view(request):
 
 
 
+
+
 class CreateWorkspaceView(APIView):
     """Create a workspace and attach selected repositories to it."""
 
@@ -710,6 +712,8 @@ def receive_ci_results(request):
     except Exception as e:
         print(f"❌ VIEW ERROR: {str(e)}")
         return JsonResponse({'error': str(e)}, status=500)
+
+
 
 
 
