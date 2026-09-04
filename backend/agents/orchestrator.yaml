@@ -177,6 +177,7 @@ jobs:
           ruff check \
             --output-format json \
             . > ruff_report.json 2>&1 || true
+          cat ruff_report.json
 
       - name: Send Ruff Report
         if: always()
@@ -242,6 +243,7 @@ jobs:
       - name: Run Bandit
         run: |
           bandit -r . -lll -f json > bandit_report.json 2>&1 || true
+          cat bandit_report.json
 
       - name: Send Bandit Report
         if: always()
@@ -313,6 +315,7 @@ jobs:
             base64 -d > odozi_runner.py
 
           python odozi_runner.py > odozi_report.json 2>&1 || true
+          cat odozi_report.json
 
       - name: Send Odozi Report
         if: always()

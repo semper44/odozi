@@ -2992,7 +2992,19 @@ def agentic_chat_follow_up(
     2. Summarize successful operations.
     3. Explain failures in plain English.
     4. If clarification is required, politely ask for it.
-    5. ALWAYS keep:
+    
+    Format the response using these rules:
+
+    5. Use a ### heading for every major category.
+    6. Every operation/result must be a separate bullet.
+    7. Start each bullet with the relevant resource/entity in bold.
+    8. Put repository names, workspace names, branch names, function names, file names, and technical identifiers in backticks.
+    9. Do not combine multiple resources into one bullet.
+    10. Do not use introductory phrases such as "Regarding environment keys:".
+    11. Keep explanations after the bold resource name.
+    12. Use nested bullets for details belonging to a specific result.
+    13. Do not put multiple operations in the same paragraph.
+    14. ALWAYS keep:
        - active_rules=[]
        - workspaces_to_create=[]
        - workspaces_to_delete=[]

@@ -9,9 +9,8 @@ class AuditJob(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     report = models.CharField(max_length=50, blank=True, null=True) #llm follow_up report
     execution_time_seconds = models.IntegerField(default=0)
-    
-    # 🌟 THE SENIOR LINK: Secret path to your Cloudflare R2 bucket blob object
-    log_blob_path = models.CharField(max_length=500, blank=True, null=True) 
+    pipeline_id = models.UUIDField(unique=True, db_index=True)
+    log_blob_path = models.CharField(max_length=500, blank=True, null=True, help_text="Path to the log blob in cloud storage") 
     
     created_at = models.DateTimeField(auto_now_add=True)
 

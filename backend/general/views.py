@@ -195,7 +195,7 @@ class OptimizedResultsReceiverView(APIView):
             auditjob = AuditJob.objects.filter(id=auditjob_id).first()
 
         # CLOUDINARY STORAGE
-        cloudinary_public_id = f"auditjobs/{auditjob_id or pipeline_id}/jobs/{tool_name}/final_report.json"
+        cloudinary_public_id = f"auditjobs/{pipeline_id}/jobs/{tool_name}/final_report.json"
 
         try:
             payload_data_block = json.loads(file_content)

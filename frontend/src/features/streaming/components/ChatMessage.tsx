@@ -59,7 +59,6 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
               <div className="flex gap-3 mt-2 items-center max-w-[75%]">
                 <img src="images/gradient.jpg" alt="AI Avatar" className="rounded-full w-[35px] h-[35px] object-cover" />
                 <div className="bg-blue-50 border border-blue-100 text-sm p-3 rounded-lg text-gray-800">
-                  {msg.text}
                   <ChatResponse response={msg.text} />
                 </div>
               </div>
