@@ -302,8 +302,8 @@ class CloudinaryHistoryReportView(APIView):
     authentication_classes = []
     permission_classes = []
 
-    def get(self, request, auditjob_id):
-        auditjob = AuditJob.objects.filter(id=auditjob_id).first()
+    def get(self, request, pipeline_id):
+        auditjob = AuditJob.objects.filter(id=pipeline_id).first()
 
         if not auditjob:
             return Response({"error": "AuditJob not found."}, status=status.HTTP_404_NOT_FOUND)
