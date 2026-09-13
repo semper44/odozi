@@ -50,10 +50,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
             print("WWWWWWWWWWWWWWWWWWWWW")
 
             if msg_type == "start_processing":
-                # 🚀 INSTANTLY OFFLOAD EVERYTHING TO CELERY
-                # Your web processes remain 100% responsive while handling traffic peaks
+                #  INSTANTLY OFFLOAD EVERYTHING TO CELERY
                 current_app.send_task(  # type: ignore
-                    "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches your celery task path string exactly!
+                    "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches my celery task path string exactly!
                     kwargs={
                         "channel_name": self.user_group,
                         "user_id": self.user.pk,

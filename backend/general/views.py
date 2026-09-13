@@ -188,14 +188,21 @@ class OptimizedResultsReceiverView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # RETRIEVE AUDITJOB FROM PIPELINE STATE
+        # The existing pipeline AuditJob stores the final LLM summary. Create
+        # one additional AuditJob for this exact tool/run to retain all tests.
         auditjob_id = pipeline_state.get("auditjob_id")
-        auditjob = None
-        if auditjob_id:
-            auditjob = AuditJob.objects.filter(id=auditjob_id).first()
+        if not run_id:
+            run_id = uuid.uuid4().hex
+        result_auditjob, _ = AuditJob.objects.get_or_create(
+            pipeline_id=pipeline_id,
+            tool_name=tool_name or "unknown",
+            run_id=str(run_id),
+        )
 
         # CLOUDINARY STORAGE
-        cloudinary_public_id = f"auditjobs/{pipeline_id}/jobs/{tool_name}/final_report.json"
+        cloudinary_public_id = (
+            f"auditjobs/{pipeline_id}/jobs/{tool_name}/{run_id}/final_report.json"
+        )
 
         try:
             payload_data_block = json.loads(file_content)
@@ -203,7 +210,8 @@ class OptimizedResultsReceiverView(APIView):
             payload_data_block = {"raw_terminal_stdout_stream": file_content.splitlines()}
 
         final_cloudinary_payload = {
-            "auditjob_id": str(auditjob_id) if auditjob_id else None,
+            "auditjob_id": str(result_auditjob.id),
+            "pipeline_auditjob_id": str(auditjob_id) if auditjob_id else None,
             "tool": tool_name,
             "run_id": run_id,
             "pipeline_id": pipeline_id,
@@ -223,10 +231,10 @@ class OptimizedResultsReceiverView(APIView):
         except Exception as upload_err:
             print(f"⚠️ Cloudinary upload warning: {upload_err}")
 
-        # DATABASE FINALIZATION (AUDITJOB)
-        if auditjob and cloudinary_url:
-            auditjob.log_blob_path = cloudinary_url
-            auditjob.save()
+        # Save the Cloudinary URL on this test's own AuditJob row.
+        if cloudinary_url:
+            result_auditjob.log_blob_path = cloudinary_url
+            result_auditjob.save(update_fields=["log_blob_path"])
 
         job_status = "failure" if is_crash_trace else "success"
 
@@ -265,7 +273,8 @@ class OptimizedResultsReceiverView(APIView):
             "repo": repo_name,
             "run_id": run_id,
             "pipeline_id": pipeline_id,
-            "auditjob_id": str(auditjob_id) if auditjob_id else None,
+            "auditjob_id": str(result_auditjob.id),
+            "pipeline_auditjob_id": str(auditjob_id) if auditjob_id else None,
             "cloudinary_public_id": cloudinary_public_id,
             "cloudinary_url": cloudinary_url,
             "content": payload_data_block,
@@ -288,7 +297,8 @@ class OptimizedResultsReceiverView(APIView):
                 "scope_status": job_status,
                 "pipeline_id": pipeline_id,
                 "tool": tool_name,
-                "auditjob_id": str(auditjob_id) if auditjob_id else None,
+                "auditjob_id": str(result_auditjob.id),
+                "pipeline_auditjob_id": str(auditjob_id) if auditjob_id else None,
                 "result_recorded": added,
                 "follow_up_started": follow_up_started,
                 "message": f"Final {tool_name} result received and recorded.",
@@ -303,41 +313,43 @@ class CloudinaryHistoryReportView(APIView):
     permission_classes = []
 
     def get(self, request, pipeline_id):
-        auditjob = AuditJob.objects.filter(id=pipeline_id).first()
+        auditjobs = AuditJob.objects.filter(
+            pipeline_id=pipeline_id,
+            log_blob_path__isnull=False,
+        ).exclude(log_blob_path="").order_by("created_at")
 
-        if not auditjob:
+        if not auditjobs.exists():
             return Response({"error": "AuditJob not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if not auditjob.log_blob_path:
-            return Response({"error": "No Cloudinary report stored for this AuditJob."}, status=status.HTTP_404_NOT_FOUND)
-
-        try:
-            response = requests.get(auditjob.log_blob_path, timeout=30)
-
-            if response.status_code != 200:
-                return Response({
-                    "error": "Cloudinary report could not be retrieved.",
-                    "cloudinary_status": response.status_code,
-                    "cloudinary_url": auditjob.log_blob_path,
-                }, status=status.HTTP_502_BAD_GATEWAY)
-
-            try:
-                report = response.json()
-            except ValueError:
-                report = response.text
-
-            return Response({
+        reports = []
+        for auditjob in auditjobs:
+            item = {
                 "auditjob_id": str(auditjob.id),
+                "tool": auditjob.tool_name,
+                "run_id": auditjob.run_id,
                 "cloudinary_url": auditjob.log_blob_path,
-                "report": report,
-            }, status=status.HTTP_200_OK)
+            }
+            try:
+                response = requests.get(auditjob.log_blob_path, timeout=30)
+                if response.status_code != 200:
+                    item.update({
+                        "error": "Cloudinary report could not be retrieved.",
+                        "cloudinary_status": response.status_code,
+                    })
+                else:
+                    try:
+                        item["report"] = response.json()
+                    except ValueError:
+                        item["report"] = response.text
+            except requests.RequestException as error:
+                item.update({"error": "Failed to contact Cloudinary.", "details": str(error)})
+            reports.append(item)
 
-        except requests.RequestException as e:
-            return Response({
-                "error": "Failed to contact Cloudinary.",
-                "details": str(e),
-            }, status=status.HTTP_502_BAD_GATEWAY)
-
+        return Response({
+            "pipeline_id": str(pipeline_id),
+            "count": len(reports),
+            "reports": reports,
+        }, status=status.HTTP_200_OK)
 
 
 

@@ -1306,8 +1306,9 @@ def process_agentic_chat_turn_task(
         github_pipeline_signatures = []
         github_expected_events = []
 
+        auditjob_id = None
         if result.intents:
-            auditjob = AuditJob.objects.create()
+            auditjob = AuditJob.objects.create(pipeline_id=pipeline_id)
             auditjob_id = str(auditjob.id)
 
         if "run_static_analysis" in result.intents:
