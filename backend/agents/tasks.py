@@ -293,70 +293,132 @@ def find_matching_repos_from_redis(all_repos, user_provided_input, channel_name)
 
 
 
-def workflow_exists(url, headers, branch_name):
+def workflow_exists(url, headers, branch_name, channel_name=None):
     """
     Checks if a workflow file exists on a specific branch and returns its SHA.
+    Includes retry logic with backoff for transient GitHub 5xx errors or network drops.
     """
-    try:
-        print("\n==============================")
-        print("CHECKING WORKFLOW")
-        print("Branch:", branch_name)
-        print("GET URL:", url)
+    max_retries = 3
+    channel_layer = get_channel_layer() if channel_name else None
 
-        response = requests.get(url, headers=headers, timeout=15)
+    for attempt in range(1, max_retries + 1):
+        try:
+            print("\n==============================")
+            print(f"CHECKING WORKFLOW (Attempt {attempt}/{max_retries})")
+            print("Branch:", branch_name)
+            print("GET URL:", url)
 
-        print("GET Status:", response.status_code)
-        print("GET Response:")
+            response = requests.get(url, headers=headers, timeout=15)
 
-        # Always expose HTTP details so callers (and LLM) can reason about failures
-        http_status = response.status_code
-        http_body = response.text
+            print("GET Status:", response.status_code)
+            print("GET Response:")
 
-        if http_status == 200:
-            try:
-                data = response.json()
-                sha = data.get("sha")
-            except Exception:
-                sha = None
+            # Always expose HTTP details so callers (and LLM) can reason about failures
+            http_status = response.status_code
+            http_body = response.text
 
-            print("Workflow EXISTS")
-            print("SHA:", sha)
+            if http_status == 200:
+                try:
+                    data = response.json()
+                    sha = data.get("sha")
+                except Exception:
+                    sha = None
 
-            return {
-                "exists": True,
-                "sha": sha,
-                "http_status": http_status,
-                "http_body": http_body
-            }
+                print("Workflow EXISTS")
+                print("SHA:", sha)
 
-        elif http_status == 404:
-            print("Workflow DOES NOT exist.")
+                return {
+                    "exists": True,
+                    "sha": sha,
+                    "http_status": http_status,
+                    "http_body": http_body
+                }
 
+            elif http_status == 404:
+                print("Workflow DOES NOT exist.")
+
+                return {
+                    "exists": False,
+                    "sha": None,
+                    "http_status": http_status,
+                    "http_body": http_body
+                }
+
+            elif http_status >= 500:
+                print(f"GitHub server error {http_status} during workflow check (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    if channel_layer and channel_name:
+                        async_to_sync(channel_layer.group_send)(
+                            channel_name,
+                            {
+                                "type": "chat_message",
+                                "payload": {
+                                    "type": "orchestration_result",
+                                    "raw_output": {
+                                        "ui_layout_route": "CHAT",
+                                        "chat_response": f"⚠️ GitHub is currently experiencing server issues (HTTP {http_status}). Retrying workflow check on '{branch_name}' (attempt {attempt}/{max_retries})...",
+                                    },
+                                }
+                            }
+                        )
+                    time.sleep(2 * attempt)
+                else:
+                    return {
+                        "exists": False,
+                        "sha": None,
+                        "http_status": http_status,
+                        "http_body": http_body,
+                        "is_github_error": True,
+                        "error": f"GitHub server error (HTTP {http_status})"
+                    }
+
+            else:
+                print("Unexpected status code:", http_status)
+                return {
+                    "exists": False,
+                    "sha": None,
+                    "http_status": http_status,
+                    "http_body": http_body
+                }
+
+        except requests.RequestException as e:
+            print(f"Network error checking workflow status (attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                if channel_layer and channel_name:
+                    async_to_sync(channel_layer.group_send)(
+                        channel_name,
+                        {
+                            "type": "chat_message",
+                            "payload": {
+                                "type": "orchestration_result",
+                                "raw_output": {
+                                    "ui_layout_route": "CHAT",
+                                    "chat_response": f"⚠️ Network issue connecting to GitHub. Retrying workflow check on '{branch_name}' (attempt {attempt}/{max_retries})...",
+                                },
+                            }
+                        }
+                    )
+                time.sleep(2 * attempt)
+            else:
+                return {
+                    "exists": False,
+                    "sha": None,
+                    "http_status": None,
+                    "http_body": None,
+                    "is_github_error": True,
+                    "error": f"GitHub connection error: {str(e)}"
+                }
+
+        except Exception as e:
+            print(f"Error checking workflow status: {e}")
             return {
                 "exists": False,
                 "sha": None,
-                "http_status": http_status,
-                "http_body": http_body
+                "http_status": None,
+                "http_body": None,
+                "is_github_error": False,
+                "error": str(e)
             }
-
-        else:
-            print("Unexpected status code.")
-            return {
-                "exists": False,
-                "sha": None,
-                "http_status": http_status,
-                "http_body": http_body
-            }
-
-    except Exception as e:
-        print(f"Error checking workflow status: {e}")
-        return {
-            "exists": False,
-            "sha": None,
-            "http_status": None,
-            "http_body": None,
-            "error": str(e)
-        }
 
 
 def ensure_orchestrator_yaml_is_online(
@@ -458,9 +520,9 @@ def ensure_orchestrator_yaml_is_online(
         result = workflow_exists(
             check_url,
             headers,
-            branch
+            branch,
+            channel_name=channel_name
         )
-
 
         payload = {
             "message": "ci: synchronize Odozi workflow",
@@ -476,34 +538,110 @@ def ensure_orchestrator_yaml_is_online(
         else:
             print("Creating workflow...")
 
-        try:
-            response = requests.put(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
+        max_put_retries = 3
+        put_success = False
 
-            outcome = {
-                "branch": branch,
-                "attempted_url": url,
-                "workflow_check": result,
-                "http_status": response.status_code,
-                "http_body": response.text
-            }
-            branches_outcomes.append(outcome)
+        for attempt in range(1, max_put_retries + 1):
+            try:
+                response = requests.put(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
 
-            print("PUT Status:", response.status_code)
+                outcome = {
+                    "branch": branch,
+                    "attempted_url": url,
+                    "workflow_check": result,
+                    "http_status": response.status_code,
+                    "http_body": response.text
+                }
+                branches_outcomes.append(outcome)
 
-            if response.status_code not in (200, 201):
-                errors.append({"branch": branch, "status": response.status_code, "body": response.text})
-            else:
-                print(f"Successfully synchronized workflow on '{branch}'.")
+                print("PUT Status:", response.status_code)
 
-        except Exception as e:
-            err = {"branch": branch, "error": str(e)}
-            errors.append(err)
-            branches_outcomes.append({"branch": branch, "error": str(e)})
+                if response.status_code in (200, 201):
+                    print(f"Successfully synchronized workflow on '{branch}'.")
+                    put_success = True
+                    break
+                elif response.status_code >= 500:
+                    print(f"GitHub server error {response.status_code} during workflow sync (attempt {attempt}/{max_put_retries})")
+                    if attempt < max_put_retries:
+                        if channel_layer and channel_name:
+                            async_to_sync(channel_layer.group_send)(
+                                channel_name,
+                                {
+                                    "type": "chat_message",
+                                    "payload": {
+                                        "type": "orchestration_result",
+                                        "raw_output": {
+                                            "ui_layout_route": "CHAT",
+                                            "chat_response": (
+                                                f"⚠️ GitHub is currently down or experiencing server issues (HTTP {response.status_code}). "
+                                                f"Retrying workflow synchronization on '{branch}' (attempt {attempt}/{max_put_retries})..."
+                                            ),
+                                        },
+                                    }
+                                }
+                            )
+                        time.sleep(2 * attempt)
+                        # Re-check workflow in case GitHub processed the commit or changed the SHA
+                        refreshed = workflow_exists(check_url, headers, branch, channel_name=None)
+                        if refreshed.get("exists") and refreshed.get("sha"):
+                            payload["sha"] = refreshed.get("sha")
+                    else:
+                        errors.append({
+                            "branch": branch,
+                            "status": response.status_code,
+                            "body": response.text,
+                            "is_github_error": True
+                        })
+                else:
+                    # Client errors (4xx like 404, 401, 422) - retrying won't resolve client issues
+                    errors.append({
+                        "branch": branch,
+                        "status": response.status_code,
+                        "body": response.text,
+                        "is_github_error": False
+                    })
+                    break
+
+            except requests.RequestException as e:
+                print(f"Network error during workflow sync to GitHub (attempt {attempt}/{max_put_retries}): {e}")
+                if attempt < max_put_retries:
+                    if channel_layer and channel_name:
+                        async_to_sync(channel_layer.group_send)(
+                            channel_name,
+                            {
+                                "type": "chat_message",
+                                "payload": {
+                                    "type": "orchestration_result",
+                                    "raw_output": {
+                                        "ui_layout_route": "CHAT",
+                                        "chat_response": (
+                                            f"⚠️ Network issue connecting to GitHub. "
+                                            f"Retrying workflow synchronization on '{branch}' (attempt {attempt}/{max_put_retries})..."
+                                        ),
+                                    },
+                                }
+                            }
+                        )
+                    time.sleep(2 * attempt)
+                else:
+                    err = {
+                        "branch": branch,
+                        "error": f"GitHub connection error: {str(e)}",
+                        "is_github_error": True
+                    }
+                    errors.append(err)
+                    branches_outcomes.append({"branch": branch, "error": str(e)})
+                    break
+            except Exception as e:
+                err = {"branch": branch, "error": str(e), "is_github_error": False}
+                errors.append(err)
+                branches_outcomes.append({"branch": branch, "error": str(e)})
+                break
 
     print("mum-dad", error_data)
 
@@ -513,22 +651,42 @@ def ensure_orchestrator_yaml_is_online(
         }
         for error_message in errors:
             print(f"5k---{error_message}")
-            error_string = error_message.get('body')
-            crash_error = None
-            if error_string:
-                try:
-                    parsed_error_string = json.loads(error_string)
-                    crash_error = parsed_error_string.get('message', None)
-                except Exception:
-                    crash_error = str(error_string)
-            if not crash_error:
-                crash_error = error_message.get('error', f"HTTP status {error_message.get('status')}")
-
+            is_github_err = error_message.get('is_github_error', False)
+            status_code = error_message.get('status')
             crash_branch = error_message.get('branch')
             repo_display = resolved_repo[0] if resolved_repo else repo_name
-            error_data["repo_resolution"]["message"] = f"Failed to synchronize workflow on branch - '{crash_branch}' for repo - '{repo_display}'. Error: {crash_error}"
+
+            if is_github_err:
+                if status_code and status_code >= 500:
+                    formatted_msg = (
+                        f"GitHub is currently down or experiencing a server outage (HTTP {status_code}) "
+                        f"while synchronizing the workflow on branch '{crash_branch}' for repository '{repo_display}'. "
+                        f"All retry attempts failed. Please try again later."
+                    )
+                else:
+                    err_detail = error_message.get('error') or f"HTTP status {status_code}"
+                    formatted_msg = (
+                        f"GitHub is currently unreachable or experiencing connection issues ({err_detail}) "
+                        f"while synchronizing the workflow on branch '{crash_branch}' for repository '{repo_display}'. "
+                        f"Please try again later."
+                    )
+            else:
+                error_string = error_message.get('body')
+                crash_error = None
+                if error_string:
+                    try:
+                        parsed_error_string = json.loads(error_string)
+                        crash_error = parsed_error_string.get('message', None)
+                    except Exception:
+                        crash_error = str(error_string)
+                if not crash_error:
+                    crash_error = error_message.get('error', f"HTTP status {error_message.get('status')}")
+                formatted_msg = f"Failed to synchronize workflow on branch - '{crash_branch}' for repo - '{repo_display}'. Error: {crash_error}"
+
+            error_data["repo_resolution"]["message"] = formatted_msg
             error_data["repo_resolution"]["repo"] = repo_display
             error_data["repo_resolution"]["branch"] = crash_branch
+            error_data["repo_resolution"]["is_github_error"] = is_github_err
             break
 
         print("mum-dad2", error_data)
@@ -1738,37 +1896,63 @@ def process_agentic_chat_turn_task(
 
     except Exception as e:
 
-        print(
-            "=" * 80
-        )
-
-        print(
-            "EXCEPTION TYPE:",
-            type(e)
-        )
-
-        print(
-            "EXCEPTION:",
-            repr(e)
-        )
-
+        print("=" * 80)
+        print("EXCEPTION TYPE:", type(e))
+        print("EXCEPTION:", repr(e))
         traceback.print_exc()
+        print("=" * 80)
 
-        print(
-            "=" * 80
-        )
+        provider_name = provider.capitalize() if provider else "AI"
+        err_str = str(e).lower()
+        if "quota" in err_str or "resource_exhausted" in err_str or "rate_limit" in err_str or "429" in err_str:
+            user_error_msg = f"⚠️ The {provider_name} AI model ({model_name}) exceeded its rate limit or daily quota. Please try again later or check your API key."
+        elif "timeout" in err_str or "timed out" in err_str or "deadline" in err_str:
+            user_error_msg = f"⚠️ The {provider_name} AI model ({model_name}) timed out and failed to respond. Please try again."
+        elif "503" in err_str or "overloaded" in err_str or "unavailable" in err_str:
+            user_error_msg = f"⚠️ The {provider_name} AI service ({model_name}) is temporarily overloaded or unavailable. Please try again shortly."
+        elif "authentication" in err_str or "api key" in err_str or "unauthorized" in err_str or "401" in err_str:
+            user_error_msg = f"⚠️ Authentication failed for {provider_name} AI model ({model_name}). Please verify your API key."
+        elif "github" in err_str:
+            user_error_msg = f"⚠️ GitHub communication error: {str(e)}"
+        else:
+            user_error_msg = f"⚠️ The {provider_name} AI model ({model_name}) failed to respond: {str(e)}"
 
+        try:
+            ChatMessage.objects.create(
+                session=session,
+                role="ai",
+                content=user_error_msg
+            )
+        except Exception as db_err:
+            print(f"Failed to persist chat turn LLM error: {db_err}")
 
+        # Broadcast as orchestration_result so chat stream updates
         async_to_sync(
             channel_layer.group_send
         )(
             channel_name,
             {
                 "type": "chat_message",
+                "payload": {
+                    "type": "orchestration_result",
+                    "raw_output": {
+                        "ui_layout_route": "CHAT",
+                        "chat_response": user_error_msg,
+                    },
+                }
+            }
+        )
 
+        # Broadcast error event for modal / socket status
+        async_to_sync(
+            channel_layer.group_send
+        )(
+            channel_name,
+            {
+                "type": "chat_message",
                 "payload": {
                     "type": "error",
-                    "message": str(e)
+                    "message": user_error_msg
                 }
             }
         )
@@ -2791,51 +2975,104 @@ if __name__ == "__main__":
             }
         )
 
-        try:
-            feedback_r = requests.post(
-                url,
-                json=api_payload,
-                headers=headers,
-                timeout=30
-            )
-        except requests.RequestException as e:
-            err_msg = f"GitHub workflow dispatch network error: {str(e)}"
-            print(
-                f"❌ GITHUB NETWORK ERROR: {e}"
-            )
-            async_to_sync(channel_layer.group_send)(
-                channel_name,
-                {
-                    "type": "chat_message",
-                    "payload": {
-                        "type": "orchestration_result",
-                        "raw_output": {
-                            "ui_layout_route": "CHAT",
-                            "chat_response": f"❌ Failed to dispatch workflow to GitHub: {str(e)}",
-                        },
+        max_dispatch_retries = 3
+        dispatch_success = False
+        feedback_r = None
+
+        for attempt in range(1, max_dispatch_retries + 1):
+            try:
+                feedback_r = requests.post(
+                    url,
+                    json=api_payload,
+                    headers=headers,
+                    timeout=30
+                )
+                if feedback_r.status_code == 204:
+                    dispatch_success = True
+                    break
+                elif feedback_r.status_code >= 500:
+                    print(f"GitHub server error {feedback_r.status_code} during dispatch (attempt {attempt}/{max_dispatch_retries})")
+                    if attempt < max_dispatch_retries:
+                        async_to_sync(channel_layer.group_send)(
+                            channel_name,
+                            {
+                                "type": "chat_message",
+                                "payload": {
+                                    "type": "orchestration_result",
+                                    "raw_output": {
+                                        "ui_layout_route": "CHAT",
+                                        "chat_response": (
+                                            f"⚠️ GitHub is currently down or experiencing server issues (HTTP {feedback_r.status_code}). "
+                                            f"Retrying workflow dispatch for '{matched_repo_name}' (attempt {attempt}/{max_dispatch_retries})..."
+                                        ),
+                                    },
+                                }
+                            }
+                        )
+                        time.sleep(2 * attempt)
+                    else:
+                        break
+                else:
+                    # Client errors (4xx) - retrying will not help
+                    break
+            except requests.RequestException as e:
+                print(f"GitHub dispatch network error (attempt {attempt}/{max_dispatch_retries}): {e}")
+                if attempt < max_dispatch_retries:
+                    async_to_sync(channel_layer.group_send)(
+                        channel_name,
+                        {
+                            "type": "chat_message",
+                            "payload": {
+                                "type": "orchestration_result",
+                                "raw_output": {
+                                    "ui_layout_route": "CHAT",
+                                    "chat_response": (
+                                        f"⚠️ Network issue connecting to GitHub. "
+                                        f"Retrying workflow dispatch for '{matched_repo_name}' (attempt {attempt}/{max_dispatch_retries})..."
+                                    ),
+                                },
+                            }
+                        }
+                    )
+                    time.sleep(2 * attempt)
+                else:
+                    err_msg = f"GitHub is currently unreachable or experiencing connection issues: {str(e)}"
+                    print(
+                        f"❌ GITHUB NETWORK ERROR: {e}"
+                    )
+                    async_to_sync(channel_layer.group_send)(
+                        channel_name,
+                        {
+                            "type": "chat_message",
+                            "payload": {
+                                "type": "orchestration_result",
+                                "raw_output": {
+                                    "ui_layout_route": "CHAT",
+                                    "chat_response": f"❌ {err_msg}",
+                                },
+                            }
+                        }
+                    )
+                    record_github_dispatch_failure(
+                        pipeline_id=pipeline_id,
+                        repository=matched_repo_name or repo_name,
+                        error_message=err_msg,
+                        target_branch=target_branch,
+                        tools=yaml_tools_list,
+                        error_details={"error": str(e), "is_github_error": True},
+                    )
+                    return {
+                        "status": "error",
+                        "pipeline_id": pipeline_id,
+                        "repo": matched_repo_name or "",
+                        "message": err_msg
                     }
-                }
-            )
-            record_github_dispatch_failure(
-                pipeline_id=pipeline_id,
-                repository=matched_repo_name or repo_name,
-                error_message=err_msg,
-                target_branch=target_branch,
-                tools=yaml_tools_list,
-                error_details={"error": str(e)},
-            )
-            return {
-                "status": "error",
-                "pipeline_id": pipeline_id,
-                "repo": matched_repo_name or "",
-                "message": err_msg
-            }
 
         # =========================================================================
         # STEP 7: GITHUB ACCEPTED DISPATCH
         # =========================================================================
 
-        if feedback_r.status_code == 204:
+        if feedback_r is not None and feedback_r.status_code == 204:
             print(
                 "🎉 SUCCESS!"
             )
@@ -2897,11 +3134,23 @@ if __name__ == "__main__":
         # =========================================================================
 
         else:
-            err_msg = f"GitHub rejected workflow dispatch [{feedback_r.status_code}]: {feedback_r.text}"
+            status_code = feedback_r.status_code if feedback_r is not None else 0
+            status_body = feedback_r.text if feedback_r is not None else "No response from GitHub"
+            if isinstance(status_code, int) and status_code >= 500:
+                err_msg = (
+                    f"GitHub is currently down or experiencing a server outage (HTTP {status_code}) "
+                    f"while dispatching the workflow for repository '{matched_repo_name}'. "
+                    f"All retry attempts failed. Please try again later."
+                )
+                is_gh_down = True
+            else:
+                err_msg = f"GitHub rejected workflow dispatch [{status_code}]: {status_body}"
+                is_gh_down = False
+
             print(
                 f"❌ GITHUB ERROR "
-                f"[{feedback_r.status_code}]: "
-                f"{feedback_r.text}"
+                f"[{status_code}]: "
+                f"{status_body}"
             )
 
             async_to_sync(channel_layer.group_send)(
@@ -2912,7 +3161,7 @@ if __name__ == "__main__":
                         "type": "orchestration_result",
                         "raw_output": {
                             "ui_layout_route": "CHAT",
-                            "chat_response": f"❌ GitHub rejected workflow dispatch [{feedback_r.status_code}]: {feedback_r.text}",
+                            "chat_response": f"❌ {err_msg}",
                         },
                     }
                 }
@@ -2927,7 +3176,8 @@ if __name__ == "__main__":
                     if matched_repo_name
                     else repo_name
                 ),
-                "message": feedback_r.text
+                "message": err_msg,
+                "is_github_error": is_gh_down,
             })
 
             record_github_dispatch_failure(
@@ -2991,7 +3241,11 @@ def agentic_chat_follow_up(
 
     1. NEVER expose stack traces, IDs or internal backend implementation.
     2. Summarize successful operations.
-    3. Explain failures in plain English.
+    3. Explain failures in plain English:
+       - GITHUB ERRORS: If a task failure or error indicates that GitHub is down, unreachable, or experiencing a server outage (such as HTTP 5xx, timeout, or connection issues to GitHub), EXPLICITLY state to the user that GitHub is currently down or experiencing server issues, and that retries were attempted. Do NOT describe it as a generic internal server error.
+       - STRICT ORIGIN RULE: ONLY attribute an error to GitHub if the failure genuinely comes from GitHub. Do NOT blame GitHub for user configuration errors, invalid branch names, or local task failures.
+       - AI/LLM ERRORS: If the task results indicate an AI or LLM model error (such as quota exceeded, timeout, or model unavailability), clearly explain to the user which AI model failed and why.
+       - REPOSITORY ERRORS: If a failure is due to repository settings or user input (e.g. branch not found, permission denied), clearly explain that specific issue.
     4. If clarification is required, politely ask for it.
     
     Format the response using these rules:
@@ -3146,6 +3400,54 @@ def agentic_chat_follow_up(
         print(e)
         traceback.print_exc()
         print("=" * 80)
+
+        provider_name = provider.capitalize() if provider else "AI"
+        err_str = str(e).lower()
+        if "quota" in err_str or "resource_exhausted" in err_str or "rate_limit" in err_str or "429" in err_str:
+            chat_response = f"### System Alert\n*   **AI Service**: The {provider_name} AI model ({model_name}) exceeded its rate limit or daily quota. Please try again later or check your API key."
+        elif "timeout" in err_str or "timed out" in err_str or "deadline" in err_str:
+            chat_response = f"### System Alert\n*   **AI Service**: The {provider_name} AI model ({model_name}) timed out and failed to respond. Please try again."
+        elif "503" in err_str or "overloaded" in err_str or "unavailable" in err_str:
+            chat_response = f"### System Alert\n*   **AI Service**: The {provider_name} AI service ({model_name}) is temporarily overloaded or unavailable. Please try again shortly."
+        elif "authentication" in err_str or "api key" in err_str or "unauthorized" in err_str or "401" in err_str:
+            chat_response = f"### System Alert\n*   **AI Service**: Authentication failed for {provider_name} AI model ({model_name}). Please verify your API key."
+        else:
+            chat_response = f"### System Alert\n*   **AI Service**: The {provider_name} AI model ({model_name}) encountered an error and failed to generate a response ({str(e)})."
+
+        if session_id:
+            try:
+                session = ChatSession.objects.get(pk=session_id)
+                ChatMessage.objects.create(
+                    session=session,
+                    role="user",
+                    content=f"[Backend Task Results]: {json.dumps(task_results, default=str)}"
+                )
+                ChatMessage.objects.create(
+                    session=session,
+                    role="ai",
+                    content=chat_response
+                )
+            except Exception as db_err:
+                print(f"Failed to persist follow-up LLM error to DB: {db_err}")
+
+        if channel_name:
+            try:
+                async_to_sync(get_channel_layer().group_send)(
+                    channel_name,
+                    {
+                        "type": "chat_message",
+                        "payload": {
+                            "type": "follow_up_result",
+                            "raw_output": {
+                                "ui_layout_route": "CHAT",
+                                "chat_response": chat_response,
+                                "task_results": task_results,
+                            },
+                        },
+                    },
+                )
+            except Exception as ch_err:
+                print(f"Failed to broadcast follow-up LLM error: {ch_err}")
 
         return None
 
