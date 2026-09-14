@@ -229,16 +229,41 @@ CLOUDINARY_CLOUD_NAME = config("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = config("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = config("CLOUDINARY_API_SECRET")
 
+# The public Django origin used in links sent from asynchronous Celery tasks.
+# Set PUBLIC_API_BASE_URL to your HTTPS/tunnel URL when deploying.
+PUBLIC_API_BASE_URL = config("PUBLIC_API_BASE_URL", default="http://127.0.0.1:8000").rstrip("/")
+
 
 
 
 
 STATIC_URL = 'static/'
 
+# Development keeps the existing local Redis layout. Production uses the
+# managed Redis connection supplied in REDIS_URL for cache, Celery and
+# Django Channels, so every deployed process communicates through one Redis.
+ENVIRONMENT = config("ENVIRONMENT", default="development").strip().lower()
+# Render automatically provides RENDER=true at runtime. ENVIRONMENT remains
+# useful for another production host, staging, or a local production test.
+IS_RENDER = config("RENDER", default=False, cast=bool)
+IS_PRODUCTION = IS_RENDER or ENVIRONMENT in {"production", "prod"}
+REDIS_URL = config("REDIS_URL", default="").strip()
+
+if IS_PRODUCTION:
+    if not REDIS_URL:
+        raise RuntimeError("REDIS_URL must be configured in production.")
+    CACHE_REDIS_LOCATION = REDIS_URL
+    CELERY_REDIS_LOCATION = REDIS_URL
+    CHANNEL_REDIS_HOSTS = [REDIS_URL]
+else:
+    CACHE_REDIS_LOCATION = "redis://127.0.0.1:6379/1"
+    CELERY_REDIS_LOCATION = "redis://127.0.0.1:6379/0"
+    CHANNEL_REDIS_HOSTS = [("127.0.0.1", 6379)]
+
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'LOCATION': CACHE_REDIS_LOCATION,
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         },
@@ -246,9 +271,9 @@ CACHES = {
     }
 }
 
-CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_BROKER_URL = CELERY_REDIS_LOCATION
 
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = CELERY_REDIS_LOCATION
 
 
 
@@ -299,7 +324,8 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
+            "hosts": CHANNEL_REDIS_HOSTS,
+            "prefix": "odozi-asgi",
         },
     },
 }

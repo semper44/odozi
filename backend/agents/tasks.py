@@ -795,6 +795,23 @@ PIPELINE_TIMEOUT_SECONDS = 60 * 14
 FOLLOW_UP_LOCK_TTL = 60 * 5
 
 
+def pipeline_report_url(pipeline_id: str) -> str:
+    """Return the public endpoint containing every stored report for a pipeline."""
+    return f"{settings.PUBLIC_API_BASE_URL}/general/cloudinary-report/{pipeline_id}/"
+
+
+def add_full_report_link(chat_response: str, pipeline_id: Optional[str]) -> str:
+    """Attach a clickable report link without relying on the LLM to preserve it."""
+    if not pipeline_id:
+        return chat_response
+    report_url = pipeline_report_url(pipeline_id)
+    return (
+        f"{chat_response.rstrip()}\n\n"
+        "### Full GitHub test report\n"
+        f"- [View the complete test output]({report_url})"
+    )
+
+
 def pipeline_redis_key(pipeline_id: str) -> str:
     """
     Main Redis state key for one complete user orchestration.
@@ -1081,7 +1098,8 @@ def trigger_pipeline_follow_up_if_ready(pipeline_id: str):
         channel_name=state.get("channel_name", ""),
         session_id=state.get("session_id"),
         history_payload=state.get("history_payload", []),
-        auditjob_id=state.get("auditjob_id")
+        auditjob_id=state.get("auditjob_id"),
+        pipeline_id=pipeline_id,
     )
     return True
 @shared_task(
@@ -2028,6 +2046,7 @@ def pipeline_timeout_check(pipeline_id):
         session_id=state.get("session_id"),
         history_payload=state.get("history_payload", []),
         auditjob_id=state.get("auditjob_id"),
+        pipeline_id=pipeline_id,
     )
 
 
@@ -2702,6 +2721,7 @@ if __name__ == "__main__":
     print("VISITORS CREATED:", visitors)
 
     all_findings = []
+    files_scanned = 0
 
     for root, dirs, files in os.walk("."):
 
@@ -2709,6 +2729,9 @@ if __name__ == "__main__":
             "venv" in root
             or ".git" in root
             or "migrations" in root
+            or "node_modules" in root
+            or "build" in root
+            or "dist" in root
         ):
             continue
 
@@ -2718,7 +2741,7 @@ if __name__ == "__main__":
                 file.endswith(".py")
                 and file != "odozi_runner.py"
             ):
-
+                files_scanned += 1
                 full_path = os.path.join(
                     root,
                     file
@@ -2806,12 +2829,20 @@ if __name__ == "__main__":
                         f"{{e}}"
                     )
 
-
+    active_rules_list = [v.__class__.__name__ for v in visitors]
     print(
         json.dumps(
             {{
                 "tool": "odozi_visitors",
-                "findings": all_findings
+                "files_scanned": files_scanned,
+                "checks_run": active_rules_list,
+                "findings": all_findings,
+                "status": "passed" if len(all_findings) == 0 else "failed",
+                "summary": (
+                    f"Scanned {{files_scanned}} Python files across {{len(visitors)}} AST checks. Found {{len(all_findings)}} violations."
+                    if files_scanned > 0
+                    else f"0 Python (.py) files found in repository. All {{len(visitors)}} checks ({{', '.join(active_rules_list)}}) completed with 0 violations."
+                )
             }}
         )
     )
@@ -3227,6 +3258,7 @@ def agentic_chat_follow_up(
     session_id: int = None,
     history_payload: List[Dict[str, str]] = None,
     auditjob_id: Optional[str] = None,
+    pipeline_id: Optional[str] = None,
 ):
     # -------------------------------------------------------------------------
     # LIGHTWEIGHT SYSTEM INSTRUCTION
@@ -3351,6 +3383,9 @@ def agentic_chat_follow_up(
             print("📊 Follow-up Result")
             print(result)
 
+        final_chat_response = add_full_report_link(result.chat_response, pipeline_id)
+        full_report_url = pipeline_report_url(pipeline_id) if pipeline_id else None
+
         # -----------------------------------------------------------------
         # Save conversation
         # -----------------------------------------------------------------
@@ -3367,12 +3402,12 @@ def agentic_chat_follow_up(
             ChatMessage.objects.create(
                 session=session,
                 role="ai",
-                content=result.chat_response
+                content=final_chat_response
             )
         if auditjob_id:
             auditjob = AuditJob.objects.filter(id=auditjob_id).first()
             if auditjob:
-                auditjob.report = result.chat_response
+                auditjob.report = final_chat_response
                 auditjob.save()
         print(f"stunned-{channel_name}")
         async_to_sync(get_channel_layer().group_send)(
@@ -3383,15 +3418,21 @@ def agentic_chat_follow_up(
                     "type": "follow_up_result",
                     "raw_output": {
                         "ui_layout_route": result.ui_layout_route,
-                        "chat_response": result.chat_response,
+                        "chat_response": final_chat_response,
                         "task_results": task_results,
+                        "pipeline_id": pipeline_id,
+                        "full_report_url": full_report_url,
                     },
                 },
             },
         )
 
         print("follow-up-done")
-        return result.model_dump()
+        final_result = result.model_dump()
+        final_result["chat_response"] = final_chat_response
+        final_result["pipeline_id"] = pipeline_id
+        final_result["full_report_url"] = full_report_url
+        return final_result
 
     except Exception as e:
 
@@ -3413,6 +3454,9 @@ def agentic_chat_follow_up(
             chat_response = f"### System Alert\n*   **AI Service**: Authentication failed for {provider_name} AI model ({model_name}). Please verify your API key."
         else:
             chat_response = f"### System Alert\n*   **AI Service**: The {provider_name} AI model ({model_name}) encountered an error and failed to generate a response ({str(e)})."
+
+        chat_response = add_full_report_link(chat_response, pipeline_id)
+        full_report_url = pipeline_report_url(pipeline_id) if pipeline_id else None
 
         if session_id:
             try:
@@ -3442,6 +3486,8 @@ def agentic_chat_follow_up(
                                 "ui_layout_route": "CHAT",
                                 "chat_response": chat_response,
                                 "task_results": task_results,
+                                "pipeline_id": pipeline_id,
+                                "full_report_url": full_report_url,
                             },
                         },
                     },

@@ -16,6 +16,7 @@ export default function LiveTerminal() {
   const currentCharIndex = useRef<number>(0);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
   const engineTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const loadedReportUrls = useRef<Set<string>>(new Set());
 
   // ✅ Listen to global streaming data from store
   const streamingMessage = useSocketStore((state) => state.streamingMessage);
@@ -36,6 +37,38 @@ export default function LiveTerminal() {
         logQueue.current.push(...lineBatch);
         if (!isTyping) setIsTyping(true);
       }
+    }
+
+    // The final Celery response includes the Cloudinary-history endpoint.
+    // Fetch it once and render the complete, structured GitHub output here.
+    const reportUrl = streamingMessage?.raw_output?.full_report_url;
+    if (streamingMessage?.type === "follow_up_result" && reportUrl && !loadedReportUrls.current.has(reportUrl)) {
+      loadedReportUrls.current.add(reportUrl);
+      setActiveTool("full GitHub reports");
+      setPipelineFinished(true);
+      logQueue.current.push("", "┌── FULL GITHUB TEST RESULTS ──────────────────────────────");
+      setIsTyping(true);
+
+      fetch(reportUrl)
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`Report request failed with HTTP ${response.status}`);
+          }
+          return response.json();
+        })
+        .then((report) => {
+          logQueue.current.push(...JSON.stringify(report, null, 2).split("\n"));
+          logQueue.current.push("└─────────────────────────────────────────────────────────", "");
+          setIsTyping(true);
+        })
+        .catch((error: Error) => {
+          logQueue.current.push(
+            `ERROR: Could not load the complete GitHub report: ${error.message}`,
+            "└─────────────────────────────────────────────────────────",
+            "",
+          );
+          setIsTyping(true);
+        });
     }
   }, [streamingMessage]);
 
@@ -90,6 +123,7 @@ export default function LiveTerminal() {
     setIsTyping(false);
     setActiveTool(null);
     setPipelineFinished(false);
+    loadedReportUrls.current.clear();
   };
 
   return (
