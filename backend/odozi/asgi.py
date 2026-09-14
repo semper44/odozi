@@ -8,6 +8,7 @@ https://docs.djangoproject.com/en/6.0/howto/deployment/asgi/
 """
 
 import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'odozi.settings')
 
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
@@ -18,7 +19,6 @@ from channels.security.websocket import AllowedHostsOriginValidator
 from odozi.middleware import CookieJwtAuthMiddleware
 from . import routing
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'odozi.settings')
 
 django_asgi_app = get_asgi_application()
 

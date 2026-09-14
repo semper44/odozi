@@ -11,10 +11,10 @@ from channels.db import database_sync_to_async
 from rest_framework_simplejwt.tokens import AccessToken
 from odozi.utils.crypto import decrypt_token
 
-User = get_user_model()
 
 @database_sync_to_async
 def get_user_from_db(user_id: Any) -> Any:
+    User = get_user_model()
     try:
         user = User.objects.get(id=user_id)
         print(f"🔍 [WS-AUTH] Database lookup successful for User ID {user_id}: {user.username}")
