@@ -34,6 +34,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "fast-results-behave.loca.lt",
     "short-aliens-sniff.loca.lt"
+    "odozi.onrender.com"
 ]
 
 # CORS
