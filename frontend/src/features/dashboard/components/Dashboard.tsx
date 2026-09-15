@@ -19,7 +19,6 @@ import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefre
 import { EnvVarModal } from "./ui/ENV vars/EnvVarModal"; 
 import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
 import { GitHubInstallation } from "../../../pages/registrationorlogin/install_github";
-// import {AgenticChatConsole} from "@features/streaming/api/AiChat.tsx"
 // import { EnvVariableCard } from "./ui/ENV vars/EnvVariableCard";
 
 
