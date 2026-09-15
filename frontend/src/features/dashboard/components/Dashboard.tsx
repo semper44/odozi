@@ -1,9 +1,10 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut,House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus } from "lucide-react";
+import { LogOut, House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus, Bot } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
 import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMessage";
+import AnimatedLock from "@/features/loading/Loader"
 import { useSelectionStore } from "../../store/selectionStore";
 import { useLLMStore } from "../../store/selectionStore";
 import { useSocketStore  } from "../../store/selectionStore";
@@ -169,13 +170,12 @@ export default function Dashboard() {
     console.log("ogo", data)
 
     // Covers a session that expires after the protected route has mounted.
-    // This must run before loading/error returns so auth failures can redirect.
-    useEffect(() => {
-        const status = (error as { status?: number } | null)?.status;
-        if (status === 401 || status === 403) {
-            navigate("/login", { replace: true });
-        }
-    }, [error, navigate]);
+    // useEffect(() => {
+    //     const status = (error as { status?: number } | null)?.status;
+    //     if (status === 401 || status === 403) {
+    //         navigate("/login", { replace: true });
+    //     }
+    // }, [error, navigate]);
 
     console.log(data, "selected repos in dashboard")
 
@@ -243,8 +243,11 @@ export default function Dashboard() {
     // Keep every hook above these conditional returns. A repository request can
     // change from loading to resolved between renders, but React still needs the
     // same hook order on both renders.
-    if (isLoading) {
-        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
+    if (true) {
+        return <div className = "w-full h-full flex justify-center items-center">
+                <AnimatedLock loading={true} />
+        </div>;
+
     }
 
     if (error) {
@@ -699,7 +702,7 @@ export default function Dashboard() {
                         <WorkspaceModal
                             isOpen={isModalOpen}
                             onClose={() => setIsModalOpen(false)}
-                            allRepositories={items || []} 
+                            allRepositories={data?.repositories || []} 
                             selectedIds={selectedIdsSet}               
                             onToggleSelect={toggleSelect}               
                             onSubmit={handleCreateWorkspace}
