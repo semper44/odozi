@@ -2,7 +2,7 @@
 
 import { useSelectionStore } from "@/features/store/selectionStore";
 import { Check, Power, Trash2 } from "lucide-react";
-import { Dispatch, SetStateAction } from "react"
+import type { Dispatch, SetStateAction } from "react";
 
 interface Props {
     isOn: boolean;

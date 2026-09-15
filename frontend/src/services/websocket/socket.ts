@@ -41,7 +41,7 @@ class SocketService {
       this.currentDelay = 1000; 
       
       useSocketStore.getState().setConnectionStatus(true);
-      useSocketStore.getState().triggerToastNotification(null);
+      useSocketStore.getState().triggerToastNotification("");
       useSocketStore.getState().clearSocketStatus(); 
     };
 

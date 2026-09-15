@@ -15,8 +15,7 @@ export default function LiveTerminal() {
   const currentLineText = useRef<string>("");
   const currentCharIndex = useRef<number>(0);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
-  const engineTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const loadedReportUrls = useRef<Set<string>>(new Set());
+  const engineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);  const loadedReportUrls = useRef<Set<string>>(new Set());
 
   // Listen to global streaming data from store
   const streamingMessage = useSocketStore((state) => state.streamingMessage);
