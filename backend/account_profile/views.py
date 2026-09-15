@@ -272,7 +272,7 @@ def github_callback_view(request):
     cache.delete(details_cache_key)
     # 5. SECURE FRAGMENT REDIRECT
     # We use a URL Hash Fragment '#' so network routing nodes/logs can NEVER read it
-    react_app_url = "http://localhost:5173/"
+    react_app_url = settings.REACT_URL
 
     response = HttpResponseRedirect(react_app_url)
 
@@ -333,7 +333,7 @@ class InstallGithubApp(APIView):
         cache_key = f"github:token:{installation_id}"
         cache.set(cache_key, installation_id, timeout=55 * 60)
         
-        react_app_url = "http://localhost:5173/"
+        react_app_url = settings.REACT_URL
 
         return HttpResponseRedirect(react_app_url)
 
