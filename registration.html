@@ -15,12 +15,13 @@
     <script>
     $(document).ready(function() {
         $('#github-login-btn').on('click', function(e) {
+            const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
             e.preventDefault();
             
             const clientId = "Iv23liUEbKH7D09scRIZ"; 
             
             // # FIXED: Target the exact python local server port and callback file
-            const redirectUri = "http://127.0.0.1:8000/account/api/auth/github/callback/"; 
+            const redirectUri = `${backendUrl}/account/api/auth/github/callback/`; 
             // ✅ FIXED: Expanded scope permissions to allow running workflows and cloning repositories
             const scope = "repo workflow user:email"; 
             

@@ -126,6 +126,7 @@ def github_callback_view(request):
     client_id = "Iv23liUEbKH7D09scRIZ"
     # Read the variable safely from settings.py. If it's missing, default to an empty string.
     client_secret = getattr(settings, "GITHUB_APP_CLIENT_SECRET", "")
+    DJANGO_URL = getattr(settings, "DJANGO_URL", "")
     print("client_secret", client_secret)  # Debugging line to confirm the value is being read correctly
 
     if not client_secret:
@@ -137,7 +138,7 @@ def github_callback_view(request):
         "client_id": client_id,
         "client_secret": client_secret,
         "code": code,
-        "redirect_uri": "http://127.0.0.1:8000/account/api/auth/github/callback/"
+        "redirect_uri": f"{DJANGO_URL}/account/api/auth/github/callback/"
     }
 
     # Make the HTTP POST call to GitHub's token engine
