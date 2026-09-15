@@ -1,0 +1,146 @@
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
+
+
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
+
+
+
+class RepoEnvKeyCreationTask(BaseModel):
+    workspace_name: Optional[str] = Field(
+        default=None,
+        description="""
+        Workspace target for the environment keys.
+
+        Set this ONLY when the user explicitly targets a workspace.
+        If repositories are targeted, this MUST be null.
+
+        Workspace and repository scope are mutually exclusive.
+        """
+    )
+
+    key_names: List[str] = Field(
+        description="""
+        List of environment key names to create.
+        Example: ['db', 'cloudflare']
+        """
+    )
+
+    repositories: List[str] = Field(
+        default=[],
+        description="""
+        Exact repository names to target.
+
+        Set this ONLY when the user explicitly targets repositories.
+        If workspace_name is provided, this MUST be [].
+
+        Workspace and repository scope are mutually exclusive.
+        """
+    )
+
+    
+class RepoEnvKeyDeletionTask(BaseModel):
+    """Maps fields directly to your polymorphic delete_repo_env_keys_service function parameter footprint."""
+    
+    delete_which: str = Field(
+        description="Must be strictly one of these structural scope targets: 'workspace', 'repo', or 'key_names'."
+    )
+    
+    workspace_name: Optional[str] = Field(
+        default=None,
+        description="""
+        The name of the target workspace context. Required if delete_which is 'workspace'.
+        CRITICAL: If delete_which is 'repo', this field MUST be null. Never mix a workspace target 
+        and a repository target in the same object block.
+        """
+    )
+    
+    key_names: List[str] = Field(
+        default=[],
+        description="""
+        List of exact environment key variable names to bulk delete (e.g., ['DB', 'CLOUDFLARE']).
+        If the user says 'delete all env keys', leave this list completely empty [].
+        """
+    )
+    
+    repositories: List[str] = Field(
+        default=[],
+        description="""
+        The names of the exact repositories targeted. Required if delete_which is 'repo'.
+        CRITICAL: If delete_which is 'workspace', this list MUST be completely empty []. 
+        Never mix a workspace target and a repository target in the same object block.
+        """
+    )
+
+    
+    
+
+
+class ToolStrategyMapping(BaseModel):
+    strategy: str = Field(description="e.g., 'pytest', 'bandit', 'generate_django_tests'")
+    target_repo_names: List[str] = Field(description="Target repos for this specific tool")
+    target_branch: Optional[str] = Field(
+        default=None, 
+        description="The branch context requested for this tool execution run. Set to null if unprovided."
+    )
+
+
+class WorkspaceCreationTask(BaseModel):
+    new_workspace_name: str = Field(description="The workspace name to create (e.g., 'mom')")
+    # Your fine-tuned flat string list remains 100% untouched!
+    repositories: List[str] = Field(description="List of repo names to put in this workspace")
+
+
+class WorkspaceDeletionTask(BaseModel):
+    """Captures explicit ID and metadata to execute your delete_workspace_with_repos function."""
+    # 🌟 Fixed: Changed from a strict required int to an optional int with a fallback default 0!
+    workspace_name: str = Field(description="The name of the workspace being targeted for deletion")
+
+
+class RepoExecutionRule(BaseModel):
+    repo_name: str = Field(description="Name of the repository")
+    target_branch: str = Field(default="master")
+    strategies: Dict[str, Dict[str, Any]] = Field(
+        default={},
+        description="""
+        A dictionary mapping the tool strategy name to its parameters.
+        Example: 
+        {
+        "check_transaction_atomic": {"target": {}, "constraints": {"must_call": "atomic"}},
+        "bandit": {}
+        }
+        """
+    )
+
+
+class OrchestratorAction(BaseModel):
+    """
+    The Master Multitask Schema. Allows combinations of operations in 1 chat turn.
+    """
+    intents: List[str] = Field(
+        description="""
+        Detected intents. Options: ['create_workspace', 'delete_workspace', 
+        'create_repo_env', 'delete_repo_env', 'run_static_analysis']
+        """
+    )
+    evict_prior_history: bool = Field(
+        default=False,
+        description="Set to True ONLY when an execution command is given."
+    )
+    condensed_history_summary: Optional[str] = Field(
+        None,
+        description="When evict_prior_history is True, compile a high-utility context summary."
+    )
+    ui_layout_route: str = Field(
+        description="Select layout mode code. Must be: 'CHAT',  or 'FINISHED'."
+    )
+    chat_response: str = Field(
+        description="Your natural, friendly response explaining your actions and technical insights."
+    )
+    workspaces_to_create: List[WorkspaceCreationTask] = Field(default=[])
+    workspaces_to_delete: List[WorkspaceDeletionTask] = Field(default=[])  
+    env_keys_to_create: List[RepoEnvKeyCreationTask] = Field(default=[])
+    env_keys_to_delete: List[RepoEnvKeyDeletionTask] = Field(default=[])
+    active_rules: List[RepoExecutionRule] = Field(default=[])
+

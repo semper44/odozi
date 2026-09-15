@@ -1,0 +1,433 @@
+name: Agentic Mixed Orchestration Suite
+
+on:
+  workflow_dispatch:
+
+    inputs:
+
+      tools_list:
+        description: 'JSON matrix array'
+        required: true
+        type: string
+
+      backend_url:
+        description: 'The API target endpoint'
+        required: true
+        type: string
+        default: 'https://fast-results-behave.loca.lt'
+
+      custom_script_payload:
+        description: 'Compiled OdoziVisitor class code and file walker'
+        required: false
+        type: string
+        default: ''
+
+      env_keys_list:
+        description: 'JSON array of environment variable names required by this repository'
+        required: false
+        type: string
+        default: '[]'
+
+      # ================================================================
+      # NEW
+      # ================================================================
+      pipeline_id:
+        description: 'Odozi orchestration correlation ID'
+        required: true
+        type: string
+
+
+permissions:
+  contents: read
+
+
+jobs:
+
+  # ================================================================
+  # PYTEST
+  # ================================================================
+
+  run-pytest:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 10
+
+    if: contains(fromJson(inputs.tools_list), 'pytest')
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+          REQ_FILE=$(find . -name "requirements.txt" | head -n 1)
+
+          if [ -n "$REQ_FILE" ]; then
+            pip install -r "$REQ_FILE"
+          fi
+
+          pip install --upgrade \
+            pytest \
+            pytest-django \
+            pytest-json-report \
+            pytest-cov
+
+      - name: Run Pytest
+        shell: bash
+        env:
+          RUNNER_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SECRETS_CONTEXT: ${{ toJson(secrets) }}
+          ENV_KEYS_INPUT: ${{ inputs.env_keys_list }}
+
+        run: |
+
+          echo "================================================"
+          echo "STARTING PYTEST"
+          echo "PIPELINE_ID=${{ inputs.pipeline_id }}"
+          echo "GITHUB_RUN_ID=${{ github.run_id }}"
+          echo "================================================"
+
+          MANAGE_PY_PATH=$(find . -name "manage.py" | head -n 1)
+
+          if [ -z "$MANAGE_PY_PATH" ]; then
+            RUN_CMD="pytest --json-report --json-report-file=report.json --cov=. --cov-report=json"
+          else
+            RUN_CMD="pytest --json-report --json-report-file=report.json --cov=. --cov-report=json"
+          fi
+
+          $RUN_CMD || true
+
+      - name: Send Final Pytest Structured Report
+        if: always()
+        run: |
+
+          if [ -f "report.json" ]; then
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "repo=${{ github.repository }}" \
+              -F "tool=pytest" \
+              -F "event_type=final" \
+              -F "file=@report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "repo=${{ github.repository }}" \
+              -F "tool=pytest" \
+              -F "event_type=final" \
+              -F "error=pytest did not produce report.json" || true
+
+          fi
+
+
+  # ================================================================
+  # RUFF
+  # ================================================================
+
+  run-ruff:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 5
+
+    if: contains(fromJson(inputs.tools_list), 'ruff')
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run Ruff
+        run: |
+          ruff check \
+            --output-format json \
+            . > ruff_report.json 2>&1 || true
+          cat ruff_report.json
+
+      - name: Send Ruff Report
+        if: always()
+        run: |
+
+          if [ -f "ruff_report.json" ]; then
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=ruff" \
+              -F "event_type=final" \
+              -F "file=@ruff_report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=ruff" \
+              -F "event_type=final" \
+              -F "error=ruff did not produce report.json" || true
+
+          fi
+
+
+  # ================================================================
+  # BANDIT
+  # ================================================================
+
+  run-bandit:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 5
+
+    if: contains(fromJson(inputs.tools_list), 'bandit')
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit
+        run: |
+          bandit -r . -lll -f json > bandit_report.json 2>&1 || true
+          cat bandit_report.json
+
+      - name: Send Bandit Report
+        if: always()
+        run: |
+
+          if [ -f "bandit_report.json" ]; then
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=bandit" \
+              -F "event_type=final" \
+              -F "file=@bandit_report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=bandit" \
+              -F "event_type=final" \
+              -F "error=bandit did not produce report.json" || true
+
+          fi
+
+
+  # ================================================================
+  # ODOZI VISITORS
+  # ================================================================
+
+  run-odozi:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 5
+
+    if: contains(fromJson(inputs.tools_list), 'odozi_visitors')
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Custom Odozi Code Engine
+        env:
+          CUSTOM_SCRIPT: ${{ inputs.custom_script_payload }}
+
+        run: |
+
+          echo "$CUSTOM_SCRIPT" |
+            base64 -d > odozi_runner.py
+
+          python odozi_runner.py > odozi_report.json 2>&1 || true
+          cat odozi_report.json
+
+      - name: Send Odozi Report
+        if: always()
+        run: |
+
+          if [ -f "odozi_report.json" ]; then
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=odozi_visitors" \
+              -F "event_type=final" \
+              -F "file=@odozi_report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=odozi_visitors" \
+              -F "event_type=final" \
+              -F "error=odozi_visitors did not produce report.json" || true
+
+          fi
+
+
+  # ================================================================
+  # PIP AUDIT
+  # ================================================================
+
+  run-pip-audit:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 5
+
+    if: contains(fromJson(inputs.tools_list), 'pip_audit')
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pip Audit
+        run: pip install pip-audit
+
+      - name: Run Pip Audit
+        run: |
+
+          if [ -f requirements.txt ]; then
+
+            pip-audit \
+              -r requirements.txt \
+              -f json \
+              > pip_audit_report.json 2>&1 || true
+
+          else
+
+            pip-audit \
+              -f json \
+              > pip_audit_report.json 2>&1 || true
+
+          fi
+
+      - name: Send Pip Audit Report
+        if: always()
+        run: |
+
+          if [ -f "pip_audit_report.json" ]; then
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=pip_audit" \
+              -F "event_type=final" \
+              -F "file=@pip_audit_report.json" || true
+
+          else
+
+            curl --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors --max-time 30 -X POST \
+              "${{ inputs.backend_url }}/general/results/" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "bypass-tunnel-reminder: true" \
+              -F "repo=${{ github.repository }}" \
+              -F "repo_owner=${{ github.repository_owner }}" \
+              -F "run_id=${{ github.run_id }}" \
+              -F "pipeline_id=${{ inputs.pipeline_id }}" \
+              -F "tool=pip_audit" \
+              -F "event_type=final" \
+              -F "error=pip_audit did not produce report.json" || true
+
+          fi

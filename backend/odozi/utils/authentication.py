@@ -1,0 +1,37 @@
+# authentication.py
+import httpx
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from channels.db import database_sync_to_async
+
+User = get_user_model()
+
+
+@database_sync_to_async
+def get_user_from_github_token(access_token):
+    """
+    Validates the GitHub token against GitHub's profile endpoint
+    and resolves/provisions the corresponding local Django user.
+    """
+    if not access_token:
+        return None
+        
+    headers = {"Authorization": f"Bearer {access_token}"}
+    try:
+        with httpx.Client() as client:
+            response = client.get("https://github.com", headers=headers, timeout=5.0)
+            
+        if response.status_code != 200:
+            return None
+            
+        github_data = response.json()
+        github_id = github_data.get("id")
+        
+        # Core Fast-Path principle: Anchorage on immutable github_id integers
+        user, _ = User.objects.get_or_create(
+            username=f"gh_{github_id}",
+            defaults={"is_active": True}
+        )
+        return user
+    except httpx.RequestError:
+        return None

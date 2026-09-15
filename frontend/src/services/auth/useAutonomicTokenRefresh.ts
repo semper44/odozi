@@ -4,7 +4,11 @@ import { useNavigate } from "react-router-dom";
 import { tokenStore } from "@/services/auth/tokenStore";
 
 export const useAutonomicTokenRefresh = () => {
+<<<<<<< HEAD
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || "http://127.0.0.1:8000";
+=======
+  const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
+>>>>>>> origin/deploy-ready
   const navigate = useNavigate();
 
   useEffect(() => {

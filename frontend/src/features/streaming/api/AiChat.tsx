@@ -30,7 +30,11 @@ export default function AgenticChatConsole() {
     };
 
     try {
+<<<<<<< HEAD
       const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || 'http://127.0.0.1:8000';
+=======
+      const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL ;
+>>>>>>> origin/deploy-ready
       
       // 2. Fire the unified payload down to your AITestSummaryView view path
       const response = await fetch(`${backendUrl}/dashboard/api/ai/test-summary/`, {

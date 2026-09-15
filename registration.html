@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Auth</title>
+</head>
+<body>
+
+    <button id="github-login-btn">Register / Login with GitHub</button> 
+
+    <!-- Cleaned up script tags: only one jQuery inclusion is necessary -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    
+    <script>
+    $(document).ready(function() {
+        $('#github-login-btn').on('click', function(e) {
+            const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
+            e.preventDefault();
+            
+            const clientId = "Iv23liUEbKH7D09scRIZ"; 
+            
+            // # FIXED: Target the exact python local server port and callback file
+            const redirectUri = `${backendUrl}/account/api/auth/github/callback/`; 
+            // ✅ FIXED: Expanded scope permissions to allow running workflows and cloning repositories
+            const scope = "repo workflow user:email"; 
+            
+            // # FIXED: Corrected the endpoint URL path and string interpolation parameters
+            // MUST use backticks (``), NOT normal quotes ('')
+            // ✅ Wrap both redirect_uri AND scope inside encodeURIComponent()
+            const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
+            console.log(githubAuthUrl);
+            
+            // Redirect the user to GitHub
+            window.location.href = githubAuthUrl;
+            console.log("githubAuthUrl");
+
+        });
+    });
+    </script>
+</body>
+</html>
