@@ -150,7 +150,6 @@ export default function Dashboard() {
     useEffect(() => {
         if (socketError) {
             clearAiResponseTimeout();
-            // setIsProcessingRequest(false);
             console.log("🚨 Dashboard caught background worker crash or API block:", socketError);
             
             // Append a system or error message to your chat interface display window
