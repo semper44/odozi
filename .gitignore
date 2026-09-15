@@ -1,16 +1,9 @@
-<<<<<<< HEAD
 /node_modules
 /linuvenv
-=======
 myvenv/
-myvenv
 dockerignore
 .dockerignore
-linuvenv
-linuvenv/
 odozy-ci-agent.2026-05-17.private-key.pem
 backend/.env
 Readme.md
 README.md
-/backend/.env
->>>>>>> origin/deploy-ready
