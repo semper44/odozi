@@ -7,7 +7,6 @@ import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMes
 import { useSelectionStore } from "../../store/selectionStore";
 import { useLLMStore } from "../../store/selectionStore";
 import { useSocketStore  } from "../../store/selectionStore";
-import { items } from "../../data/dummyData";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import { RepoCard } from "./ui/RepoCard";
@@ -260,7 +259,7 @@ export default function Dashboard() {
         console.log("baby")
 
         // Filter our cached collection matching the active Zustand Set configurations
-        const serializedRepos = items
+        const serializedRepos = data.repositories
             .filter((repo: any) => selectedIdsSet.has(String(repo.id)))
             .map((repo: any) => {
             const nameParts = repo.full_name.split("/");
@@ -449,6 +448,7 @@ export default function Dashboard() {
 
                     {/* <!-- second tab  --> */}
                     <div className="top-tabs w-full sm:grid hidden gap-2">
+                        {/* for menu switching */}
                         {leftTabs.map((tab) => {
                             const isActive = activeLeftTab === tab.id;
                             return (
@@ -757,11 +757,11 @@ export default function Dashboard() {
             </div>
         
         </div>
-
+       {!data.installed_github &&
         <GitHubInstallation
             isOpen={showInstallModal}
             onClose={() => setShowInstallModal(false)}
-        />
+        />}
         </>
     );
     
