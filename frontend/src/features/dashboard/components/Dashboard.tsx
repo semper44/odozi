@@ -6,8 +6,8 @@ import gradientBg  from "../../../assets/gradient.jpg"
 import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMessage";
 import { useSelectionStore } from "../../store/selectionStore";
 import { useLLMStore } from "../../store/selectionStore";
+import AnimatedLock from "../loading/Loader"
 import { useSocketStore  } from "../../store/selectionStore";
-import { items } from "../../data/dummyData";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import { RepoCard } from "./ui/RepoCard";
@@ -260,7 +260,7 @@ export default function Dashboard() {
         console.log("baby")
 
         // Filter our cached collection matching the active Zustand Set configurations
-        const serializedRepos = items
+        const serializedRepos = data.repositories
             .filter((repo: any) => selectedIdsSet.has(String(repo.id)))
             .map((repo: any) => {
             const nameParts = repo.full_name.split("/");
@@ -702,7 +702,7 @@ export default function Dashboard() {
                         <WorkspaceModal
                             isOpen={isModalOpen}
                             onClose={() => setIsModalOpen(false)}
-                            allRepositories={items || []} 
+                            allRepositories={data.repositories || []} 
                             selectedIds={selectedIdsSet}               
                             onToggleSelect={toggleSelect}               
                             onSubmit={handleCreateWorkspace}
