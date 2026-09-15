@@ -1,5 +1,3 @@
-import React from "react";
-
 const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
 export const GitHubLoginOrRegister = () => {

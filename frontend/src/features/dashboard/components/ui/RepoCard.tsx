@@ -5,7 +5,6 @@ interface Props {
   name: string;
   image: string;
   workspaceName: string;
-  isActive:  boolean
 }
 
 export const RepoCard = ({
@@ -13,7 +12,6 @@ export const RepoCard = ({
   name,
   image,
   workspaceName,
-  isActive,
 
 }: Props) => {
   const selected = useSelectionStore(

@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import {SendHorizontal} from "lucide-react";
 import ChatResponse from "../../dashboard/components/ui/Markdown";
-import { data } from "react-router-dom";
 
 
 export interface ChatMessage {

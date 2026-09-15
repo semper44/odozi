@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+@keyframes shine {
+  0% {
+    transform: translateX(-100px) rotate(12deg);
+  }
+
+  50% {
+    transform: translateX(140px) rotate(12deg);
+  }
+
+  100% {
+    transform: translateX(140px) rotate(12deg);
+  }
+}
+
+@keyframes lockGlow {
+  0%,
+  100% {
+    opacity: 0.45;
+    filter: drop-shadow(0 0 0px rgba(168, 85, 247, 0));
+  }
+
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.8));
+  }
+}

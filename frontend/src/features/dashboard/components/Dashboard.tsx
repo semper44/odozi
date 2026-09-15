@@ -19,7 +19,6 @@ import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefre
 import { EnvVarModal } from "./ui/ENV vars/EnvVarModal"; 
 import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
 import { GitHubInstallation } from "../../../pages/registrationorlogin/install_github";
-// import {AgenticChatConsole} from "@features/streaming/api/AiChat.tsx"
 // import { EnvVariableCard } from "./ui/ENV vars/EnvVariableCard";
 
 
@@ -245,7 +244,11 @@ export default function Dashboard() {
     // change from loading to resolved between renders, but React still needs the
     // same hook order on both renders.
     if (isLoading) {
-        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
+        return <div className = "w-full h-full flex justify-center items-center">
+            
+                <AnimatedLock />
+            
+            </div>;
     }
 
     if (error) {
@@ -308,10 +311,6 @@ export default function Dashboard() {
     };
 
 
-    const createEnvVar = (keyList: string[], workspace:string) => {
-    };
-
-
     const handleSendRequest = async (textInput: string) => {
         console.log(activeToast !== null,"activetoast", activeToast)
         console.log({"yyyyyyyyyyy":activeProvider, "activeModel":activeModel})
@@ -326,7 +325,7 @@ export default function Dashboard() {
             }  
         if (activeToast !== null){
                 alert(9999999)
-                toast.error(activeToast.message || "Gateway terminated connection: Reconnecting", {
+                toast.error(activeToast || "Gateway terminated connection: Reconnecting", {
                 position: "top-right",
                 autoClose: 4000,
                 theme: "colored"
@@ -393,8 +392,8 @@ export default function Dashboard() {
     // Active when there is a search query AND exactly one match is found
     const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
 
-    const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
-    const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
+    // const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
+    // const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
 
 
     // if (isAuthError){

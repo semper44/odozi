@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSocketStore } from "@/features/store/selectionStore";
 import { Terminal, Shield, Trash2, ArrowDown, Loader2 } from "lucide-react";
 
@@ -18,7 +18,7 @@ export default function LiveTerminal() {
   const engineTimerRef = useRef<NodeJS.Timeout | null>(null);
   const loadedReportUrls = useRef<Set<string>>(new Set());
 
-  // ✅ Listen to global streaming data from store
+  // Listen to global streaming data from store
   const streamingMessage = useSocketStore((state) => state.streamingMessage);
 
   useEffect(() => {

@@ -1,11 +1,9 @@
 // socket.ts
-import type { StreamingMessage } from "./types";
 import { useSocketStore } from "@/features/store/selectionStore"
-import { toast } from 'react-toastify';
 
-interface SocketConfig {
-  baseUrl: string;
-}
+// interface SocketConfig {
+//   baseUrl: string;
+// }
 
 class SocketService {
   private socket: WebSocket | null = null;
