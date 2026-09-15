@@ -4,7 +4,6 @@ import { createBrowserRouter, redirect } from "react-router-dom";
 
 import Home from "@/pages/Home";
 import {GitHubLoginOrRegister} from "@/pages/registrationorlogin";
-import LiveTerminal from "../../features/streaming/components/LiveTerminal";
 
 const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
@@ -44,9 +43,5 @@ export const router = createBrowserRouter([
     path: "/login",
     element: <GitHubLoginOrRegister />,
   },
-  {
-    path: "/terminal",
-    element: <LiveTerminal />,
-  },
- 
+  
 ]);

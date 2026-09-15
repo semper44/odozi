@@ -170,12 +170,12 @@ export default function Dashboard() {
     console.log("ogo", data)
 
     // Covers a session that expires after the protected route has mounted.
-    // useEffect(() => {
-    //     const status = (error as { status?: number } | null)?.status;
-    //     if (status === 401 || status === 403) {
-    //         navigate("/login", { replace: true });
-    //     }
-    // }, [error, navigate]);
+    useEffect(() => {
+        const status = (error as { status?: number } | null)?.status;
+        if (status === 401 || status === 403) {
+            navigate("/login", { replace: true });
+        }
+    }, [error, navigate]);
 
     console.log(data, "selected repos in dashboard")
 
@@ -243,7 +243,7 @@ export default function Dashboard() {
     // Keep every hook above these conditional returns. A repository request can
     // change from loading to resolved between renders, but React still needs the
     // same hook order on both renders.
-    if (true) {
+    if (isLoading) {
         return <div className = "w-full h-full flex justify-center items-center">
                 <AnimatedLock loading={true} />
         </div>;
