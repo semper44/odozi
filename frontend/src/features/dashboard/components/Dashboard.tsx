@@ -1,13 +1,13 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus, Bot } from "lucide-react";
+import { Bot,House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
 import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMessage";
-import AnimatedLock from "@/features/loading/Loader"
 import { useSelectionStore } from "../../store/selectionStore";
 import { useLLMStore } from "../../store/selectionStore";
 import { useSocketStore  } from "../../store/selectionStore";
+import { items } from "../../data/dummyData";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import { RepoCard } from "./ui/RepoCard";
@@ -19,6 +19,7 @@ import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefre
 import { EnvVarModal } from "./ui/ENV vars/EnvVarModal"; 
 import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
 import { GitHubInstallation } from "../../../pages/registrationorlogin/install_github";
+// import {AgenticChatConsole} from "@features/streaming/api/AiChat.tsx"
 // import { EnvVariableCard } from "./ui/ENV vars/EnvVariableCard";
 
 
@@ -149,6 +150,7 @@ export default function Dashboard() {
     useEffect(() => {
         if (socketError) {
             clearAiResponseTimeout();
+            // setIsProcessingRequest(false);
             console.log("🚨 Dashboard caught background worker crash or API block:", socketError);
             
             // Append a system or error message to your chat interface display window
@@ -168,6 +170,7 @@ export default function Dashboard() {
     console.log("ogo", data)
 
     // Covers a session that expires after the protected route has mounted.
+    // This must run before loading/error returns so auth failures can redirect.
     useEffect(() => {
         const status = (error as { status?: number } | null)?.status;
         if (status === 401 || status === 403) {
@@ -242,10 +245,7 @@ export default function Dashboard() {
     // change from loading to resolved between renders, but React still needs the
     // same hook order on both renders.
     if (isLoading) {
-        return <div className = "w-full h-full flex justify-center items-center">
-                <AnimatedLock loading={true} />
-        </div>;
-
+        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Loading...</p>;
     }
 
     if (error) {
@@ -260,7 +260,7 @@ export default function Dashboard() {
         console.log("baby")
 
         // Filter our cached collection matching the active Zustand Set configurations
-        const serializedRepos = data.repositories
+        const serializedRepos = items
             .filter((repo: any) => selectedIdsSet.has(String(repo.id)))
             .map((repo: any) => {
             const nameParts = repo.full_name.split("/");
@@ -449,7 +449,6 @@ export default function Dashboard() {
 
                     {/* <!-- second tab  --> */}
                     <div className="top-tabs w-full sm:grid hidden gap-2">
-                        {/* for menu switching */}
                         {leftTabs.map((tab) => {
                             const isActive = activeLeftTab === tab.id;
                             return (
@@ -519,10 +518,13 @@ export default function Dashboard() {
 
                             </div>
 
-                            {/* <!-- logout icon --> */}
-                                <div className="w-full flex justify-center cursor-pointer">
-                                    <LogOut className="material-icons-outlined text-[12px]" />
+                            {/* <!-- chat support icon --> */}
+                            <div onClick={() => {setIsAiChatOpen(!isAiOpen)}} id="ai-chat-support" className="md:w-[100px] w-fit p-4 mt-auto shadow-md rounded-full cursor-pointer grid items-center justify-center ">
+                                <div className="w-full flex justify-center">
+                                    <Bot className="material-icons-outlined text-[12px]" />
                                 </div>
+                                    <p className="text-[12px] hidden md:flex">Support</p>
+                            </div>
                         </div>
                     </div>
 
@@ -700,7 +702,7 @@ export default function Dashboard() {
                         <WorkspaceModal
                             isOpen={isModalOpen}
                             onClose={() => setIsModalOpen(false)}
-                            allRepositories={data?.repositories || []} 
+                            allRepositories={items || []} 
                             selectedIds={selectedIdsSet}               
                             onToggleSelect={toggleSelect}               
                             onSubmit={handleCreateWorkspace}
@@ -755,11 +757,11 @@ export default function Dashboard() {
             </div>
         
         </div>
-       {!data.installed_github &&
+
         <GitHubInstallation
             isOpen={showInstallModal}
             onClose={() => setShowInstallModal(false)}
-        />}
+        />
         </>
     );
     

@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useSocketStore } from "@/features/store/selectionStore";
 import { Terminal, Shield, Trash2, ArrowDown, Loader2 } from "lucide-react";
-import AnimatedLock from "../../loading/Loader"
-
 
 export default function LiveTerminal() {
   const [visibleLines, setVisibleLines] = useState<string[]>([]);
@@ -129,7 +127,7 @@ export default function LiveTerminal() {
   };
 
   return (
-    <div className="w-full bg-[#09090b] border border-[#1f1f23] shadow-2xl overflow-hidden flex flex-col h-full">
+    <div className="w-full bg-[#09090b] border border-[#1f1f23] rounded-xl shadow-2xl overflow-hidden flex flex-col h-[500px]">
       
       {/* Terminal Top Action Menu Header */}
       <div className="bg-[#121215] px-4 py-3 border-b border-[#1f1f23] flex items-center justify-between select-none">
@@ -167,7 +165,7 @@ export default function LiveTerminal() {
       <div className="flex-grow p-5 overflow-y-auto font-mono text-[13px] leading-relaxed text-zinc-300 space-y-1 select-text scrollbar-thin scrollbar-thumb-zinc-800">
         {visibleLines.length === 0 && !activeTool && (
           <div className="h-full flex flex-col items-center justify-center gap-2 text-zinc-600">
-            <AnimatedLock loading={true} />
+            <Shield className="w-5 h-5 text-zinc-700 animate-pulse" />
             <p className="text-xs">Awaiting workflow compilation data chunks from GitHub...</p>
           </div>
         )}

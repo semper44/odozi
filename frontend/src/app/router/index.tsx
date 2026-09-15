@@ -5,7 +5,7 @@ import { createBrowserRouter, redirect } from "react-router-dom";
 import Home from "@/pages/Home";
 import {GitHubLoginOrRegister} from "@/pages/registrationorlogin";
 
-const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
+const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL || "http://127.0.0.1:8000";
 
 /**
  * The dashboard endpoint is already the backend's session validator.  Running
@@ -43,5 +43,5 @@ export const router = createBrowserRouter([
     path: "/login",
     element: <GitHubLoginOrRegister />,
   },
-  
+ 
 ]);
