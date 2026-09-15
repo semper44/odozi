@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bot,House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus } from "lucide-react";
+import { Bot,House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus, LogOut } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
 import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMessage";
@@ -518,13 +518,10 @@ export default function Dashboard() {
 
                             </div>
 
-                            {/* <!-- chat support icon --> */}
-                            <div onClick={() => {setIsAiChatOpen(!isAiOpen)}} id="ai-chat-support" className="md:w-[100px] w-fit p-4 mt-auto shadow-md rounded-full cursor-pointer grid items-center justify-center ">
+                            {/* <!-- logout --> */}
                                 <div className="w-full flex justify-center">
-                                    <Bot className="material-icons-outlined text-[12px]" />
+                                    <LogOut />
                                 </div>
-                                    <p className="text-[12px] hidden md:flex">Support</p>
-                            </div>
                         </div>
                     </div>
 
