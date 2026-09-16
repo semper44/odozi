@@ -6,7 +6,7 @@ import gradientBg  from "../../../assets/gradient.jpg"
 import {AIChat, type ChatMessage } from "@/features/streaming/components/ChatMessage";
 import { useSelectionStore } from "../../store/selectionStore";
 import { useLLMStore } from "../../store/selectionStore";
-import AnimatedLock from "../loading/Loader"
+import AnimatedLock from "@/features/loading/Loader"
 import { useSocketStore  } from "../../store/selectionStore";
 import { useRepos } from "@/features/github/hooks/useRepos";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
@@ -309,6 +309,10 @@ export default function Dashboard() {
         });
     };
 
+
+    // send button for env creation details to the backend
+    const createEnvVar = (keyList: string[], workspace:string) => {
+    };
 
     const handleSendRequest = async (textInput: string) => {
         console.log(activeToast !== null,"activetoast", activeToast)

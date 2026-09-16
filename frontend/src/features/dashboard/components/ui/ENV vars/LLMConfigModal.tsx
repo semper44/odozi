@@ -17,7 +17,7 @@ interface LLMConfigModalProps {
 
 export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
   const get_llm_values = localStorage.getItem("odozi-llm-context")
-  const parsed_llm_values = JSON.parse(get_llm_values)
+  const parsed_llm_values = JSON.parse(get_llm_values || "")
   const [provider, setProvider] = useState(parsed_llm_values?.state?.activeProvider);
   const [model, setModel] = useState(parsed_llm_values?.state?.activeModel);
   const [apiKey, setApiKey] = useState(parsed_llm_values && "**************");

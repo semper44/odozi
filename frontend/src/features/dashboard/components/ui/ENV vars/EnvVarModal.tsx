@@ -7,7 +7,7 @@ interface EnvVarModalProps {
   onClose: () => void;
   selected: Set<string>; 
   workspace: string
-  onSubmit: (keyList: string[]) => void; // 👈 FIXED: Now accepts the string array
+  onSubmit: (keyList: string[], workspace: string) => void;
   isPending: boolean;
 }
 
