@@ -169,12 +169,12 @@ export default function Dashboard() {
 
     // Covers a session that expires after the protected route has mounted.
     // This must run before loading/error returns so auth failures can redirect.
-    useEffect(() => {
-        const status = (error as { status?: number } | null)?.status;
-        if (status === 401 || status === 403) {
-            navigate("/login", { replace: true });
-        }
-    }, [error, navigate]);
+    // useEffect(() => {
+    //     const status = (error as { status?: number } | null)?.status;
+    //     if (status === 401 || status === 403) {
+    //         navigate("/login", { replace: true });
+    //     }
+    // }, [error, navigate]);
 
     console.log(data, "selected repos in dashboard")
 
