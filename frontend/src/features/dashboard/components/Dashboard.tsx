@@ -262,7 +262,7 @@ export default function Dashboard() {
         console.log("baby")
 
         // Filter our cached collection matching the active Zustand Set configurations
-        const serializedRepos = data.repositories
+        const serializedRepos = data?.repositories
             .filter((repo: any) => selectedIdsSet.has(String(repo.id)))
             .map((repo: any) => {
             const nameParts = repo.full_name.split("/");
@@ -272,7 +272,7 @@ export default function Dashboard() {
                 repo_owner: nameParts[0] || "Unknown",
                 repo_full_name: repo.full_name
             };
-            });
+            })?? [];
 
         useCreateRepos.mutate({
             workspaceId: null, // Signals backend view path B to trigger a brand-new workspace insert
@@ -311,7 +311,11 @@ export default function Dashboard() {
 
 
     // send button for env creation details to the backend
-    const createEnvVar = (keyList: string[], workspace:string) => {
+    const createEnvVar = (keyList: string[]) => {
+        useCreateEnv.mutate({
+            key_names: keyList,
+            repo_id: Array.from(selected),
+        });
     };
 
     const handleSendRequest = async (textInput: string) => {
@@ -357,9 +361,9 @@ export default function Dashboard() {
 
         // Append user bubble instantly to the UI tree layout
         const newUserMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        sender: "user",
-        text: cleanedInput,
+            id: crypto.randomUUID(),
+            sender: "user",
+            text: cleanedInput,
         };
         setMessages((prev) => [...prev, newUserMessage]);
 
@@ -393,7 +397,7 @@ export default function Dashboard() {
 
     console.log(selected,"filteredRep", selectedWorkspace)
     // Active when there is a search query AND exactly one match is found
-    const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
+    // const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
 
     // const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
     // const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
@@ -500,7 +504,7 @@ export default function Dashboard() {
 
                         {/*  my proj */}
                         <div className="my-proj w-fit hidden md:flex items-center gap-2">
-                            <p className="font-bold text-black pl-10">Welcome, {data.username}</p>
+                            <p className="font-bold text-black pl-10">Welcome, {data?.username}</p>
                         </div>
 
                         {/* input box parent */}
@@ -576,13 +580,13 @@ export default function Dashboard() {
                         {/* repo menu */}                 
                         
                         {(!isAiOpen && !isProcessingRequest) && (<div className="px-10 py-3">
-                            <SelectionToolbar switchOn = {setIsOn} isOn = {isOn} filteredRepos={filteredRepositories} />
+                            <SelectionToolbar switchOn = {setIsOn}  filteredRepos={filteredRepositories} />
 
                         {/* repo List */}
                             <div className="space-y-4">
-                                {data.repositories.map((repo) => {
+                                {data?.repositories.map((repo) => {
                                 // It is "ticked" if all are shown (no single match) OR if it is the single match
-                                const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
+                                // const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
 
                                 return (
                                     <RepoCard
@@ -590,7 +594,6 @@ export default function Dashboard() {
                                         id={String(repo.id)}
                                         name={repo.full_name}
                                         image={"repo.avatar_url"}
-                                        isActive={isActive} // Pass the tick/active state to your card
                                         workspaceName={repo.workspaceName}
                                     />
                                 );
@@ -701,7 +704,7 @@ export default function Dashboard() {
                         <WorkspaceModal
                             isOpen={isModalOpen}
                             onClose={() => setIsModalOpen(false)}
-                            allRepositories={data.repositories || []} 
+                            allRepositories={data?.repositories || []} 
                             selectedIds={selectedIdsSet}               
                             onToggleSelect={toggleSelect}               
                             onSubmit={handleCreateWorkspace}

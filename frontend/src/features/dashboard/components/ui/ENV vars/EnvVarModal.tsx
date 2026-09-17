@@ -7,7 +7,7 @@ interface EnvVarModalProps {
   onClose: () => void;
   selected: Set<string>; 
   workspace: string
-  onSubmit: (keyList: string[], workspace: string) => void;
+  onSubmit: (keyList: string[]) => void;
   isPending: boolean;
 }
 
@@ -52,7 +52,7 @@ export function EnvVarModal({
     }
 
     // Passes the populated string list directly up to createEnvVar()
-    onSubmit(keyList, workspace);
+    onSubmit(keyList);
   };
 
    return (

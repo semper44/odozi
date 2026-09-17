@@ -1,33 +1,60 @@
-export const fetchRepos = async () => {
+// Repository returned by Django inside "repositories"
+export interface Repository {
+  id: number;
+  name: string;
+  full_name: string;
+  default_branch: string;
+}
+
+// Existing repo_selection data can contain additional fields,
+// so we don't need to guess every backend field yet.
+export interface RepoSelection {
+  repo_id: number;
+  workspace__name?: string;
+  [key: string]: unknown;
+}
+
+export interface FetchReposResponse {
+  repositories: Repository[];
+  repo_selection: RepoSelection[];
+  my_jwt_access_token: string;
+  installed_github: boolean;
+  my_jwt_access_refresh: string;
+  username: string;
+  user_id: number | string;
+  expires_at: string;
+}
+
+export const fetchRepos = async (): Promise<FetchReposResponse> => {
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
   const response = await fetch(`${backendUrl}/dashboard/`, {
     method: "POST",
-    credentials: "include", 
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },
   });
 
-  // ✅ 1. Check if the response failed (any status outside 200-299)
   if (!response.ok) {
     let errorDetails = "Unknown API Error";
+
     try {
-      // Try to extract Django's explicit JsonResponse message (e.g. {"error": "..."})
       const errorJson = await response.json();
       errorDetails = errorJson.error || errorDetails;
     } catch {
       errorDetails = response.statusText;
     }
 
-    // ✅ 2. Create a custom error object and attach the exact HTTP status code
     const apiError = new Error(errorDetails);
-    (apiError as any).status = response.status; // Carries 401, 403, 500 etc.
-    
-    // ✅ 3. Throwing here ensures your hook's "error" object is populated
-    throw apiError; 
+
+    // Preserve the HTTP status without using `any`.
+    Object.assign(apiError, {
+      status: response.status,
+    });
+
+    throw apiError;
   }
 
-  // Only reaches here if response.ok is true
-  return response.json();
+  return response.json() as Promise<FetchReposResponse>;
 };

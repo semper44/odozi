@@ -1,43 +1,74 @@
-// useRepos.ts
 import { useQuery } from "@tanstack/react-query";
-import { fetchRepos } from "../api/githubApi";
+import {
+  fetchRepos,
+  type Repository,
+  type FetchReposResponse,
+} from "../api/githubApi";
+
+export interface EnrichedRepository extends Repository {
+  workspaceName: string;
+  hasWorkspace: boolean;
+}
+
+export interface ReposQueryData extends Omit<FetchReposResponse, "repositories"> {
+  repositories: EnrichedRepository[];
+  uniqueWorkspaces: string[];
+}
 
 export const useRepos = () => {
-  return useQuery({
+  return useQuery<FetchReposResponse, Error, ReposQueryData>({
     queryKey: ["repos"],
     queryFn: fetchRepos,
     staleTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
     retry: false,
-    
+
     select: (rawResponseData) => {
-      if (!rawResponseData) return { repositories: [], uniqueWorkspaces: [], username: "" };
+      if (!rawResponseData) {
+        return {
+          repositories: [],
+          uniqueWorkspaces: [],
+          username: "",
+          repo_selection: [],
+          my_jwt_access_token: "",
+          installed_github: false,
+          my_jwt_access_refresh: "",
+          user_id: "",
+          expires_at: "",
+        };
+      }
 
-      const { repositories = [], repo_selection = [] } = rawResponseData;
+      const {
+        repositories = [],
+        repo_selection = [],
+      } = rawResponseData;
 
-      // 1. Map workspace assignments
       const selectionMap = new Map<number, string>();
       const workspaceNamesSet = new Set<string>();
 
-      repo_selection.forEach((item: any) => {
+      repo_selection.forEach((item) => {
         if (item.repo_id) {
           const wsName = item.workspace__name || "";
+
           selectionMap.set(item.repo_id, wsName);
-          if (wsName) workspaceNamesSet.add(wsName); // Collect unique names
+
+          if (wsName) {
+            workspaceNamesSet.add(wsName);
+          }
         }
       });
 
-      const enrichedRepositories = repositories.map((repo: any) => ({
-        ...repo,
-        workspaceName: selectionMap.get(repo.id) || "",
-        hasWorkspace: selectionMap.has(repo.id),
-      }));
+      const enrichedRepositories: EnrichedRepository[] =
+        repositories.map((repo) => ({
+          ...repo,
+          workspaceName: selectionMap.get(Number(repo.id)) || "",
+          hasWorkspace: selectionMap.has(Number(repo.id)),
+        }));
 
       return {
         ...rawResponseData,
         repositories: enrichedRepositories,
-        // Converting Set to an array list for the dropdown menu
-        uniqueWorkspaces: Array.from(workspaceNamesSet), 
+        uniqueWorkspaces: Array.from(workspaceNamesSet),
       };
     },
   });

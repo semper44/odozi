@@ -6,10 +6,10 @@ import { toast } from 'react-toastify';
 
 // Explicit type contract describing your database mapping structure
 export interface GitHubRepoPayload {
-  github_id: number;
-  repo_name: string;
-  repo_owner: string;
-  repo_full_name: string;
+    repo_id: number;
+    repo_name: string;
+    repo_owner: string;
+    repo_full_name: string;
 }
 
 // Inside useRepoMutations.ts:
@@ -28,18 +28,18 @@ export const useCreateReposMutation = () => {
 
 
 // 2. Hook wrapper handling high-speed bulk database deletions
-export const useDeleteReposMutation = () => {
-  const queryClient = useQueryClient();
+// export const useDeleteReposMutation = () => {
+//   const queryClient = useQueryClient();
 
-  return useMutation({
-    mutationFn: (repoIds: number[]) => deleteSelectedRepos(repoIds),
-    onSuccess: () => {
-      console.log("🔥 Successfully wiped repository selections from database.");
-      // Invalidate the 'repos' cache key to clear out the disconnected UI cards
-      queryClient.invalidateQueries({ queryKey: ["repos"] });
-    },
-  });
-};
+//   return useMutation({
+//     mutationFn: (repoIds: number[]) => deleteSelectedRepos(repoIds),
+//     onSuccess: () => {
+//       console.log("🔥 Successfully wiped repository selections from database.");
+//       // Invalidate the 'repos' cache key to clear out the disconnected UI cards
+//       queryClient.invalidateQueries({ queryKey: ["repos"] });
+//     },
+//   });
+// };
 
 
 
