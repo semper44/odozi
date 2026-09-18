@@ -9,7 +9,6 @@ import { useLLMStore } from "../../store/selectionStore";
 import AnimatedLock from "@/features/loading/Loader"
 import { useSocketStore  } from "../../store/selectionStore";
 import { useRepos } from "@/features/github/hooks/useRepos";
-import { items as data } from "@/features/data/dummyData";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import { RepoCard } from "./ui/RepoCard";
 import { SelectionToolbar } from "./SelectionToolbar";
@@ -169,31 +168,14 @@ export default function Dashboard() {
 
     // Covers a session that expires after the protected route has mounted.
     // This must run before loading/error returns so auth failures can redirect.
-    // useEffect(() => {
-    //     const status = (error as { status?: number } | null)?.status;
-    //     if (status === 401 || status === 403) {
-    //         navigate("/login", { replace: true });
-    //     }
-    // }, [error, navigate]);
+    useEffect(() => {
+        const status = (error as { status?: number } | null)?.status;
+        if (status === 401 || status === 403) {
+            navigate("/login", { replace: true });
+        }
+    }, [error, navigate]);
 
     console.log(data, "selected repos in dashboard")
-
-    // useEffect(() => {
-    //     if (isLoading) return;
-
-    //     if (data?.installGithub === true) {
-    //         setShowInstallModal(true);
-    //         setHasCheckedInstallPrompt(true);
-    //         return;
-    //     }
-
-    //     if (data?.installGithub === false) {
-    //         setHasCheckedInstallPrompt(true);
-    //     }
-    // }, [data?.installGithub, hasCheckedInstallPrompt, isLoading]);
-
-    
-    // ✅ Console log streaming messages in Dashboard
 
 
     useEffect(() => {
@@ -257,7 +239,7 @@ export default function Dashboard() {
     const handleCreateWorkspace = (modalPayload: { workspaceName: string }) => {
         console.log("manage")
         // if (selectedIdsSet.size === 0 || !data?.repositories) return;
-        console.log("baby", data.repositories)
+        console.log("baby", data?.repositories)
 
         // Filter our cached collection matching the active Zustand Set configurations
         const serializedRepos = data?.repositories
@@ -758,10 +740,10 @@ export default function Dashboard() {
         
         </div>
 
-        <GitHubInstallation
+        {data?.installed_github && <GitHubInstallation
             isOpen={showInstallModal}
             onClose={() => setShowInstallModal(false)}
-        />
+        />}
         </>
     );
     
