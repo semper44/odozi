@@ -9,6 +9,7 @@ import { useLLMStore } from "../../store/selectionStore";
 import AnimatedLock from "@/features/loading/Loader"
 import { useSocketStore  } from "../../store/selectionStore";
 import { useRepos } from "@/features/github/hooks/useRepos";
+import { items as data } from "@/features/data/dummyData";
 import { useStreamingSocket } from "@/features/streaming/hooks/useStreamingSocket";
 import { RepoCard } from "./ui/RepoCard";
 import { SelectionToolbar } from "./SelectionToolbar";
@@ -30,7 +31,6 @@ export default function Dashboard() {
     const [isAiOpen, setIsAiChatOpen] = useState(false);
     const [isPending, setIsPending] = useState(false);
     const [isProcessingRequest, setIsProcessingRequest] = useState(false);
-    const [isOn, setIsOn] = useState(false);
     const [envShowModal, setEnvShowModal] = useState(false);
     const [showLlmModal, setShowLlmModal] = useState(false);
     const [prompt, setPrompt] = useState("");
@@ -243,15 +243,13 @@ export default function Dashboard() {
     // change from loading to resolved between renders, but React still needs the
     // same hook order on both renders.
     if (isLoading) {
-        return <div className = "w-full h-full flex justify-center items-center">
-            
-                <AnimatedLock />
-            
+        return <div className = "w-full h-screen flex justify-center items-center">       
+                <AnimatedLock />          
             </div>;
     }
 
     if (error) {
-        return <p className = "text-red-500 w-full h-full flex justify-center text-center">Error fetching repos</p>;
+        return <div className = "text-red-500 w-full h-screen flex justify-center items-center">Error fetching repos</div>;
     }
 
    
@@ -259,7 +257,7 @@ export default function Dashboard() {
     const handleCreateWorkspace = (modalPayload: { workspaceName: string }) => {
         console.log("manage")
         // if (selectedIdsSet.size === 0 || !data?.repositories) return;
-        console.log("baby")
+        console.log("baby", data.repositories)
 
         // Filter our cached collection matching the active Zustand Set configurations
         const serializedRepos = data?.repositories
@@ -409,7 +407,7 @@ export default function Dashboard() {
     // if (serverDownError){
     //     console.log("Server is down. Please try again later.")
     // }
-    console.log(error, "h1osana",data)
+    // console.log(error, "h1osana",data)
 
 
     function ClickBackIconTasks(){
@@ -525,7 +523,7 @@ export default function Dashboard() {
                             </div>
 
                             {/* <!-- logout --> */}
-                                <div className="w-full flex justify-center">
+                                <div className="w-full flex justify-end lg:pr-4 cursor-pointer">
                                     <LogOut />
                                 </div>
                         </div>
@@ -580,7 +578,7 @@ export default function Dashboard() {
                         {/* repo menu */}                 
                         
                         {(!isAiOpen && !isProcessingRequest) && (<div className="px-10 py-3">
-                            <SelectionToolbar switchOn = {setIsOn}  filteredRepos={filteredRepositories} />
+                            <SelectionToolbar   filteredRepos={filteredRepositories} />
 
                         {/* repo List */}
                             <div className="space-y-4">

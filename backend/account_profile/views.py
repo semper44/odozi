@@ -97,9 +97,10 @@ def verify_github_signature(request):
     },
 )
 def github_callback_view(request):
-    react_app_url = settings.REACT_URL  
-    response = HttpResponseRedirect(react_app_url)
-    return response
+    print("boyfriend wahala")
+    # react_app_url = settings.REACT_URL  
+    # response = HttpResponseRedirect(react_app_url)
+    # return response
     
     # 1. Catch the 'code' parameter sent by GitHub in the URL query string
     code = request.GET.get('code')

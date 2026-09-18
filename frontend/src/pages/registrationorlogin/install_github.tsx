@@ -6,8 +6,6 @@ interface GitHubInstallationProps {
   onClose?: () => void;
 }
 
-const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
-
 export const GitHubInstallation: React.FC<GitHubInstallationProps> = ({
   className,
   isOpen = false,

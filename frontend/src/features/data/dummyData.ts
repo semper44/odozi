@@ -1,154 +1,201 @@
-// src/features/gallery/data/dummyData.ts
+// src/features/data/dummyData.ts
 
-export const items = [
-  {
-    "id": 102938471,
-    "owner": "semper44",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "odozi",
-    "full_name": "semper44/odozi",
-    "is_private": true
-  },
-  {
-    "id": 204958112,
-    "owner": "semper44",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "django-backend",
-    "full_name": "semper44/django-backend",
-    "is_private": true
-  },
-  {
-    "id": 305847291,
-    "owner": "semper44",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "react-dashboard",
-    "full_name": "semper44/react-dashboard",
-    "is_private": false
-  },
-  {
-    "id": 401928374,
-    "owner": "cyber-defense-core",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "bandit-parser",
-    "full_name": "cyber-defense-core/bandit-parser",
-    "is_private": true
-  },
-  {
-    "id": 509281736,
-    "owner": "cyber-defense-core",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "ruff-runner",
-    "full_name": "cyber-defense-core/ruff-runner",
-    "is_private": true
-  },
-  {
-    "id": 602817394,
-    "owner": "open-security",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "pytest-tracer",
-    "full_name": "open-security/pytest-tracer",
-    "is_private": false
-  },
-  {
-    "id": 701928475,
-    "owner": "open-security",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "celery-monitor",
-    "full_name": "open-security/celery-monitor",
-    "is_private": false
-  },
-  {
-    "id": 809182736,
-    "owner": "stack-labs",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "fastapi-gateway",
-    "full_name": "stack-labs/fastapi-gateway",
-    "is_private": true
-  },
-  {
-    "id": 903847219,
-    "owner": "stack-labs",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "auth-gatekeeper",
-    "full_name": "stack-labs/auth-gatekeeper",
-    "is_private": true
-  },
-  {
-    "id": 112233445,
-    "owner": "devops-pipeline",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "runner-image",
-    "full_name": "devops-pipeline/runner-image",
-    "is_private": false
-  },
-  {
-    "id": 223344556,
-    "owner": "devops-pipeline",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "bash-herestring-scanners",
-    "full_name": "devops-pipeline/bash-herestring-scanners",
-    "is_private": true
-  },
-  {
-    "id": 334455667,
-    "owner": "alpha-omega-corp",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "enterprise-monorepo",
-    "full_name": "alpha-omega-corp/enterprise-monorepo",
-    "is_private": true
-  },
-  {
-    "id": 445566778,
-    "owner": "alpha-omega-corp",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "legacy-migration",
-    "full_name": "alpha-omega-corp/legacy-migration",
-    "is_private": true
-  },
-  {
-    "id": 556677889,
-    "owner": "analytics-io",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "log-accumulator",
-    "full_name": "analytics-io/log-accumulator",
-    "is_private": false
-  },
-  {
-    "id": 667788990,
-    "owner": "analytics-io",
-    "collaborators_url": "https://github.com{/collaborator}",
-    "branches_url": "https://github.com{/branch}",
-    "contributors_url": "https://github.com",
-    "name": "realtime-charts",
-    "full_name": "analytics-io/realtime-charts",
-    "is_private": false
-  }
-]
+export const items = {
+  "repositories": [
+    {
+      "id": 102938471,
+      "owner": "semper44",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "odozi",
+      "full_name": "semper44/odozi",
+      "is_private": true,
+      "workspaceName": "semper44-workspace",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2026-10-15T00:00:00Z"
+    },
+    {
+      "id": 204958112,
+      "owner": "semper44",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "django-backend",
+      "full_name": "semper44/django-backend",
+      "is_private": true,
+      "workspaceName": "semper44-workspace",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2026-10-15T00:00:00Z"
+    },
+    {
+      "id": 305847291,
+      "owner": "semper44",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "react-dashboard",
+      "full_name": "semper44/react-dashboard",
+      "is_private": false,
+      "workspaceName": "semper44-workspace",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2026-11-20T12:30:00Z"
+    },
+    {
+      "id": 401928374,
+      "owner": "cyber-defense-core",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "bandit-parser",
+      "full_name": "cyber-defense-core/bandit-parser",
+      "is_private": true,
+      "workspaceName": "cyber-core-space",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2026-11-20T12:30:00Z"
+    },
+    {
+      "id": 509281736,
+      "owner": "cyber-defense-core",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "ruff-runner",
+      "full_name": "cyber-defense-core/ruff-runner",
+      "is_private": true,
+      "workspaceName": "cyber-core-space",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2027-01-05T08:00:00Z"
+    },
+    {
+      "id": 602817394,
+      "owner": "open-security",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "pytest-tracer",
+      "full_name": "open-security/pytest-tracer",
+      "is_private": false,
+      "workspaceName": "sec-open-labs",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2027-01-05T08:00:00Z"
+    },
+    {
+      "id": 701928475,
+      "owner": "open-security",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "celery-monitor",
+      "full_name": "open-security/celery-monitor",
+      "is_private": false,
+      "workspaceName": "sec-open-labs",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2026-12-01T23:59:59Z"
+    },
+    {
+      "id": 809182736,
+      "owner": "stack-labs",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "fastapi-gateway",
+      "full_name": "stack-labs/fastapi-gateway",
+      "is_private": true,
+      "workspaceName": "stack-labs-main",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2026-12-01T23:59:59Z"
+    },
+    {
+      "id": 903847219,
+      "owner": "stack-labs",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "auth-gatekeeper",
+      "full_name": "stack-labs/auth-gatekeeper",
+      "is_private": true,
+      "workspaceName": "stack-labs-main",
+      "avatar_url": "https://githubusercontent.com",
+      "expires_at": "2026-09-30T15:00:00Z"
+    },
+    {
+      "id": 112233445,
+      "owner": "devops-pipeline",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "runner-image",
+      "full_name": "devops-pipeline/runner-image",
+      "is_private": false,
+      "workspaceName": "pipeline-dev",
+      "avatar_url": "https://githubusercontent.com0",
+      "expires_at": "2026-09-30T15:00:00Z"
+    },
+    {
+      "id": 223344556,
+      "owner": "devops-pipeline",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "bash-herestring-scanners",
+      "full_name": "devops-pipeline/bash-herestring-scanners",
+      "is_private": true,
+      "workspaceName": "pipeline-dev",
+      "avatar_url": "https://githubusercontent.com1",
+      "expires_at": "2027-03-14T06:45:00Z"
+    },
+    {
+      "id": 334455667,
+      "owner": "alpha-omega-corp",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "enterprise-monorepo",
+      "full_name": "alpha-omega-corp/enterprise-monorepo",
+      "is_private": true,
+      "workspaceName": "alpha-omega-prod",
+      "avatar_url": "https://githubusercontent.com2",
+      "expires_at": "2027-03-14T06:45:00Z"
+    },
+    {
+      "id": 445566778,
+      "owner": "alpha-omega-corp",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "legacy-migration",
+      "full_name": "alpha-omega-corp/legacy-migration",
+      "is_private": true,
+      "workspaceName": "alpha-omega-prod",
+      "avatar_url": "https://githubusercontent.com3",
+      "expires_at": "2026-10-31T21:00:00Z"
+    },
+    {
+      "id": 556677889,
+      "owner": "analytics-io",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "log-accumulator",
+      "full_name": "analytics-io/log-accumulator",
+      "is_private": false,
+      "workspaceName": "analytics-metrics",
+      "avatar_url": "https://githubusercontent.com4",
+      "expires_at": "2026-10-31T21:00:00Z"
+    },
+    {
+      "id": 667788990,
+      "owner": "analytics-io",
+      "collaborators_url": "https://github.com{/collaborator}",
+      "branches_url": "https://github.com{/branch}",
+      "contributors_url": "https://github.com",
+      "name": "realtime-charts",
+      "full_name": "analytics-io/realtime-charts",
+      "is_private": false,
+      "workspaceName": "analytics-metrics",
+      "avatar_url": "https://githubusercontent.com5",
+      "expires_at": "2026-10-15T00:00:00Z"
+    }
+  ]
+};

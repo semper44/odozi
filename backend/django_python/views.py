@@ -68,8 +68,9 @@ from langchain_core.output_parsers import StrOutputParser
 def dashboard_view(request):
     """Authenticate the dashboard request and return repository data for the signed-in user."""
     print("wahsahala")
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed. Must use POST for security verification."}, status=405)
+    print("hmmm")
+    # if request.method != "POST":
+    #     return JsonResponse({"error": "Method not allowed. Must use POST for security verification."}, status=405)
 
     # RETRIEVE INCOMING IDENTIFICATION CONTAINERS
     ticket_id = request.COOKIES.get("ticket_id")
@@ -87,8 +88,9 @@ def dashboard_view(request):
 
 
     # FIRST LOGIN HANDSHAKE (Transit Ticket Present) 
+    print("b41111")
     if ticket_id:
-        print(ticket_id)
+        print(ticket_id, "oolololol")
 
         # Base tracking template string for Redis keys
         redis_ticket_key = f"redis_auth_ws_transit_ticket:{ticket_id}" if ticket_id else None

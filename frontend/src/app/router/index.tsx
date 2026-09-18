@@ -18,7 +18,7 @@ const requireAuthenticatedSession = async () => {
     credentials: "include",
     headers: { "Content-Type": "application/json" },
   });
-
+  console.log("response", response)
   if (response.status === 401 || response.status === 403) {
     throw redirect("/login");
   }
@@ -37,7 +37,7 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: <Home />,
-    loader: requireAuthenticatedSession,
+    // loader: requireAuthenticatedSession,
   },
   {
     path: "/login",

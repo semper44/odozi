@@ -28,11 +28,11 @@
             // # FIXED: Corrected the endpoint URL path and string interpolation parameters
             // MUST use backticks (``), NOT normal quotes ('')
             // ✅ Wrap both redirect_uri AND scope inside encodeURIComponent()
-            const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
-            console.log(githubAuthUrl);
+            // const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
+            // console.log(githubAuthUrl);
             
             // Redirect the user to GitHub
-            window.location.href = githubAuthUrl;
+            window.location.href = redirectUri;
             console.log("githubAuthUrl");
 
         });

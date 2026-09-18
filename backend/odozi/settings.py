@@ -33,7 +33,7 @@ ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     "fast-results-behave.loca.lt",
-    "short-aliens-sniff.loca.lt",
+    "http://localhost:5173",
     "odozi.onrender.com",
     "https://odozi.vercel.app"
 ]

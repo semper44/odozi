@@ -1,6 +1,10 @@
 import ReactMarkdown from "react-markdown";
 
-export default function ChatResponse({ response }) {
+interface ResponseProps{
+  response: string;
+}
+
+export default function ChatResponse({ response }: ResponseProps) {
   return (
     <div className="space-y-4 text-sm leading-6 text-gray-800">
       <ReactMarkdown
