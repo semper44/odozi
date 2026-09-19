@@ -1,6 +1,5 @@
 import { useSelectionStore } from "@/features/store/selectionStore";
 import { Check, Power, Trash2 } from "lucide-react";
-import type { Dispatch, SetStateAction } from "react";
 
 interface Props {
     filteredRepos: Array<{ id: string | number; [key: string]: any }>;
