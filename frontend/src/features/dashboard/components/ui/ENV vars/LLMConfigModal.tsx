@@ -17,7 +17,10 @@ interface LLMConfigModalProps {
 
 export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
   const get_llm_values = localStorage.getItem("odozi-llm-context")
-  const parsed_llm_values = JSON.parse(get_llm_values || "")
+  let parsed_llm_values;
+  if(get_llm_values !== null && get_llm_values){
+    parsed_llm_values = JSON.parse(get_llm_values || "")
+  }
   const [provider, setProvider] = useState(parsed_llm_values?.state?.activeProvider);
   const [model, setModel] = useState(parsed_llm_values?.state?.activeModel);
   const [apiKey, setApiKey] = useState(parsed_llm_values && "**************");
@@ -82,7 +85,7 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
       <div className="bg-white rounded-2xl w-full max-w-lg p-6 border border-gray-100 shadow-2xl relative z-10 animate-in zoom-in-95 duration-150">
         <h2 className="text-xl font-bold mb-4">Configure LLM Credentials</h2>
-        <h2 className="text-xl font-bold mb-4">biko{parsed_llm_values?.activeProvider}</h2>
+        <h2 className="text-xl font-bold mb-4">{parsed_llm_values?.activeProvider}</h2>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Dropdown 1: Provider selection */}

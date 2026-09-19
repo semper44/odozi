@@ -597,7 +597,7 @@ export default function Dashboard() {
                                     {/* chat panel */}
                                     {(isAiOpen && !isProcessingRequest) && <div className="w-full h-[80%] flex flex-col items-center">
                                         <h1 className="text-black"><span id="gradient-text" className="bg-gradient-to-r from-[#be9ee2] to-white bg-clip-text text-transparent font-bold">Hy Dear</span> This is an AI assited chat</h1>
-                                        <img src={gradientBg } alt="Robot AI" className="w-[35%]" style={{ width : "35%"}} />
+                                        <img src={gradientBg } alt="Robot AI" className="w-[35%]" style={{ width : "35%"}} loading="lazy"/>
                                         <p className="text-black pt-3">How can i help?</p>
                                         {/* input */}
                                         <div className="w-[70%] h-[20%] justify-self-center relative">
@@ -740,7 +740,7 @@ export default function Dashboard() {
         
         </div>
 
-        {data?.installed_github && <GitHubInstallation
+        {!data?.installed_github && <GitHubInstallation
             isOpen={showInstallModal}
             onClose={() => setShowInstallModal(false)}
         />}
