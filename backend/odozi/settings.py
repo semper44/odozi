@@ -97,6 +97,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -278,6 +279,8 @@ CACHES = {
 CELERY_BROKER_URL = CELERY_REDIS_LOCATION
 
 CELERY_RESULT_BACKEND = CELERY_REDIS_LOCATION
+
+WHITENOISE_MANIFEST_STRICT = False
 
 
 
