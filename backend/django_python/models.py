@@ -3,20 +3,6 @@ from account_profile.models import GitHubRepository, UserProfileModel, Workspace
 from django.contrib.auth.models import User
 
 
-class UserInputModel(models.Model):
-    user = models.ForeignKey(UserProfileModel, on_delete=models.CASCADE, related_name="user_input_profile")
-    user_input = models.TextField()
-    llm_response = models.JSONField()
-    created_at = models.DateTimeField(auto_now_add=True)
-
-
-# class UserHistory(models.Model):
-#     user = models.OneToOneField(UserProfileModel, on_delete=models.CASCADE, related_name="user_input_profile")
-#     llm_response = models.JSONField()
-#     created_at = models.DateTimeField(auto_now_add=True)
-
-
-
 
 class RepoEnvKey(models.Model):
     """

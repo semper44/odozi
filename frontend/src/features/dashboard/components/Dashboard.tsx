@@ -168,12 +168,12 @@ export default function Dashboard() {
 
     // Covers a session that expires after the protected route has mounted.
     // This must run before loading/error returns so auth failures can redirect.
-    // useEffect(() => {
-    //     const status = (error as { status?: number } | null)?.status;
-    //     if (status === 401 || status === 403) {
-    //         navigate("/login", { replace: true });
-    //     }
-    // }, [error, navigate]);
+    useEffect(() => {
+        const status = (error as { status?: number } | null)?.status;
+        if (status === 401 || status === 403) {
+            navigate("/login", { replace: true });
+        }
+    }, [error, navigate]);
 
     console.log(data, "selected repos in dashboard")
 
@@ -493,9 +493,9 @@ export default function Dashboard() {
                         </div>
 
                         {/* input box parent */}
-                        <div className="flex justify-between items-center flex-grow">
+                        <div className="w-full flex justify-between items-center flex-grow">
                             {/*  input box */}
-                            <div className="w-[60%] xl:w-[72%] relative">
+                            <div className="w-[78%] relative">
                                 <input 
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -510,7 +510,7 @@ export default function Dashboard() {
                             </div>
 
                             {/* <!-- logout --> */}
-                                <div className="w-full flex justify-end lg:pr-4 cursor-pointer">
+                                <div className="flex-end lg:pr-4 cursor-pointer">
                                     <LogOut />
                                 </div>
                         </div>

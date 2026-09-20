@@ -7,6 +7,7 @@ from account_profile.models import Workspace
 class AuditJob(models.Model):
     """Tracks a pipeline summary and its individual tool-result runs."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    history = models.CharField(max_length=500) #user input history
     report = models.CharField(max_length=50, blank=True, null=True) #llm follow_up report
     execution_time_seconds = models.IntegerField(default=0)
     # One pipeline can dispatch any number of tools/runs.

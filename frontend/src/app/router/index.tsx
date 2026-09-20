@@ -37,7 +37,7 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: <Home />,
-    // loader: requireAuthenticatedSession,
+    loader: requireAuthenticatedSession,
   },
   {
     path: "/login",
