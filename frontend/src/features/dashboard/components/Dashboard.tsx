@@ -168,12 +168,12 @@ export default function Dashboard() {
 
     // Covers a session that expires after the protected route has mounted.
     // This must run before loading/error returns so auth failures can redirect.
-    useEffect(() => {
-        const status = (error as { status?: number } | null)?.status;
-        if (status === 401 || status === 403) {
-            navigate("/login", { replace: true });
-        }
-    }, [error, navigate]);
+    // useEffect(() => {
+    //     const status = (error as { status?: number } | null)?.status;
+    //     if (status === 401 || status === 403) {
+    //         navigate("/login", { replace: true });
+    //     }
+    // }, [error, navigate]);
 
     console.log(data, "selected repos in dashboard")
 
@@ -298,6 +298,11 @@ export default function Dashboard() {
         });
     };
 
+    if(data?.llm_config){
+        const setLLMConfig = useLLMStore((state) => state.setLLMConfig);
+        setLLMConfig(data?.llm_config?.provider, data?.llm_config?.model_name)
+
+    }
     const handleSendRequest = async (textInput: string) => {
         console.log(activeToast !== null,"activetoast", activeToast)
         console.log({"yyyyyyyyyyy":activeProvider, "activeModel":activeModel})

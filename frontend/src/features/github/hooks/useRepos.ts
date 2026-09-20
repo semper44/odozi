@@ -10,7 +10,8 @@ export interface EnrichedRepository extends Repository {
   hasWorkspace: boolean;
 }
 
-export interface ReposQueryData extends Omit<FetchReposResponse, "repositories"> {
+export interface ReposQueryData
+  extends Omit<FetchReposResponse, "repositories"> {
   repositories: EnrichedRepository[];
   uniqueWorkspaces: string[];
 }
@@ -24,20 +25,6 @@ export const useRepos = () => {
     retry: false,
 
     select: (rawResponseData) => {
-      if (!rawResponseData) {
-        return {
-          repositories: [],
-          uniqueWorkspaces: [],
-          username: "",
-          repo_selection: [],
-          my_jwt_access_token: "",
-          installed_github: false,
-          my_jwt_access_refresh: "",
-          user_id: "",
-          expires_at: "",
-        };
-      }
-
       const {
         repositories = [],
         repo_selection = [],

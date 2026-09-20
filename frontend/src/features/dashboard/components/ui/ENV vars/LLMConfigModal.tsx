@@ -46,7 +46,7 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
     try {
       const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
       
-      // 1. Fire HTTP POST request down to your new Class-Based View endpoint URL
+      // Firing HTTP POST request down to my Class-Based View endpoint URL
       const response = await fetch(`${backendUrl}/account/api/ai/config/save/`, {
         method: "POST",
         credentials: "include", 
@@ -66,7 +66,7 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
         throw new Error(result.error || `Server returned status: ${response.status}`);
       }
 
-      // 2. 🌟 SUCCESS: Commit to global Zustand state store for immediate sync
+      // SUCCESS: Committing to global Zustand state store for immediate sync
       setLLMConfig(provider, model);
       
       toast.success(result.message || "LLM Configuration stored successfully!");

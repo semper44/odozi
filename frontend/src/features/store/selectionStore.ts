@@ -13,8 +13,13 @@ interface SelectionStore {
 }
 
 interface LLMState {
+  /** The currently selected LLM provider, e.g. "gemini" or "openai". */
   activeProvider: string;
+
+  /** The currently selected model for the active provider. 'gpt-4o', 'gpt-4o-mini' */
   activeModel: string;
+
+  /** Updates the active LLM provider and model. */
   setLLMConfig: (provider: string, model: string) => void;
 }
 
@@ -73,14 +78,14 @@ interface SocketState {
   statusMessage: string;
   socketError: SocketErrorPayload | null;
    activeToast: string | null;
-  streamingMessage: any | null;  // ✅ Global streaming data
+  streamingMessage: any | null;  // Global streaming data
   
   // Actions to mutate state from my WebSocket manager
   setConnectionStatus: (status: boolean) => void;
   setProcessingStatus: (isProcessing: boolean, message?: string) => void;
   setSocketError: (message: string, isImportant?: boolean) => void;
   triggerToastNotification: (message: string) => void;
-  setStreamingMessage: (data: any) => void;  // ✅ Action to update streaming data
+  setStreamingMessage: (data: any) => void;  // Action to update streaming data
   clearSocketStatus: () => void;
 }
 
