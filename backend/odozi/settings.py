@@ -41,7 +41,7 @@ ALLOWED_HOSTS = [
 # CORS
 CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http://localhost:5173",
                         "http://127.0.0.1:8000",'http://127.0.0.1',"http://127.0.0.1:5173", "https://odozi.vercel.app",
-                        "ws://127.0.0.1:8000", "ws://localhost:8000", "https://fast-results-behave.loca.lt"]
+                        "ws://127.0.0.1:8000", "ws://localhost:8000", "odozi.onrender.com", "https://fast-results-behave.loca.lt"]
 
 CORS_ALLOW_CREDENTIALS = True
 
