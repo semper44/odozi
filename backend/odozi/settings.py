@@ -46,6 +46,11 @@ CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http:
 
 CORS_ALLOW_CREDENTIALS = True
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://odozi.onrender.com",
+    "https://odozi.vercel.app",
+]
+
 # 4. CRITICAL: Allow cookies to travel across different domains/ports
 # Changing this to 'None' breaks the barrier and allows cross-site cookie drops
 SESSION_COOKIE_SAMESITE = "None"
