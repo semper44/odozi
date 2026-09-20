@@ -17,8 +17,8 @@ from django.conf import settings
 from django.db import transaction
 
 from agents.tasks import process_scan_payload_task
-from account_profile.models import GitHubRepository, Workspace, WorkspaceMembership
-from .models import UserProfileModel, RepoEnvKey, WorkflowRunHistory, ChatSession, ChatMessage
+from account_profile.models import GitHubRepository, Workspace, UserLLMConfig
+from .models import UserProfileModel
 from odozi.service import (create_workspace_with_repos, delete_workspace_with_repos, 
                            create_repo_env_keys_service, delete_repo_env_keys_service) 
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
@@ -241,7 +241,7 @@ def dashboard_view(request):
 
 
         try:
-            db_user = User.objects.get(pk=user_id)
+            db_user = User.objects.select_related("llm_config").get(pk=user_id)
         except User.DoesNotExist:
             return JsonResponse({"error": "Database sync user mismatch"}, status=401)
 
@@ -266,7 +266,9 @@ def dashboard_view(request):
             "github_access_token": github_access_token,
             "username": username,
             "user_id": user_id,
-            "expires_at":expires_at
+            "expires_at":expires_at,
+            "provider" : db_user.llm_config.provider,# type: ignore
+            "model_name" : db_user.llm_config.model_name # type: ignore
         }
         print("")
         print("user_details", user_details)

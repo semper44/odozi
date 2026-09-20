@@ -160,3 +160,4 @@ class UserLLMConfig(models.Model):
             return ""
         fernet = Fernet(settings.TOKEN_ENCRYPTION_KEY.encode())
         return fernet.decrypt(self.encrypted_api_key.encode()).decode()
+
