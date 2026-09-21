@@ -14,13 +14,7 @@ export interface RepoSelection {
   [key: string]: unknown;
 }
 
-export interface LLMConfigInterface {
-  /** The LLM provider, e.g. "gemini", "openai", or "anthropic". */
-  provider: string;
 
-  /** The model name used by the selected provider. */
-  model_name: string;
-}
 
 export interface FetchReposResponse {
   repositories: Repository[];
@@ -31,7 +25,8 @@ export interface FetchReposResponse {
   username: string;
   user_id: number | string;
   expires_at: string;
-  llm_config: LLMConfigInterface
+  provider: string;
+  model_name: string;
 }
 
 export const fetchRepos = async (): Promise<FetchReposResponse> => {

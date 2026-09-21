@@ -217,9 +217,17 @@ export default function Dashboard() {
     const toggleSelect = useSelectionStore((state) => state.toggleSelect);
     const clearSelection = useSelectionStore((state) => state.clearSelection);
     
-    const { activeProvider, activeModel } = useLLMStore();
+    const { activeProvider, activeModel, setLLMConfig } = useLLMStore();
     console.log("could",activeProvider, activeModel)
     const activeToast = useSocketStore((state) => state.activeToast);
+
+    
+    useEffect(() => {
+        if (data?.provider && data?.model_name) {
+            setLLMConfig(data.provider, data.model_name);
+        }
+    }, [data?.provider, data?.model_name]);
+
 
     // Keep every hook above these conditional returns. A repository request can
     // change from loading to resolved between renders, but React still needs the
@@ -298,11 +306,8 @@ export default function Dashboard() {
         });
     };
 
-    if(data?.llm_config){
-        const setLLMConfig = useLLMStore((state) => state.setLLMConfig);
-        setLLMConfig(data?.llm_config?.provider, data?.llm_config?.model_name)
 
-    }
+
     const handleSendRequest = async (textInput: string) => {
         console.log(activeToast !== null,"activetoast", activeToast)
         console.log({"yyyyyyyyyyy":activeProvider, "activeModel":activeModel})
@@ -316,7 +321,6 @@ export default function Dashboard() {
                 return
             }  
         if (activeToast !== null){
-                alert(9999999)
                 toast.error(activeToast || "Gateway terminated connection: Reconnecting", {
                 position: "top-right",
                 autoClose: 4000,
