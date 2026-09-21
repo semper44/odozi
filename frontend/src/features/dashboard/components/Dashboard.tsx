@@ -1,5 +1,4 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import { Bot,House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus, LogOut } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
@@ -25,7 +24,6 @@ import { GitHubInstallation } from "../../../pages/registrationorlogin/install_g
 
 export default function Dashboard() {
     const AI_RESPONSE_TIMEOUT_MS = 180_000;
-    const navigate = useNavigate();
     useAutonomicTokenRefresh();
     const [isAiOpen, setIsAiChatOpen] = useState(false);
     const [isPending, setIsPending] = useState(false);
@@ -311,6 +309,7 @@ export default function Dashboard() {
     const handleSendRequest = async (textInput: string) => {
         console.log(activeToast !== null,"activetoast", activeToast)
         console.log({"yyyyyyyyyyy":activeProvider, "activeModel":activeModel})
+        // checking if the user has selected llm models
         if(activeProvider === '' || activeModel === ''){
             toast.error("Please fill in the LLM details first", {
                 position: "top-right",
@@ -319,15 +318,26 @@ export default function Dashboard() {
                 });
 
                 return
-            }  
-        if (activeToast !== null){
-                toast.error(activeToast || "Gateway terminated connection: Reconnecting", {
+            }
+        // Checking if there is any active error in my websocket connection  
+        if (activeToast){
+            toast.error(activeToast || "Gateway terminated connection: Reconnecting", {
                 position: "top-right",
                 autoClose: 4000,
                 theme: "colored"
             });
+            return;
+        }
 
-            return
+        // Prevent dispatching requests if my socket pipeline is currently disconnected
+        const isConnected = useSocketStore.getState().isConnected;
+        if (!isConnected) {
+            toast.error("WebSocket connection is not ready. Reconnecting to gateway...", {
+                position: "top-right",
+                autoClose: 4000,
+                theme: "colored"
+            });
+            return;
         }
 
         // alert(`${prompt}---${!textInput}-${textInput}`)

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from 'zustand/middleware';
+import { toast } from 'react-toastify';
 
 
 interface SelectionStore {
@@ -95,7 +96,7 @@ export const useSocketStore = create<SocketState>((set) => ({
   statusMessage: '',
   socketError: null,
   activeToast: null,
-  streamingMessage: null,  // ✅ Initialize streaming data
+  streamingMessage: null,  //Initialize streaming data
   
 
   setConnectionStatus: (status) => set({ isConnected: status }),
@@ -112,9 +113,20 @@ export const useSocketStore = create<SocketState>((set) => ({
     
   clearSocketStatus: () => set({ isProcessing: false, statusMessage: '', socketError: null }),
 
-  triggerToastNotification: (message) => set({ activeToast: message }),
+  triggerToastNotification: (message: string) => {
+    const trimmed = message?.trim();
+    set({ activeToast: trimmed || null });
+    // Display my toast notification immediately whenever an active message is triggered
+    if (trimmed) {
+      toast.error(trimmed, {
+        position: "top-right",
+        autoClose: 4000,
+        theme: "colored",
+      });
+    }
+  },
   
-  setStreamingMessage: (data) => set({ streamingMessage: data }),  // ✅ Action to set streaming data
+  setStreamingMessage: (data) => set({ streamingMessage: data }),  //Action to set streaming data
   
   clearActiveToast: () => set({ activeToast: null })
 }));

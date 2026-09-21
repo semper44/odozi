@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { socketService } from "@/services/websocket/socket";
 
 
@@ -13,6 +13,8 @@ interface StreamingSocketPayload {
 export const useStreamingSocket = (onMessageReceived?: (data: any) => void) => {
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
   const wsUrl = backendUrl.replace(/^http/, "ws");
+  const onMessageRef = useRef(onMessageReceived);
+  onMessageRef.current = onMessageReceived;
 
   useEffect(() => {
     socketService.configure({
@@ -21,16 +23,14 @@ export const useStreamingSocket = (onMessageReceived?: (data: any) => void) => {
 
     socketService.connect();
 
-    if (onMessageReceived) {
-      socketService.onMessage((data) => {
-        onMessageReceived(data);
-      });
-    }
+    socketService.onMessage((data) => {
+      onMessageRef.current?.(data);
+    });
 
     return () => {};
-  }, [onMessageReceived]);
+  }, [wsUrl]);
 
-  // ✅ ADDED BACK: Expose the message sender helper function to your dashboard layout
+  // Exposing my message sender helper function to my dashboard layout
   return {
       sendMessage: (payload: StreamingSocketPayload) => {
           socketService.send(payload);

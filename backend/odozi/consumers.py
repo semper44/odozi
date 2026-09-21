@@ -6,9 +6,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         self.user = self.scope.get("user")
-        print("kante",self.user.username, "consumer_user", self.user)
+        username = getattr(self.user, "username", "Anonymous")
+        print(f"📡 [WS-CONNECT] User attempting connection: {username}")
 
-        # Check if the user object is anonymous or completely unassigned
+        # Reject unauthenticated or anonymous sessions cleanly with my standard close code
         if not self.user or self.user.is_anonymous:
             await self.close(code=4001)
             return

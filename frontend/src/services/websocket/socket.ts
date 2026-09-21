@@ -12,7 +12,7 @@ class SocketService {
   private isIntentionalDisconnect: boolean = false;
   private reconnectTimeoutId: any = null;
   private currentDelay: number = 1000; 
-  private hasFiredErrorThisSession: boolean = false; // 🌟 NEW STATE: Explicit tracking toggle
+  private hasFiredErrorThisSession: boolean = false; //Explicit tracking toggle
   private maxDelay: number = 16000;    
 
   public configure(config: any) {
@@ -21,7 +21,7 @@ class SocketService {
 
   async connect() {
     if (!this.config) {
-      console.error("🚨 SocketService initialized without a structural configuration.");
+      console.error("SocketService initialized without a structural configuration.");
       return;
     }
 
@@ -34,9 +34,9 @@ class SocketService {
     this.socket = new WebSocket(cleanUrl);
 
     this.socket.onopen = () => {
-      console.log("⚡ Browser WebSocket Channel Established via Secure HttpOnly Cookie");
+      console.log("Browser WebSocket Channel Established via Secure HttpOnly Cookie");
       
-      // 🌟 Clean session flags cleanly upon successful connection entry
+      // Clean session flags cleanly upon successful connection entry
       this.hasFiredErrorThisSession = false;
       this.currentDelay = 1000; 
       
@@ -46,19 +46,23 @@ class SocketService {
     };
 
     this.socket.onclose = (event) => {
+      useSocketStore.getState().setConnectionStatus(false);
+
       if (event.code === 4001) {
-        console.error("🚨 Connection rejected: Login session invalid or unauthenticated.");
+        console.error("Connection rejected: Login session invalid or unauthenticated.");
+        useSocketStore.getState().setSocketError("Login session invalid or unauthenticated. Please login again.", false);
+        useSocketStore.getState().triggerToastNotification("❌ Session expired. Please login again.");
         return;
       }
 
       if (!this.isIntentionalDisconnect) {
         console.warn(`❌ Unscheduled link failure (Code: ${event.code}). Launching reconnect script...`);
         
-        // 🌟 Use our new boolean flag to guarantee the notification fires EXACTLY ONCE per drop
+        // Using my boolean flag to guarantee the notification fires cleanly once per drop
         if (!this.hasFiredErrorThisSession) {
           useSocketStore.getState().setSocketError("Gateway terminated connection: Reconnecting", false);
           useSocketStore.getState().triggerToastNotification("❌ Connection dropped. Reconnecting to gateway...");
-          this.hasFiredErrorThisSession = true; // Lock execution
+          this.hasFiredErrorThisSession = true; // Lock execution for this drop
         }
         
         this.scheduleReconnect();
@@ -68,10 +72,10 @@ class SocketService {
     this.socket.onerror = (error) => {
       console.error("🚨 Core browser connection layer error detected:", error);
       
-      // 🌟 Lock out duplicate noise: Only notify the interface once per connection break session
+      // Notify my UI once per connection issue session
       if (!this.hasFiredErrorThisSession) {
-        useSocketStore.getState().triggerToastNotification("❌ Please login again.");
-        useSocketStore.getState().setSocketError("Please login again.", false);
+        useSocketStore.getState().triggerToastNotification("❌ WebSocket connection failed. Reconnecting...");
+        useSocketStore.getState().setSocketError("WebSocket connection failed. Reconnecting...", false);
         this.hasFiredErrorThisSession = true; 
       }
     };
@@ -94,7 +98,7 @@ class SocketService {
           if (typeof displayMessage === "string") {
             const lowerMessage = displayMessage.toLowerCase();
             
-            // 🌟 Handles Celery auto-retry log output safely
+            //Handles Celery auto-retry log output safely
             if (lowerMessage.includes("unexpected_eof_while_reading") || lowerMessage.includes("eof occurred")) {
               displayMessage = 'Network error, please check your internet connection and try again, Or the LLM provider is taking too long to respond.';
             }
@@ -112,7 +116,7 @@ class SocketService {
           
           console.log(displayMessage, "🎯 Chat message:");
           
-          // 🌟 This triggers your main modal alert securely on the React layout canvas
+          //This triggers my main modal alert securely on the React layout canvas
           useSocketStore.getState().setSocketError(displayMessage, true);
         }
 
@@ -124,7 +128,7 @@ class SocketService {
             try {
               cleanPayload = JSON.parse(packet.raw_output);
             } catch (parseErr) {
-              console.error("🚨 Failed unpacking nested raw_output string payload frame:", parseErr);
+              console.error("Failed unpacking nested raw_output string payload frame:", parseErr);
             }
           }
 
@@ -138,23 +142,23 @@ class SocketService {
         }
 
         else if (packet.type === "follow_up_result") {
-          // 🎯 Turn off your processing loading animations across the React application canvas
+          // Turn off my processing loading animations across the React application canvas
           useSocketStore.getState().setProcessingStatus(false);
           
           let cleanFollowUpPayload = packet;
 
-          // Safely unpack the nested stringified JSON block from your Celery follow-up task
+          // Safely unpack the nested stringified JSON block from my Celery follow-up task
           if(packet.raw_output) {
             if (typeof packet.raw_output === "string") {
               try {
                 cleanFollowUpPayload = JSON.parse(packet.raw_output);
               } catch (parseErr) {
-                console.error("🚨 Failed unpacking nested follow_up raw_output payload:", parseErr);
+                console.error("Failed unpacking nested follow_up raw_output payload:", parseErr);
               }
             } 
           }
 
-          console.log("🎯 Unpacked Follow-up Payload:", cleanFollowUpPayload);
+          console.log("Unpacked Follow-up Payload:", cleanFollowUpPayload);
 
           // Updating my chat messaging streams so the user sees the explanation question
           useSocketStore.getState().setStreamingMessage(cleanFollowUpPayload);
@@ -207,6 +211,7 @@ class SocketService {
 
     useSocketStore.getState().setConnectionStatus(false);
     useSocketStore.getState().clearSocketStatus();
+    this.hasFiredErrorThisSession = false;
   }
 }
 
