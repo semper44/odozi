@@ -11,15 +11,19 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         # Reject unauthenticated or anonymous sessions cleanly with my standard close code
         if not self.user or self.user.is_anonymous:
+            print("rejected")
             await self.close(code=4001)
             return
 
         # Authorized user - assign to their secure private room
         self.room_name = f"user_room_{self.user.id}"
         self.user_group = f"group_{self.room_name}"
+        print("self.room_name", self.room_name)
+        print("self.user_group", self.user_group)
 
         await self.channel_layer.group_add(self.user_group, self.channel_name)
         await self.accept()
+        print("accepted")
 
     async def disconnect(self, code):
         # Safely discard using the exact matching group variable name
@@ -28,6 +32,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 self.user_group,
                 self.channel_name
             )
+        print("disconnect")
 
 
     async def receive(self, text_data=None, bytes_data=None):

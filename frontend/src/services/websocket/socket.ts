@@ -70,7 +70,7 @@ class SocketService {
     };
 
     this.socket.onerror = (error) => {
-      console.error("🚨 Core browser connection layer error detected:", error);
+      console.error("Core browser connection layer error detected:", error);
       
       // Notify my UI once per connection issue session
       if (!this.hasFiredErrorThisSession) {
