@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bot,House, Menu, Search, SendHorizontal, ChevronLeft, ChevronDown, Plus, LogOut } from "lucide-react";
 import { toast } from 'react-toastify';
 import gradientBg  from "../../../assets/gradient.jpg"
@@ -24,6 +25,7 @@ import { GitHubInstallation } from "../../../pages/registrationorlogin/install_g
 
 export default function Dashboard() {
     const AI_RESPONSE_TIMEOUT_MS = 180_000;
+    const navigate = useNavigate();
     useAutonomicTokenRefresh();
     const [isAiOpen, setIsAiChatOpen] = useState(false);
     const [isPending, setIsPending] = useState(false);
