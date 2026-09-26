@@ -28,7 +28,7 @@ urlpatterns = [
     path('general/', include("general.urls")),
     path('dashboard/', include("django_python.urls")),
     path("health/", health_check),
-    path("test/", test_endpoint),
+    path("", test_endpoint),
     # path("receive_input/", ReceiveInput.as_view(), name="receive_input"),
 
 ]
