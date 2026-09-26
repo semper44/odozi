@@ -9,6 +9,46 @@ from channels.middleware import BaseMiddleware
 from channels.db import database_sync_to_async
 from rest_framework_simplejwt.tokens import AccessToken
 from odozi.utils.crypto import decrypt_token
+import time
+
+
+class RequestDebugMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        start = time.monotonic()
+
+        print(
+            f"🚨 REQUEST START: "
+            f"{request.method} {request.get_full_path()}"
+        )
+
+        try:
+            response = self.get_response(request)
+
+            elapsed = time.monotonic() - start
+
+            print(
+                f"✅ REQUEST END: "
+                f"{request.method} {request.get_full_path()} "
+                f"status={response.status_code} "
+                f"time={elapsed:.3f}s"
+            )
+
+            return response
+
+        except BaseException as exc:
+            elapsed = time.monotonic() - start
+
+            print(
+                f"💥 REQUEST EXCEPTION: "
+                f"{request.method} {request.get_full_path()} "
+                f"time={elapsed:.3f}s "
+                f"type={type(exc).__name__}"
+            )
+
+            raise
 
 
 @database_sync_to_async
