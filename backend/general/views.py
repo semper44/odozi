@@ -31,6 +31,10 @@ from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 
 
 
+def health_check(request):
+    return JsonResponse({"status": "ok"})
+
+
 class ReceiveInput(generics.CreateAPIView):
     """Receive a user input payload and queue it for downstream agent processing."""
 

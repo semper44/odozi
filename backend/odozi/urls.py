@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 
 from account_profile.views import github_push_webhook
+from general.views import health_check
 
 
 urlpatterns = [
@@ -26,6 +27,7 @@ urlpatterns = [
     path('account/', include("account_profile.urls")),
     path('general/', include("general.urls")),
     path('dashboard/', include("django_python.urls")),
+    path("health/", health_check)
     # path("receive_input/", ReceiveInput.as_view(), name="receive_input"),
 
 ]
