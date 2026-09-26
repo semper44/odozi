@@ -27,14 +27,14 @@ export const useCreateReposMutation = () => {
 };
 
 
-// 2. Hook wrapper handling high-speed bulk database deletions
+// Hook wrapper handling high-speed bulk database deletions
 // export const useDeleteReposMutation = () => {
 //   const queryClient = useQueryClient();
 
 //   return useMutation({
 //     mutationFn: (repoIds: number[]) => deleteSelectedRepos(repoIds),
 //     onSuccess: () => {
-//       console.log("🔥 Successfully wiped repository selections from database.");
+//       console.log("Successfully wiped repository selections from database.");
 //       // Invalidate the 'repos' cache key to clear out the disconnected UI cards
 //       queryClient.invalidateQueries({ queryKey: ["repos"] });
 //     },

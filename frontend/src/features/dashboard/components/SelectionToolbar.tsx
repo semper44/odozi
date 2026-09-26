@@ -5,18 +5,12 @@ interface Props {
     filteredRepos: Array<{ id: string | number; [key: string]: any }>;
 }
 
-export const SelectionToolbar = ({
-    filteredRepos,
-}: Props) => {
+export const SelectionToolbar = ({filteredRepos,}: Props) => {
     const selected = useSelectionStore((state) => state.selected);
 
-    const clearSelection = useSelectionStore(
-        (state) => state.clearSelection
-    );
+    const clearSelection = useSelectionStore((state) => state.clearSelection);
 
-    const selectAll = useSelectionStore(
-        (state) => state.selectAll
-    );
+    const selectAll = useSelectionStore((state) => state.selectAll);
 
     // Determine whether every currently visible repository is selected.
     const allVisibleSelected =
@@ -25,7 +19,6 @@ export const SelectionToolbar = ({
             selected.has(String(repo.id))
         );
 
-    // This is the actual toolbar state. We don't need a separate isOn prop.
     const displayIsOn = filteredRepos.length > 0 && allVisibleSelected;
 
     return (

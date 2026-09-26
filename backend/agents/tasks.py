@@ -39,7 +39,7 @@ from django.core.cache import cache
 from django.contrib.auth.models import User
 from django.db.utils import OperationalError
 
-from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage
+from django_python.models import RepositoryScan, RepoEnvKey,ChatSession, ChatMessage, ChatHistory
 from django_python.schema import OrchestratorAction
 
 from concurrent.futures import ThreadPoolExecutor
@@ -249,7 +249,7 @@ def find_matching_repos_from_redis(all_repos, user_provided_input, channel_name)
                 "payload": {
                     "type": "orchestration_result",
                     "raw_output": {
-                        "ui_layout_route": "CHAT",
+                        
                         "chat_response": f"Matching Repos for {raw_search}" ,
                     },
                 }
@@ -355,7 +355,7 @@ def workflow_exists(url, headers, branch_name, channel_name=None):
                                 "payload": {
                                     "type": "orchestration_result",
                                     "raw_output": {
-                                        "ui_layout_route": "CHAT",
+                                        
                                         "chat_response": f"⚠️ GitHub is currently experiencing server issues (HTTP {http_status}). Retrying workflow check on '{branch_name}' (attempt {attempt}/{max_retries})...",
                                     },
                                 }
@@ -392,7 +392,7 @@ def workflow_exists(url, headers, branch_name, channel_name=None):
                             "payload": {
                                 "type": "orchestration_result",
                                 "raw_output": {
-                                    "ui_layout_route": "CHAT",
+                                    
                                     "chat_response": f"⚠️ Network issue connecting to GitHub. Retrying workflow check on '{branch_name}' (attempt {attempt}/{max_retries})...",
                                 },
                             }
@@ -438,7 +438,7 @@ def ensure_orchestrator_yaml_is_online(
                 "payload": {
                     "type": "orchestration_result",
                     "raw_output": {
-                        "ui_layout_route": "CHAT",
+                        
                         "chat_response": f"Verifying Repo name and branch on github for {repo_name}" ,
                     },
                 }
@@ -576,7 +576,7 @@ def ensure_orchestrator_yaml_is_online(
                                     "payload": {
                                         "type": "orchestration_result",
                                         "raw_output": {
-                                            "ui_layout_route": "CHAT",
+                                            
                                             "chat_response": (
                                                 f"⚠️ GitHub is currently down or experiencing server issues (HTTP {response.status_code}). "
                                                 f"Retrying workflow synchronization on '{branch}' (attempt {attempt}/{max_put_retries})..."
@@ -618,7 +618,7 @@ def ensure_orchestrator_yaml_is_online(
                                 "payload": {
                                     "type": "orchestration_result",
                                     "raw_output": {
-                                        "ui_layout_route": "CHAT",
+                                        
                                         "chat_response": (
                                             f"⚠️ Network issue connecting to GitHub. "
                                             f"Retrying workflow synchronization on '{branch}' (attempt {attempt}/{max_put_retries})..."
@@ -1064,20 +1064,31 @@ def build_pipeline_follow_up_results(pipeline_id: str):
 
 
 def trigger_pipeline_follow_up_if_ready(pipeline_id: str):
-    """Idempotent Redis-gated follow-up launcher."""
+    """
+    My idempotent Redis-gated follow-up launcher.
+    
+    This function is my barrier gate for GitHub/hybrid runs. I only fire
+    agentic_chat_follow_up when ALL conditions are met:
+    1. My local tasks (if any were dispatched) have marked local_results_ready = True.
+    2. Every expected GitHub tool webhook has reported its result to Redis.
+    
+    Whichever component finishes last (my local tasks chord callback or my final
+    GitHub webhook) satisfies this gate and fires my follow-up via agentic_chat_follow_up.delay().
+    I use a distributed Redis lock (followup_lock) to ensure my follow-up runs exactly once.
+    """
     state = get_pipeline_state(pipeline_id)
     if not state:
-        print(f"⚠️ FOLLOW-UP CHECK: pipeline not found {pipeline_id}")
+        print(f"FOLLOW-UP CHECK: pipeline not found {pipeline_id}")
         return False
     if state.get("follow_up_started"):
-        print(f"♻️ FOLLOW-UP ALREADY STARTED: {pipeline_id}")
+        print(f"FOLLOW-UP ALREADY STARTED: {pipeline_id}")
         return False
     if not pipeline_is_ready(pipeline_id):
         return False
 
     lock_key = f"agentic_pipeline:followup_lock:{pipeline_id}"
     if not cache.add(lock_key, "1", timeout=FOLLOW_UP_LOCK_TTL):
-        print(f"♻️ FOLLOW-UP LOCKED BY ANOTHER WORKER: {pipeline_id}")
+        print(f"FOLLOW-UP LOCKED BY ANOTHER WORKER: {pipeline_id}")
         return False
 
     state = get_pipeline_state(pipeline_id)
@@ -1117,6 +1128,7 @@ def process_agentic_chat_turn_task(
     username,
     token,
     session_id,
+    session_request_id,
     prompt_text,
     repos,
     provider,
@@ -1135,11 +1147,34 @@ def process_agentic_chat_turn_task(
     with transaction.atomic():
         user = User.objects.get(pk=user_id)
 
-        session, _ = ChatSession.objects.get_or_create(
-            pk=session_id,
-            defaults={"user": user}
+        if session_id is None:
+            # I create a session only when the first prompt arrives; Django
+            # assigns its ID when this row is saved.
+            session = ChatSession.objects.create(user=user)
+            # plus a chat hitory
+            ChatHistory.objects.create(user=user, history=prompt_text, session=session)
+        else:
+            # I only continue sessions that belong to the user who sent this
+            # prompt, so a guessed ID cannot attach another user's history.
+            session = ChatSession.objects.get(pk=session_id, user=user)
+
+    if session_id is None:
+        # sending Django's generated ID to the browser before doing the longer
+        # orchestration work, so later prompts can continue this same session.
+        async_to_sync(channel_layer.group_send)(
+            channel_name,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "type": "session_started",
+                    "session_id": session.pk,
+                    "session_request_id": session_request_id,
+                },
+            },
         )
 
+    with transaction.atomic():
+        # I read this session's history after creating or validating the row.
         past_messages = list(
             session.messages.all()
             .order_by('created_at')[:15]
@@ -1484,7 +1519,7 @@ def process_agentic_chat_turn_task(
 
         auditjob_id = None
         if result.intents:
-            auditjob = AuditJob.objects.create(pipeline_id=pipeline_id)
+            auditjob = AuditJob.objects.create(pipeline_id=pipeline_id, history= prompt_text, user= user)
             auditjob_id = str(auditjob.id)
 
         if "run_static_analysis" in result.intents:
@@ -1783,6 +1818,11 @@ def process_agentic_chat_turn_task(
         # ---------------------------------------------------------------------
         # PHASE 5: DETERMINE WHICH ORCHESTRATION PATH WE HAVE
         # ---------------------------------------------------------------------
+        # Here I check if I have any executable tasks generated from the LLM.
+        # If the user is just having a casual chat or asking an informational question
+        # (intents is [] or ['technical_query']), both has_github_pipeline and has_local_tasks
+        # will evaluate to False. This safely drops into CASE C below, meaning I do NOT
+        # call agentic_chat_follow_up at all—I just broadcast my chat_response directly!
         has_github_pipeline = bool(github_pipeline_signatures)
         has_local_tasks = bool(intent_signatures)
 
@@ -1794,8 +1834,11 @@ def process_agentic_chat_turn_task(
         print("=" * 80)
 
         # =====================================================================
-        # CASE A: LOCAL TASKS ONLY
+        # CASE A: LOCAL TASKS ONLY (Workspace / Env keys)
         # =====================================================================
+        # When I only have local operations to perform, I execute them in parallel
+        # via a Celery group and attach agentic_chat_follow_up as my chord callback.
+        # Celery will automatically invoke my follow-up as soon as all local tasks finish.
         if has_local_tasks and not has_github_pipeline:
             callback_signature = signature(
                 "agents.tasks.agentic_chat_follow_up",
@@ -1814,8 +1857,12 @@ def process_agentic_chat_turn_task(
             print("✅ LOCAL-ONLY PIPELINE DISPATCHED WITH CELERY CHORD.")
 
         # =====================================================================
-        # CASE B: GITHUB PIPELINE EXISTS
+        # CASE B: GITHUB PIPELINE EXISTS (Static Analysis)
         # =====================================================================
+        # When GitHub CI/CD is involved, I initialize my Redis barrier state machine.
+        # Individual tasks do NOT call agentic_chat_follow_up directly. Instead,
+        # I wait for all expected GitHub webhooks and local task results to land in Redis.
+        # Whichever finishes last will trigger my follow-up via trigger_pipeline_follow_up_if_ready.
         elif has_github_pipeline:
             create_pipeline_state(
                 pipeline_id=pipeline_id,
@@ -1845,6 +1892,7 @@ def process_agentic_chat_turn_task(
             print(f"   LOCAL TASKS    : {has_local_tasks}")
             print("=" * 80)
 
+            # If I have local tasks running alongside GitHub, I chord them into collect_local_pipeline_results
             if intent_signatures:
                 print("🚀 Dispatching local tasks asynchronously...")
                 local_canvas = (
@@ -1859,6 +1907,7 @@ def process_agentic_chat_turn_task(
             print("🚀 Dispatching GitHub pipeline tasks asynchronously...")
             group(github_pipeline_signatures).apply_async()
 
+            # Safety net: If GitHub takes too long or drops webhooks, fire my partial follow-up after 14 mins
             pipeline_timeout_check.apply_async(
                 args=[pipeline_id],
                 countdown=PIPELINE_TIMEOUT_SECONDS,
@@ -1870,36 +1919,29 @@ def process_agentic_chat_turn_task(
             )
 
         # =====================================================================
-        # CASE C: NO EXECUTION TASKS
+        # CASE C: NO EXECUTION TASKS (Casual Chat / Clarifications / Technical Queries)
         # =====================================================================
+        # If the user is just chatting or asking a question without ordering an execution,
+        # I do NOT schedule or call agentic_chat_follow_up. I simply let this task broadcast
+        # my LLM's chat_response directly down the WebSocket channel below.
         else:
-            print("ℹ️ No executable intents were generated.")
+            print("ℹ️ No executable intents were generated. Skipping follow-up task.")
 
 
         # ---------------------------------------------------------------------
         # FRONTEND STATUS MESSAGE
         # ---------------------------------------------------------------------
 
-        print(
-            "coat",
-            "swaaaaa"
-        )
-
-
-        async_to_sync(
-            channel_layer.group_send
-        )(
+        async_to_sync(channel_layer.group_send)(
             channel_name,
             {
                 "type": "chat_message",
-
                 "payload": {
-
-                    "type": "orchestration_result",
-
+                    "type": "chat",
+                    "keep_loading": False,
                     "raw_output": {
                         "ui_layout_route": ui_layout_route,
-                        "chat_response": chat_response
+                        "chat_response": chat_response,
                     },
 
                     "usage": {
@@ -1953,8 +1995,8 @@ def process_agentic_chat_turn_task(
                 "type": "chat_message",
                 "payload": {
                     "type": "orchestration_result",
+                    "keep_loading": False,
                     "raw_output": {
-                        "ui_layout_route": "CHAT",
                         "chat_response": user_error_msg,
                     },
                 }
@@ -1977,7 +2019,13 @@ def process_agentic_chat_turn_task(
 
 @shared_task
 def collect_local_pipeline_results(local_results, pipeline_id):
-    """Chord callback that records local results and checks the same Redis gate."""
+    """
+    My Celery chord callback for local tasks in a hybrid pipeline.
+    
+    When my local tasks (workspaces, env keys) complete, Celery passes their outputs
+    here. I save them into my Redis pipeline state, mark local_results_ready = True,
+    and call trigger_pipeline_follow_up_if_ready to check if my GitHub tasks also finished.
+    """
     print(f"\n📦 COLLECTING LOCAL RESULTS\npipeline={pipeline_id}")
     add_local_results_to_pipeline(
         pipeline_id=pipeline_id,
@@ -1992,7 +2040,13 @@ def collect_local_pipeline_results(local_results, pipeline_id):
 
 @shared_task
 def pipeline_timeout_check(pipeline_id):
-    """Enqueues one partial follow-up if the GitHub-backed pipeline times out."""
+    """
+    My safety watchdog task.
+    
+    If GitHub Actions hangs, runners crash, or webhooks get lost, this task wakes up
+    after 14 minutes. If my follow-up has not started, I gather all partial results
+    received so far and force-trigger agentic_chat_follow_up so my user gets a report.
+    """
     state = get_pipeline_state(pipeline_id)
     if not state:
         print(f"⏱️ TIMEOUT CHECK: state already expired {pipeline_id}")
@@ -2511,7 +2565,7 @@ def run_agentic_pipeline(
                 "payload": {
                     "type": "orchestration_result",
                     "raw_output": {
-                        "ui_layout_route": "CHAT",
+                        
                         "chat_response": (
                             f"Started processing on github "
                             f"(pipeline {pipeline_id})"
@@ -2996,7 +3050,7 @@ if __name__ == "__main__":
                 "payload": {
                     "type": "orchestration_result",
                     "raw_output": {
-                        "ui_layout_route": "CHAT",
+                        
                         "chat_response": (
                             f"Dispatching workflow to GitHub for repository '{matched_repo_name}' "
                             f"on branch '{target_branch}'..."
@@ -3031,7 +3085,7 @@ if __name__ == "__main__":
                                 "payload": {
                                     "type": "orchestration_result",
                                     "raw_output": {
-                                        "ui_layout_route": "CHAT",
+                                        
                                         "chat_response": (
                                             f"⚠️ GitHub is currently down or experiencing server issues (HTTP {feedback_r.status_code}). "
                                             f"Retrying workflow dispatch for '{matched_repo_name}' (attempt {attempt}/{max_dispatch_retries})..."
@@ -3056,7 +3110,7 @@ if __name__ == "__main__":
                             "payload": {
                                 "type": "orchestration_result",
                                 "raw_output": {
-                                    "ui_layout_route": "CHAT",
+                                    
                                     "chat_response": (
                                         f"⚠️ Network issue connecting to GitHub. "
                                         f"Retrying workflow dispatch for '{matched_repo_name}' (attempt {attempt}/{max_dispatch_retries})..."
@@ -3078,7 +3132,7 @@ if __name__ == "__main__":
                             "payload": {
                                 "type": "orchestration_result",
                                 "raw_output": {
-                                    "ui_layout_route": "CHAT",
+                                    
                                     "chat_response": f"❌ {err_msg}",
                                 },
                             }
@@ -3132,7 +3186,7 @@ if __name__ == "__main__":
                     "payload": {
                         "type": "orchestration_result",
                         "raw_output": {
-                            "ui_layout_route": "CHAT",
+                            
                             "chat_response": (
                                 "Workflow dispatched to GitHub successfully. "
                                 "Waiting for analysis results..."
@@ -3191,7 +3245,7 @@ if __name__ == "__main__":
                     "payload": {
                         "type": "orchestration_result",
                         "raw_output": {
-                            "ui_layout_route": "CHAT",
+                            
                             "chat_response": f"❌ {err_msg}",
                         },
                     }
@@ -3260,9 +3314,19 @@ def agentic_chat_follow_up(
     auditjob_id: Optional[str] = None,
     pipeline_id: Optional[str] = None,
 ):
-    # -------------------------------------------------------------------------
+    """
+    My final synthesis and reporting core.
+    
+    IMPORTANT: This task is ONLY called when there was an executable intent:
+    - In local-only execution: Celery's chord callback triggers me when all local tasks finish.
+    - In GitHub/hybrid execution: My Redis barrier gate (trigger_pipeline_follow_up_if_ready)
+      triggers me when all local tasks and expected GitHub webhooks arrive.
+    - On safety timeout: My watchdog task (pipeline_timeout_check) triggers me after 14 mins.
+    
+    If the user was just having a casual chat or asking an informational question
+    (intents=[] or ['technical_query']), I am NEVER called.
+    """
     # LIGHTWEIGHT SYSTEM INSTRUCTION
-    # -------------------------------------------------------------------------
     short_followup_instruction = """
     You are the Error Resolution Core for Project Odozi, an autonomous agentic CI/CD gateway.
 
@@ -3416,6 +3480,7 @@ def agentic_chat_follow_up(
                 "type": "chat_message",
                 "payload": {
                     "type": "follow_up_result",
+                    "keep_loading": False,
                     "raw_output": {
                         "ui_layout_route": result.ui_layout_route,
                         "chat_response": final_chat_response,
@@ -3483,7 +3548,7 @@ def agentic_chat_follow_up(
                         "payload": {
                             "type": "follow_up_result",
                             "raw_output": {
-                                "ui_layout_route": "CHAT",
+                                
                                 "chat_response": chat_response,
                                 "task_results": task_results,
                                 "pipeline_id": pipeline_id,
@@ -3608,7 +3673,7 @@ def handle_backend_error_followup( self,
             "type": "chat_message",
             "payload": {
                 "type": "orchestration_result",
-                "raw_output": {"ui_layout_route": "CHAT", "chat_response": result.chat_response}
+                "raw_output": { "chat_response": result.chat_response}
             }
         }
     )

@@ -6,6 +6,15 @@ export interface Repository {
   default_branch: string;
 }
 
+
+
+interface ChatHistory {
+  session: number,
+  history: string;   // For the text summary
+}
+
+
+
 // Existing repo_selection data can contain additional fields,
 // so we don't need to guess every backend field yet.
 export interface RepoSelection {
@@ -27,6 +36,7 @@ export interface FetchReposResponse {
   expires_at: string;
   provider: string;
   model_name: string;
+  history: ChatHistory[];
 }
 
 export const fetchRepos = async (): Promise<FetchReposResponse> => {

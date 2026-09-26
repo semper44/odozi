@@ -1,18 +1,14 @@
-# agents/views.py
-# dashboard/views.py
 import io
 import json
-import boto3
 import requests
 import uuid
-from datetime import datetime
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.parsers import JSONParser, MultiPartParser, BaseParser
-from general.models import AuditJob
+from rest_framework.permissions import IsAuthenticated
 
-from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
+from django.http import JsonResponse
 from django.conf import settings
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
@@ -26,6 +22,12 @@ from agents.tasks import (
     trigger_pipeline_follow_up_if_ready,
     get_pipeline_state
 )
+from .models import AuditJob
+from django_python.models import ChatSession, ChatMessage
+from django_python.serializer import ChatMessageSerializer
+
+
+from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 
 
 
@@ -351,5 +353,24 @@ class CloudinaryHistoryReportView(APIView):
             "reports": reports,
         }, status=status.HTTP_200_OK)
 
+
+
+class ChatHistoryReportView(APIView):
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request,session):
+        print(request.user, "kenyaaaaaaa", session)
+        chat_session  = ChatSession.objects.prefetch_related("messages").get(pk=session, user=request.user)
+        serializer = ChatMessageSerializer(
+            chat_session.messages.all(),
+            many=True,
+        )
+        print(serializer.data)
+
+        return Response({
+            "id": chat_session.id,
+            "messages": serializer.data,
+        })
 
 

@@ -157,6 +157,18 @@ class ChatSession(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
 
+
+class ChatHistory(models.Model):
+    """Tracks history of chats."""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="user_history",
+    )
+    session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="user_history")
+    history = models.CharField(max_length=500) #user input history
+    
+
 class ChatMessage(models.Model):
     ROLE_CHOICES = [('user', 'User'), ('ai', 'AI')]
     

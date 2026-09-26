@@ -25,6 +25,30 @@ interface LLMState {
 }
 
 
+interface SocketState {
+  isConnected: boolean;
+  isProcessing: boolean;
+  statusMessage: string;
+  socketError: SocketErrorPayload | null;
+   activeToast: string | null;
+  streamingMessage: any | null;  // Global streaming data
+  
+  // Actions to mutate state from my WebSocket manager
+  setConnectionStatus: (status: boolean) => void;
+  setProcessingStatus: (isProcessing: boolean, message?: string) => void;
+  setSocketError: (message: string, isImportant?: boolean) => void;
+  triggerToastNotification: (message: string) => void;
+  setStreamingMessage: (data: any) => void;  // Action to update streaming data
+  clearSocketStatus: () => void;
+}
+
+interface SocketErrorPayload {
+  message: string;
+  isImportant: boolean;
+}
+
+
+
 export const useSelectionStore =
   create<SelectionStore>((set) => ({
     selected: new Set(),
@@ -33,7 +57,7 @@ export const useSelectionStore =
       set((state) => {
         const next = new Set(state.selected);
 
-        if (next.has(id)) {
+        if(next.has(id)) {
           next.delete(id);
         } else {
           next.add(id);
@@ -68,27 +92,9 @@ export const useLLMStore = create<LLMState>()(
   )
 );
 
-interface SocketErrorPayload {
-  message: string;
-  isImportant: boolean;
-}
 
-interface SocketState {
-  isConnected: boolean;
-  isProcessing: boolean;
-  statusMessage: string;
-  socketError: SocketErrorPayload | null;
-   activeToast: string | null;
-  streamingMessage: any | null;  // Global streaming data
-  
-  // Actions to mutate state from my WebSocket manager
-  setConnectionStatus: (status: boolean) => void;
-  setProcessingStatus: (isProcessing: boolean, message?: string) => void;
-  setSocketError: (message: string, isImportant?: boolean) => void;
-  triggerToastNotification: (message: string) => void;
-  setStreamingMessage: (data: any) => void;  // Action to update streaming data
-  clearSocketStatus: () => void;
-}
+
+
 
 export const useSocketStore = create<SocketState>((set) => ({
   isConnected: false,
@@ -117,7 +123,7 @@ export const useSocketStore = create<SocketState>((set) => ({
     const trimmed = message?.trim();
     set({ activeToast: trimmed || null });
     // Display my toast notification immediately whenever an active message is triggered
-    if (trimmed) {
+    if(trimmed){
       toast.error(trimmed, {
         position: "top-right",
         autoClose: 4000,

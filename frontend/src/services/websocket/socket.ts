@@ -4,7 +4,6 @@ import { useSocketStore } from "@/features/store/selectionStore"
 // interface SocketConfig {
 //   baseUrl: string;
 // }
-
 class SocketService {
   private socket: WebSocket | null = null;
   private messageCallback: ((data: any) => void) | null = null;
@@ -15,9 +14,13 @@ class SocketService {
   private hasFiredErrorThisSession: boolean = false; //Explicit tracking toggle
   private maxDelay: number = 16000;    
 
+  
+
   public configure(config: any) {
     this.config = config;
   }
+
+  
 
   async connect() {
     if (!this.config) {
@@ -83,13 +86,12 @@ class SocketService {
     this.socket.onmessage = (event) => {
       try {
         const packet = JSON.parse(event.data);
-        console.log("📥 Raw Network Packet Received:", packet);
+        console.log("Raw Network Packet Received:", packet);
+         console.log("follow_up_result",packet.type === "follow_up_result" )
+        console.log("keep_loading",packet.keep_loading === false )
+        console.log(typeof(packet.keep_loading))
 
-        if (packet.type === "status") {
-          useSocketStore.getState().setProcessingStatus(true, packet.message || "Processing...");
-        } 
-
-        else if (packet.type === "error") {
+        if (packet.type === "error") {
           useSocketStore.getState().setProcessingStatus(false); 
           console.log("eche", packet);
 
@@ -141,10 +143,18 @@ class SocketService {
           }
         }
 
-        else if (packet.type === "follow_up_result") {
+        else if (packet.type === "session_started") {
+          // I forward the generated session ID so Dashboard can finish starting the chat.
+          if (this.messageCallback) {
+            this.messageCallback(packet);
+          }
+        }
+
+        else if (packet.type === "follow_up_result" || packet.keep_loading === false) {
           // Turn off my processing loading animations across the React application canvas
           useSocketStore.getState().setProcessingStatus(false);
-          
+          let pResult = useSocketStore.getState().isProcessing;
+          console.log("isProcessing", pResult, "pResult")
           let cleanFollowUpPayload = packet;
 
           // Safely unpack the nested stringified JSON block from my Celery follow-up task
@@ -169,7 +179,7 @@ class SocketService {
         }
 
       } catch (err) {
-        console.error("⚠️ Failed parsing incoming WebSocket JSON data frame payload:", err);
+        console.error("Failed parsing incoming WebSocket JSON data frame payload:", err);
       }
     };
   }

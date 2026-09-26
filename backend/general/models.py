@@ -1,11 +1,18 @@
 import uuid
 from django.db import models
 from account_profile.models import Workspace
+from django.contrib.auth.models import User
+
 
 
     
 class AuditJob(models.Model):
     """Tracks a pipeline summary and its individual tool-result runs."""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="audit_jobs",
+    )
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     history = models.CharField(max_length=500) #user input history
     report = models.CharField(max_length=50, blank=True, null=True) #llm follow_up report
@@ -30,3 +37,5 @@ class AuditJob(models.Model):
 
     def __str__(self):
         return f"AuditJob {self.id}- {self.pipeline_id} {self.tool_name or 'summary'}"
+
+

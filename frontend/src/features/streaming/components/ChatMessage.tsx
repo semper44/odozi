@@ -45,7 +45,7 @@ export const AIChat: React.FC<AIChatProps> = ({ messages, onSendMessage, isAiLoa
 
   return (
     <div id="ai-chat-body-parent" className="flex flex-col w-full" style={{ height: "100vh" }}>
-      <div ref={chatBodyRef} className="h-[55%] mt-4 md:px-4 w-full flex flex-col gap-2 overflow-y-auto">
+      <div ref={chatBodyRef} className="h-[55%] mt-4 pb-[1rem] md:px-4 w-full flex flex-col gap-2 overflow-y-auto overflow-x-hidden">
         
         {/* Render both user messages and incoming packets smoothly */}
         {messages?.map((msg) => (

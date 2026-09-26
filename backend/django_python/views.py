@@ -1,8 +1,5 @@
-import os
-import boto3
 import json
 import uuid
-import secrets
 import requests
 from itertools import product
 from typing import cast, List
@@ -14,7 +11,6 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.cache import cache
 from django.contrib.auth.models import User
 from django.conf import settings
-from django.db import transaction
 
 from agents.tasks import process_scan_payload_task
 from account_profile.models import GitHubRepository, Workspace, UserLLMConfig
@@ -23,11 +19,9 @@ from odozi.service import (create_workspace_with_repos, delete_workspace_with_re
                            create_repo_env_keys_service, delete_repo_env_keys_service) 
 from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
-from odozi.utils.security import verify_signature
 from odozi.utils.github_auth_decorator import require_github_auth
 from odozi.utils.auth import get_client_ip, get_browser_family, invalidate_user_session
-from .serializer import GitHubRepositorySerializer, UserProfileSerializer
-from .schema import OrchestratorAction
+
 
 
 from rest_framework import generics, status
@@ -184,7 +178,13 @@ def dashboard_view(request):
     installed_github = UserProfileModel.objects.get(user=user).installed_github
 
     if cached_repos:
+        try:
+            db_user = User.objects.select_related("llm_config",).prefetch_related("user_history",).get(pk=user_id)
+        except User.DoesNotExist:
+            return JsonResponse({"error": "Database sync user mismatch"}, status=401)
+        
         print("")
+        print(list(db_user.user_history.all().values("history", "session")))
         print(cached_repos)
         print(f"⚡ [CACHE HIT] Serving repositories for '{username}' instantly from Redis RAM.")
         # Handle string parsing dependencies if using raw serialization
@@ -220,13 +220,13 @@ def dashboard_view(request):
         # for easy access in tasks.py
         repo_names = []
         for r in repositories_data:
-            # 1. Defensive type check
+            # Defensive type check
             if not isinstance(r, dict):
                 continue
 
             name = r.get("name")
         
-            # 2. Append to full structured list
+            # Append to full structured list
             cleaned_repos.append({
                 "id": r.get("id"),
                 "name": name,
@@ -234,14 +234,14 @@ def dashboard_view(request):
                 "default_branch": r.get('default_branch')  
             })
             
-            # 3. Simultaneously append to the flat name list
+            # Simultaneously append to the flat name list
             if name:
                 repo_names.append(name)
 
 
 
         try:
-            db_user = User.objects.select_related("llm_config").get(pk=user_id)
+            db_user = User.objects.select_related("llm_config",).prefetch_related("user_history",).get(pk=user_id)
         except User.DoesNotExist:
             return JsonResponse({"error": "Database sync user mismatch"}, status=401)
 
@@ -256,11 +256,14 @@ def dashboard_view(request):
             'repo_id', 'workspace__name'
         ))
 
+        print("VDM", db_user.user_history.all())
+
         user_details = {
             "repositories": cleaned_repos,
             "repo_selection":serialized_repo_selection,
             "repo_names":repo_names,
             "installed_github": installed_github,
+            "history":list(db_user.user_history.all().values("history", "session")),
             # "my_jwt_access_token": token_string,
             # "my_jwt_access_refresh": token_refresh_string,
             "github_access_token": github_access_token,

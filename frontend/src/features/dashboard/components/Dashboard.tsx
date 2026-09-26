@@ -19,8 +19,7 @@ import { useAutonomicTokenRefresh } from "@/services/auth/useAutonomicTokenRefre
 import { EnvVarModal } from "./ui/ENV vars/EnvVarModal"; 
 import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
 import { GitHubInstallation } from "../../../pages/registrationorlogin/install_github";
-
-
+import {fetchChatSession} from "@/features/streaming/api/chatApi"
 
 
 export default function Dashboard() {
@@ -39,11 +38,13 @@ export default function Dashboard() {
     const [selectedWorkspace, setSelectedWorkspace] = useState(""); // "" means "All Workspaces"
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [showInstallModal, setShowInstallModal] = useState(true);
-
+    const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+    const activeSessionIdRef = useRef<number | null>(null);
+    const isCreatingSessionRef = useRef(false);
+    const sessionRequestIdRef = useRef<string | null>(null);
     const [activeLeftTab, setActiveLeftTab] = useState("Home");
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const historyItems = ["Repository setup", "Environment variables", "Deploy checklist"];
     const leftTabs = [
         { id: "Home", label: "Home", icon: <House className="cursor-pointer" /> },
         { id: "Chat", label: "Chat", icon: <Bot className="cursor-pointer" /> },
@@ -56,7 +57,7 @@ export default function Dashboard() {
     const socketError = useSocketStore((state) => state.socketError);
     const isProcessing = useSocketStore((state) => state.isProcessing);
     // const statusMessage = useSocketStore((state) => state.statusMessage);
-   console.log(messages, "pillar")
+   console.log(messages, "pillar", isProcessing)
 
     useEffect(() => {
         console.log(isProcessingRequest,"Dashboard mounted, initializing socket connection...", isAiOpen,"rihanna", isProcessingRequest);
@@ -123,6 +124,15 @@ export default function Dashboard() {
     const { sendMessage } = useStreamingSocket((packet) => {
         console.log(socketError, "🎯 Caught incoming orchestration block payload:", packet);
 
+        if (packet?.type === "session_started" && typeof packet.session_id === "number" && packet.session_request_id === sessionRequestIdRef.current) {
+            // I keep the generated ID in state and a ref so the next prompt
+            // can use it immediately, even before React finishes rendering.
+            activeSessionIdRef.current = packet.session_id;
+            setActiveSessionId(packet.session_id);
+            isCreatingSessionRef.current = false;
+            sessionRequestIdRef.current = null;
+        }
+
         // Intermediate orchestration updates are not completion. Keep the
         // watchdog alive until the final Celery follow-up result arrives.
         if (packet?.type === "follow_up_result") {
@@ -147,8 +157,7 @@ export default function Dashboard() {
     useEffect(() => {
         if (socketError) {
             clearAiResponseTimeout();
-            // setIsProcessingRequest(false);
-            console.log("🚨 Dashboard caught background worker crash or API block:", socketError);
+            console.log("Dashboard caught background worker crash or API block:", socketError);
             
             // Append a system or error message to your chat interface display window
             if (socketError.isImportant) {
@@ -203,11 +212,14 @@ export default function Dashboard() {
             return false;
         }
 
-        // Filter Step B: Match Search Input Query strings
+        // Filter Step B: Match repository and workspace names. Searching the
+        // short repo name is useful when the user does not type `owner/repo`.
         const cleanQuery = searchQuery.toLowerCase().trim();
         if (!cleanQuery) return true;
         
-        return repo.full_name?.toLowerCase().includes(cleanQuery);
+        return [repo.name, repo.full_name, repo.workspaceName]
+            .filter((value): value is string => typeof value === "string")
+            .some((value) => value.toLowerCase().includes(cleanQuery));
         });
     }, [data, searchQuery, selectedWorkspace]);
 
@@ -309,6 +321,10 @@ export default function Dashboard() {
 
 
     const handleSendRequest = async (textInput: string) => {
+        if (isCreatingSessionRef.current) {
+            toast.info("Your new chat is still starting. Please wait a moment.");
+            return;
+        }
         console.log(activeToast !== null,"activetoast", activeToast)
         console.log({"yyyyyyyyyyy":activeProvider, "activeModel":activeModel})
         // checking if the user has selected llm models
@@ -342,16 +358,11 @@ export default function Dashboard() {
             return;
         }
 
-        // alert(`${prompt}---${!textInput}-${textInput}`)
-
         const cleanedInput = textInput.trim();
         if(!cleanedInput){
             alert("none")
             return
         }
-
-        // alert(textInput) 
-
         useSocketStore.getState().setProcessingStatus(true, "AI is spinning up orchestration jobs...");
 
 
@@ -368,11 +379,25 @@ export default function Dashboard() {
         };
         setMessages((prev) => [...prev, newUserMessage]);
 
+        if (activeSessionIdRef.current === null) {
+            // I mark the first prompt as creating a session; the task will
+            // return its generated ID over this same WebSocket connection.
+            isCreatingSessionRef.current = true;
+            // I tag this attempt so a late acknowledgement cannot reactivate a chat I cleared.
+            sessionRequestIdRef.current = crypto.randomUUID();
+        }
+
         sendMessage({
             type: "start_processing",
             prompt: cleanedInput,
             provider: activeProvider,
             model_name: activeModel,
+            ...(activeSessionIdRef.current !== null && {
+                session_id: activeSessionIdRef.current,
+            }),
+            ...(activeSessionIdRef.current === null && sessionRequestIdRef.current !== null && {
+                session_request_id: sessionRequestIdRef.current,
+            }),
         });
 
         clearAiResponseTimeout();
@@ -413,17 +438,35 @@ export default function Dashboard() {
     // console.log(error, "h1osana",data)
 
 
-    function ClickBackIconTasks(){
-        setActiveLeftTab("Home");
+    function clearActiveChat(){
+        // I clear the active ID and visible messages so the next prompt starts a new session.
+        activeSessionIdRef.current = null;
+        setActiveSessionId(null);
+        isCreatingSessionRef.current = false;
+        sessionRequestIdRef.current = null;
+        setMessages([]);
+        setPrompt("");
+        setIsProcessingRequest(false);
+        setIsPending(false);
+        useSocketStore.getState().setProcessingStatus(false);
+        clearAiResponseTimeout();
+    }
 
-        if (isProcessingRequest) {
-            setIsProcessingRequest(false);
-            setIsAiChatOpen(true);
+    function ClickBackIconTasks(clearSession = true){
+        if (clearSession) {
+            // I make the back chevron end this chat before returning Home.
+            clearActiveChat();
         }
-        if (isAiOpen) {
-            setIsAiChatOpen(false);
-            setIsProcessingRequest(false);
-        }
+        setActiveLeftTab("Home");
+        setIsAiChatOpen(false);
+        setIsProcessingRequest(false)
+    }
+
+    function startNewChat(){
+        // I start a blank chat in place while keeping the user in the Chat view.
+        clearActiveChat();
+        setActiveLeftTab("Chat");
+        setIsAiChatOpen(true);
     }
 
     const handleLeftTabClick = (tabId: string) => {
@@ -431,11 +474,18 @@ export default function Dashboard() {
         setIsMobileMenuOpen(false);
 
         if (tabId === "Home") {
-            ClickBackIconTasks();
+            // I preserve the active session when the Home tab is selected.
+            ClickBackIconTasks(false);
         }
 
         if (tabId === "Chat") {
-            setIsAiChatOpen((isOpen) => !isOpen);
+            console.log("activeSessionId", activeSessionId)
+            setIsAiChatOpen(true);
+            if (activeSessionId=== null){
+                setIsProcessingRequest(false);
+            }else{
+                setIsProcessingRequest(true);
+            }
         }
 
         if (tabId === "History") {
@@ -443,7 +493,36 @@ export default function Dashboard() {
         }
     };
 
-    
+    const openHistory = async (sessionId: number) => {
+        try {
+            setActiveLeftTab("History")
+            const session = await fetchChatSession(sessionId);
+
+            console.log("chinaza", session)
+            setMessages(
+            session.messages.map((message: {
+                id: number;
+                role: "user" | "ai";
+                content: string;
+            }) => ({
+                id: String(message.id),
+                sender: message.role,
+                text: message.content,
+            })),
+            );
+
+            activeSessionIdRef.current = session.id;
+            setActiveSessionId(session.id);
+            isCreatingSessionRef.current = false;
+            sessionRequestIdRef.current = null;
+            setIsAiChatOpen(true);
+            setIsProcessingRequest(true)
+
+        } catch (error) {
+            console.error("Could not load chat history:", error);
+            toast.error("Could not load that chat.");
+        }
+    };
 
     return (
         <>
@@ -454,7 +533,7 @@ export default function Dashboard() {
 
                 <div className="tabs flex flex-col h-full">
 
-                    {/* <!-- second tab  --> */}
+                    {/* second tab */}
                     <div className="top-tabs w-full sm:grid hidden gap-2">
                         {leftTabs.map((tab) => {
                             const isActive = activeLeftTab === tab.id;
@@ -467,14 +546,15 @@ export default function Dashboard() {
                                         <p>{tab.label}</p>
                                     </div>
                                     {tab.id === "History" && isHistoryOpen && (
-                                        <div className="mt-3 ml-3 space-y-2 border-l border-purple-200 pl-3">
-                                            {historyItems.map((item) => (
+                                        <div className="mt-3 ml-3 space-y-2 border-l cursor-pointer border-purple-200 pl-3">
+                                            {data?.history.map((item) => (
                                                 <button
-                                                    key={item}
+                                                    onClick ={()=> openHistory(item.session)}
+                                                    key={item.session}
                                                     type="button"
                                                     className="block w-full text-left text-xs text-gray-600 hover:text-purple-700"
                                                 >
-                                                    {item}
+                                                    {item.history}
                                                 </button>
                                             ))}
                                         </div>
@@ -556,14 +636,14 @@ export default function Dashboard() {
                                     </button>
                                     {tab.id === "History" && isHistoryOpen && (
                                         <div className="mt-3 ml-4 space-y-2 border-l border-purple-200 pl-3">
-                                            {historyItems.map((item) => (
+                                            {data?.history.map((item) => (
                                                 <button
-                                                    key={item}
+                                                    key={item.session}
                                                     type="button"
                                                     onClick={() => setIsMobileMenuOpen(false)}
                                                     className="block w-full text-left text-xs text-gray-600 hover:text-purple-700"
                                                 >
-                                                    {item}
+                                                    {item.history}
                                                 </button>
                                             ))}
                                         </div>
@@ -585,7 +665,7 @@ export default function Dashboard() {
 
                         {/* repo List */}
                             <div className="space-y-4">
-                                {data?.repositories.map((repo) => {
+                                {filteredRepositories.map((repo) => {
                                 // It is "ticked" if all are shown (no single match) OR if it is the single match
                                 // const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
 
@@ -611,7 +691,24 @@ export default function Dashboard() {
                         <div className="AI-menu w-full h-full flex flex-col items-center justify-center gap-4">
                             <div className="w-full md:w-[75%] px-3 py-4 h-full">
                                 <div className="flex items-center justify-between">
-                                    <ChevronLeft onClick={() => ClickBackIconTasks()} className="cursor-pointer"/>
+                                    <button
+                                        type="button"
+                                        onClick={() => ClickBackIconTasks()}
+                                        aria-label="Clear chat and return home"
+                                        title="Clear chat and return home"
+                                        className="cursor-pointer"
+                                    >
+                                        <ChevronLeft />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={startNewChat}
+                                        aria-label="Start a new chat"
+                                        title="New chat"
+                                        className="cursor-pointer"
+                                    >
+                                        <Plus />
+                                    </button>
                                 </div>
                                 {/* ai-chat-placeholder */}
                                 <div id="ai-chat-placeholder" className=" h-[100%] w-full justify-center items-center">
@@ -626,7 +723,7 @@ export default function Dashboard() {
                                                 type="text"
                                                 value={prompt}
                                                 onChange={(e) => setPrompt(e.target.value)}
-                                                // 🌟 Captures the Enter key natively and fires the clean string text
+                                                // Captures the Enter key natively and fires the clean string text
                                                 onKeyDown={(e) => {
                                                 if (e.key === "Enter" && !isPending && prompt.trim()) {
                                                     handleSendRequest(prompt);
@@ -679,7 +776,7 @@ export default function Dashboard() {
                                         </div>
                                     </div>}
 
-                                    {isAiOpen && (
+                                    {(isAiOpen && isProcessingRequest) &&(
                                         <div className="w-full h-[80%]">
                                         {/* The Chat box stays mounted on your dashboard screen layout permanently */}
                                         <AIChat 

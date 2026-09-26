@@ -8,6 +8,8 @@ interface StreamingSocketPayload {
     provider?: string;
     model_name?: string;
     repos?: string[];
+    session_id?: number;
+    session_request_id?: string;
 }
 
 export const useStreamingSocket = (onMessageReceived?: (data: any) => void) => {

@@ -53,27 +53,29 @@ class ChatConsumer(AsyncWebsocketConsumer):
             msg_type = data.get('type')
             self.token  = self.scope.get("github_token")
             print("")
-            print("WWWWWWWWWWWWWWWWWWWWW")
+            print("WWWWWWWWWWWWWWWWWWWWW", msg_type)
 
-            if msg_type == "start_processing":
-                #  INSTANTLY OFFLOAD EVERYTHING TO CELERY
-                current_app.send_task(  # type: ignore
-                    "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches my celery task path string exactly!
-                    kwargs={
-                        "channel_name": self.user_group,
-                        "user_id": self.user.pk,
-                        "username": self.user.username,
-                        "token": self.token,
-                        "session_id": data.get('session_id', 1),
-                        "prompt_text": data.get('prompt', ''),
-                        "repos": data.get('repos', []),
-                        "provider": data.get('provider', 'google'),
-                        "model_name": data.get('model_name', 'gemini-2.5-flash'),
-                        "api_key": data.get('user_api_key', '')
-                    }
-                )
+            #  INSTANTLY OFFLOAD EVERYTHING TO CELERY
+            current_app.send_task(  # type: ignore
+                "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches my celery task path string exactly!
+                kwargs={
+                    "channel_name": self.user_group,
+                    "user_id": self.user.pk,
+                    "username": self.user.username,
+                    "token": self.token,
+                    # I pass None for a fresh chat so the Celery task can create
+                    # a session and let Django assign its primary key.
+                    "session_id": data.get('session_id'),
+                    # I echo this token so the browser can ignore stale session acknowledgements.
+                    "session_request_id": data.get('session_request_id'),
+                    "prompt_text": data.get('prompt', ''),
+                    "repos": data.get('repos', []),
+                    "provider": data.get('provider', 'google'),
+                    "model_name": data.get('model_name', 'gemini-2.5-flash'),
+                    "api_key": data.get('user_api_key', '')
+                }
+            )
 
-                print("goal post")
             print("sexy")
 
         except json.JSONDecodeError:

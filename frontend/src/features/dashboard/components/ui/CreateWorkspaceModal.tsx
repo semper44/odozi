@@ -11,9 +11,9 @@ interface RepositoryItem {
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
-  allRepositories: RepositoryItem[]; // ✅ Receives ALL repositories from React-Query cache
-  selectedIds: Set<string>;          // ✅ Receives the global selection Set string keys reference
-  onToggleSelect: (id: string) => void; // ✅ Receives the global store toggle function
+  allRepositories: RepositoryItem[]; // Receives ALL repositories from React-Query cache
+  selectedIds: Set<string>;          // Receives the global selection Set string keys reference
+  onToggleSelect: (id: string) => void; // Receives the global store toggle function
   onSubmit: (payload: { workspaceName: string }) => void;
   isPending: boolean;
 }
@@ -57,7 +57,6 @@ export const WorkspaceModal = ({
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
       <div className="absolute inset-0" onClick={onClose} />
 
-      {/* 🚀 UPGRADED: Expanded max-w-lg sizing bounds providing optimal screen spacing */}
       <div className="bg-white rounded-2xl w-full max-w-lg p-6 border border-gray-100 shadow-2xl relative z-10 animate-in zoom-in-95 duration-150">
         
         {/* Header Section */}
@@ -74,7 +73,7 @@ export const WorkspaceModal = ({
         </div>
 
         <form onSubmit={handleFormSubmit} className="space-y-4">
-          {/* 1. TOP ELEMENT: Workspace Title Input Text Field */}
+          {/* Workspace Title Input Text Field */}
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wider">
               Workspace Profile Name
@@ -93,7 +92,7 @@ export const WorkspaceModal = ({
             </div>
           </div>
 
-          {/* 2. CORE ELEMENT: Integrated Search & Selection Board Grid */}
+          {/* CORE ELEMENT: Integrated Search & Selection Board Grid */}
           <div className="space-y-2">
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">
               Search & Select Repositories
