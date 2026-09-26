@@ -32,12 +32,13 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "fast-results-behave.loca.lt",
-    "http://localhost:5173",
+    "0.0.0.0",
+    ".onrender.com",
     "odozi.onrender.com",
-    "https://odozi.onrender.com",
-    "https://odozi.vercel.app"
+    "odozi.vercel.app",
+    "fast-results-behave.loca.lt",
 ]
+
 
 # CORS
 CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http://localhost:5173",
