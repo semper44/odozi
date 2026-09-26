@@ -12,17 +12,22 @@ from odozi.utils.crypto import decrypt_token
 import time
 
 
+print("🔥🔥🔥 ODOZI MIDDLEWARE.PY LOADED 🔥🔥🔥", flush=True)
+
+
+
 class RequestDebugMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        start = time.monotonic()
-
         print(
-            f"🚨 REQUEST START: "
-            f"{request.method} {request.get_full_path()}"
+            f"🚨🚨🚨 REQUEST DEBUG: "
+            f"{request.method} {request.get_full_path()}",
+            flush=True,
         )
+
+        start = time.monotonic()
 
         try:
             response = self.get_response(request)
@@ -33,7 +38,8 @@ class RequestDebugMiddleware:
                 f"✅ REQUEST END: "
                 f"{request.method} {request.get_full_path()} "
                 f"status={response.status_code} "
-                f"time={elapsed:.3f}s"
+                f"time={elapsed:.3f}s",
+                flush=True,
             )
 
             return response
@@ -45,7 +51,8 @@ class RequestDebugMiddleware:
                 f"💥 REQUEST EXCEPTION: "
                 f"{request.method} {request.get_full_path()} "
                 f"time={elapsed:.3f}s "
-                f"type={type(exc).__name__}"
+                f"type={type(exc).__name__}",
+                flush=True,
             )
 
             raise
