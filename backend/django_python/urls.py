@@ -5,6 +5,7 @@ from .views import (dashboard_view, CreateRepoEnvKeys,
 
 
 
+
 urlpatterns = [
     path("", dashboard_view, name="dashboard"),
     # path("results/", OptimizedResultsReceiverView, name="results"),

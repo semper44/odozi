@@ -20,6 +20,7 @@ import { EnvVarModal } from "./ui/ENV vars/EnvVarModal";
 import { LLMConfigModal } from "./ui/ENV vars/LLMConfigModal";
 import { GitHubInstallation } from "../../../pages/registrationorlogin/install_github";
 import {fetchChatSession} from "@/features/streaming/api/chatApi"
+import { logout } from "@/services/auth/logout";
 
 
 export default function Dashboard() {
@@ -45,6 +46,14 @@ export default function Dashboard() {
     const [activeLeftTab, setActiveLeftTab] = useState("Home");
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const handleLogout = async () => {
+        try {
+            await logout();
+            navigate("/login", { replace: true });
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Could not log out. Please try again.");
+        }
+    };
     const leftTabs = [
         { id: "Home", label: "Home", icon: <House className="cursor-pointer" /> },
         { id: "Chat", label: "Chat", icon: <Bot className="cursor-pointer" /> },
@@ -607,7 +616,9 @@ export default function Dashboard() {
 
                             {/* <!-- logout --> */}
                                 <div className="flex-end lg:pr-4 cursor-pointer">
-                                    <LogOut />
+                                    <button type="button" onClick={handleLogout} aria-label="Log out" className="cursor-pointer">
+                                        <LogOut />
+                                    </button>
                                 </div>
                         </div>
                     </div>

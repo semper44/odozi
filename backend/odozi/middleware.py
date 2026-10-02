@@ -22,8 +22,11 @@ class RequestDebugMiddleware:
 
     def __call__(self, request):
         print(
-            f"🚨🚨🚨 REQUEST DEBUG: "
-            f"{request.method} {request.get_full_path()}",
+            f"🚨 REQUEST DEBUG: "
+            f"method={request.method} "
+            f"path={request.get_full_path()} "
+            f"host={request.get_host()} "
+            f"user_agent={request.META.get('HTTP_USER_AGENT')}",
             flush=True,
         )
 

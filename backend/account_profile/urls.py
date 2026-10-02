@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import  (github_callback_view, github_push_webhook, GitHubRefreshView, 
+from .views import  (github_callback_view, github_push_webhook, GitHubRefreshView, LogoutView, 
                      github_login_view, SaveLLMConfigView, InstallGithubApp)
 
 
@@ -11,6 +11,7 @@ urlpatterns = [
     path("api/auth/github/setup/", InstallGithubApp.as_view(), name="github_setup"),
     path("github_push/", github_push_webhook, name="github_push"),
     path("api/auth/token/refresh/", GitHubRefreshView.as_view(), name="github_refresh"),
+    path("api/auth/logout/", LogoutView.as_view(), name="logout"),
     path('api/ai/config/save/', SaveLLMConfigView.as_view(), name='save_llm_config'),
 
 ]

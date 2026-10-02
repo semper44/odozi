@@ -22,7 +22,7 @@ from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
 from django.shortcuts import redirect
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth import login
+from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.db import transaction
@@ -303,6 +303,25 @@ def github_callback_view(request):
     
     return response
 
+
+
+
+class LogoutView(APIView):
+    """End the current browser session and remove its authentication cookies."""
+
+    authentication_classes = [HttpOnlyCookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        logout(request)
+        response = Response({"detail": "Logged out successfully."}, status=status.HTTP_200_OK)
+        for cookie_name in ("jwt_access_token", "jwt_refresh_token", "ticket_id", "expires_at", "sessionid"):
+            response.delete_cookie(
+                cookie_name,
+                path="/",
+                samesite="None" if cookie_name.startswith("jwt_") or cookie_name in {"ticket_id", "expires_at"} else "Lax",
+            )
+        return response
 
 
 
