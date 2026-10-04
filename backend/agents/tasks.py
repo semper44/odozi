@@ -87,7 +87,7 @@ def transform_ci_results(raw_results):
         
         simplified_report["summary"]["failed_tools"].append(tool_name)
 
-        # --- TRANSFORM LINTER (RUFF) ---
+        # TRANSFORM LINTER (RUFF) 
         if tool_name == "linter":
             errors = report.get("errors_found", [])
             # If the errors are still an unparsed JSON string, load them
@@ -107,7 +107,7 @@ def transform_ci_results(raw_results):
                     "rule_id": err.get("code", "")
                 })
 
-        # --- TRANSFORM SECURITY SCAN (BANDIT) ---
+        # TRANSFORM SECURITY SCAN (BANDIT) 
         elif tool_name == "security_scan":
             vulns = report.get("vulnerabilities", [])
             if isinstance(vulns, str) and vulns.strip():
@@ -127,7 +127,7 @@ def transform_ci_results(raw_results):
                 })
 
        
-        # --- TRANSFORM SECRET SCANNER ---
+        # TRANSFORM SECRET SCANNER 
         elif tool_name == "secret_scanner":
             leaks = report.get("leaked_secrets", {})
             for filepath, details in leaks.items():
@@ -143,7 +143,7 @@ def transform_ci_results(raw_results):
 
 
        
-         # --- TRANSFORM MYPY ---        
+         # TRANSFORM MYPY         
         elif tool_name == "mypy_type_check":
             for err in report.get("type_errors", []):
                 simplified_report["violations"].append({
@@ -155,7 +155,7 @@ def transform_ci_results(raw_results):
                     "rule_id": "missing-type-hint"
                 })
 
-        # --- TRANSFORM CUSTOM MIGRATION CHECK ---
+        #  TRANSFORM CUSTOM MIGRATION CHECK 
         elif tool_name == "migration_consistency":
             for violation in report.get("violations", []):
                 simplified_report["violations"].append({
@@ -167,7 +167,7 @@ def transform_ci_results(raw_results):
                     "rule_id": "missing-migration-file"
                 })
 
-        # --- TRANSFORM CUSTOM GUARDRAILS (SEMGREP) ---
+        # TRANSFORM CUSTOM GUARDRAILS (SEMGREP) 
         elif tool_name == "semgrep_custom":
             findings = report.get("findings", [])
             for finding in findings:
@@ -786,10 +786,7 @@ Example Summary Output:
 
 """
 
-# ============================================================================
 # REDIS-DRIVEN AGENTIC PIPELINE STATE ENGINE
-# ============================================================================
-
 PIPELINE_STATE_TTL = 60 * 15
 PIPELINE_TIMEOUT_SECONDS = 60 * 14
 FOLLOW_UP_LOCK_TTL = 60 * 5
@@ -1139,9 +1136,7 @@ def process_agentic_chat_turn_task(
     channel_layer = get_channel_layer()
     auditjob_id = None
 
-    # -------------------------------------------------------------------------
 
-    # -------------------------------------------------------------------------
     if not prompt_text:
         return
 
@@ -1211,10 +1206,7 @@ def process_agentic_chat_turn_task(
             })
 
 
-    # -------------------------------------------------------------------------
     # PROMPT TEMPLATE
-    # -------------------------------------------------------------------------
-
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", system_instruction_text),
 
@@ -1226,10 +1218,7 @@ def process_agentic_chat_turn_task(
     ])
 
 
-    # -------------------------------------------------------------------------
     # LLM FACTORY
-    # -------------------------------------------------------------------------
-
     if provider == "openai":
 
         llm = ChatOpenAI(
@@ -1249,10 +1238,7 @@ def process_agentic_chat_turn_task(
         )
 
 
-    # -------------------------------------------------------------------------
     # STRUCTURED OUTPUT
-    # -------------------------------------------------------------------------
-
     structured_llm = llm.with_structured_output(
         OrchestratorAction
     )
@@ -1261,11 +1247,6 @@ def process_agentic_chat_turn_task(
 
 
     try:
-
-        # ---------------------------------------------------------------------
-
-        # ---------------------------------------------------------------------
-
         with get_openai_callback() as cb:
 
             result = cast(
@@ -1294,25 +1275,15 @@ def process_agentic_chat_turn_task(
 
         print(result)
 
-        print(
-            "============================================================\n"
-        )
 
-
-        # ---------------------------------------------------------------------
-
-        # ---------------------------------------------------------------------
 
         ui_layout_route = result.ui_layout_route
         chat_response = result.chat_response
 
         with transaction.atomic():
 
+                # if result.evict_prior_history OVERHAUL
             if result.evict_prior_history:
-
-                # -------------------------------------------------------------
-                # OVERHAUL
-                # -------------------------------------------------------------
 
                 session.messages.all().delete()
 
@@ -1336,10 +1307,7 @@ def process_agentic_chat_turn_task(
 
             else:
 
-                # -------------------------------------------------------------
                 # STANDARD WORKING MEMORY
-                # -------------------------------------------------------------
-
                 ChatMessage.objects.create(
                     session=session,
                     role="user",
@@ -1352,10 +1320,6 @@ def process_agentic_chat_turn_task(
                     content=result.chat_response
                 )
 
-
-        # ---------------------------------------------------------------------
-
-        # ---------------------------------------------------------------------
 
         repo_owner = user.username
 
@@ -1372,10 +1336,7 @@ def process_agentic_chat_turn_task(
         )
 
 
-        # ---------------------------------------------------------------------
         # LOAD REPOSITORIES FROM CACHE
-        # ---------------------------------------------------------------------
-
         if cached_details is not None:
 
             cached_repos = cached_details.get(
@@ -1497,24 +1458,12 @@ def process_agentic_chat_turn_task(
                 return
 
 
-        # ---------------------------------------------------------------------
-
-        # ---------------------------------------------------------------------
         pipeline_id = uuid.uuid4().hex
-
-        # ---------------------------------------------------------------------
-
-        # ---------------------------------------------------------------------
-
         intent_signatures = []
-
         cached_repositories = cached_details.get("repositories",[])
 
 
-        # ---------------------------------------------------------------------
         # GITHUB PIPELINE SIGNATURES
-        # ---------------------------------------------------------------------
-
         github_pipeline_signatures = []
         github_expected_events = []
 
@@ -1571,14 +1520,8 @@ def process_agentic_chat_turn_task(
                     continue
 
 
-                # -------------------------------------------------------------
-                # <<< CHANGED >>>
-                #
-                # GitHub tasks are kept separately from local tasks.
-                #
+                # Keeping GitHub tasks separately from local tasks.
                 # Most importantly, NO follow-up callback is attached to them.
-                # -------------------------------------------------------------
-
                 github_pipeline_signatures.append(
 
                     run_agentic_pipeline.s(
@@ -1637,10 +1580,7 @@ def process_agentic_chat_turn_task(
                         github_expected_events.append(event_key)
 
 
-        # ---------------------------------------------------------------------
         # LOCAL WORKSPACE TASKS
-        # ---------------------------------------------------------------------
-
         if "create_workspace" in result.intents:
 
             result_dict = result.model_dump()
@@ -1681,10 +1621,7 @@ def process_agentic_chat_turn_task(
             )
 
 
-        # ---------------------------------------------------------------------
         # LOCAL WORKSPACE DELETION
-        # ---------------------------------------------------------------------
-
         if "delete_workspace" in result.intents:
 
             result_dict = result.model_dump()
@@ -1730,10 +1667,7 @@ def process_agentic_chat_turn_task(
             )
 
 
-        # ---------------------------------------------------------------------
         # LOCAL ENVIRONMENT CREATION
-        # ---------------------------------------------------------------------
-
         if "create_repo_env" in result.intents:
 
             result_dict = result.model_dump()
@@ -1774,10 +1708,7 @@ def process_agentic_chat_turn_task(
             )
 
 
-        # ---------------------------------------------------------------------
         # LOCAL ENVIRONMENT DELETION
-        # ---------------------------------------------------------------------
-
         if "delete_repo_env" in result.intents:
             result_dict = result.model_dump()
             env_key_requests = (
@@ -1816,9 +1747,7 @@ def process_agentic_chat_turn_task(
             )
 
 
-        # ---------------------------------------------------------------------
 
-        # ---------------------------------------------------------------------
         # Here I check if I have any executable tasks generated from the LLM.
         # If the user is just having a casual chat or asking an informational question
         # (intents is [] or ['technical_query']), both has_github_pipeline and has_local_tasks
@@ -1828,15 +1757,12 @@ def process_agentic_chat_turn_task(
         has_local_tasks = bool(intent_signatures)
 
         print("\n" + "=" * 80)
-        print("🔀 ORCHESTRATION ROUTING")
         print(f"   GitHub pipeline : {has_github_pipeline}")
         print(f"   Local tasks     : {has_local_tasks}")
         print(f"   Pipeline ID     : {pipeline_id}")
         print("=" * 80)
 
-        # =====================================================================
-        # CASE A: LOCAL TASKS ONLY (Workspace / Env keys)
-        # =====================================================================
+        # LOCAL TASKS ONLY (Workspace / Env keys)
         # When I only have local operations to perform, I execute them in parallel
         # via a Celery group and attach agentic_chat_follow_up as my chord callback.
         # Celery will automatically invoke my follow-up as soon as all local tasks finish.
@@ -1857,9 +1783,7 @@ def process_agentic_chat_turn_task(
             workflow_canvas.apply_async()
             print("✅ LOCAL-ONLY PIPELINE DISPATCHED WITH CELERY CHORD.")
 
-        # =====================================================================
-        # CASE B: GITHUB PIPELINE EXISTS (Static Analysis)
-        # =====================================================================
+        # GITHUB PIPELINE EXISTS (Static Analysis)
         # When GitHub CI/CD is involved, I initialize my Redis barrier state machine.
         # Individual tasks do NOT call agentic_chat_follow_up directly. Instead,
         # I wait for all expected GitHub webhooks and local task results to land in Redis.
@@ -1919,9 +1843,7 @@ def process_agentic_chat_turn_task(
                 "Waiting for webhook results before follow-up."
             )
 
-        # =====================================================================
-        # CASE C: NO EXECUTION TASKS (Casual Chat / Clarifications / Technical Queries)
-        # =====================================================================
+        #  NO EXECUTION TASKS (Casual Chat / Clarifications / Technical Queries)
         # If the user is just chatting or asking a question without ordering an execution,
         # I do NOT schedule or call agentic_chat_follow_up. I simply let this task broadcast
         # my LLM's chat_response directly down the WebSocket channel below.
@@ -1929,9 +1851,7 @@ def process_agentic_chat_turn_task(
             print("ℹ️ No executable intents were generated. Skipping follow-up task.")
 
 
-        # ---------------------------------------------------------------------
         # FRONTEND STATUS MESSAGE
-        # ---------------------------------------------------------------------
 
         async_to_sync(channel_layer.group_send)(
             channel_name,
@@ -2300,7 +2220,7 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
         return "No configuration data provided"
 
     channel_layer = get_channel_layer()
-        # 🚀 IMMEDIATE BROADCAST: Push the success summary metrics right out to the client browser
+        #  IMMEDIATE BROADCAST: Push the success summary metrics right out to the client browser
     async_to_sync(channel_layer.group_send)(
         channel_name,
         {
@@ -2327,7 +2247,7 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
 
     if len(requests_list)>0:
         for req in requests_list:
-            # 🌟 INITIALIZE VARIABLES INSIDE THE LOOP BODY PER REQUEST CONTEXT
+            #  INITIALIZE VARIABLES INSIDE THE LOOP BODY PER REQUEST CONTEXT
             workspace_name = req.get("workspace_name")
             raw_key_names = req.get("key_names", [])
             raw_target_repos = req.get("repositories", [])
@@ -2340,7 +2260,7 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
 
             if raw_target_repos:
                 for raw_item in raw_target_repos:
-                    # 🌟 FIX A: Extract the repository name string safely depending on data type
+                    #  FIX A: Extract the repository name string safely depending on data type
                     if isinstance(raw_item, dict):
                         repo_name_str = raw_item.get("repo_name", "")
                     else:
@@ -2357,7 +2277,7 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
                         if matched_id:
                             selected_repo_ids.append(matched_id)
                     else:
-                        # 🌟 FIX B: Fallback directly to the incoming layout metadata payload 
+                        #  FIX B: Fallback directly to the incoming layout metadata payload 
                         # if the cache does not have this repository loaded yet
                         if isinstance(raw_item, dict):
                             incoming_id = raw_item.get("repo_id")
@@ -2583,9 +2503,6 @@ def run_agentic_pipeline(
         print(f"TARGET      : {target_branch}")
         print("=" * 80)
 
-        # =========================================================================
-
-        # =========================================================================
 
         try:
             git_token = get_installation_access_token(
@@ -3014,7 +2931,7 @@ if __name__ == "__main__":
             "=" * 80
         )
 
-        # 📡 Broadcast dispatching state
+        #  Broadcast dispatching state
         async_to_sync(channel_layer.group_send)(
             channel_name,
             {
@@ -3125,9 +3042,6 @@ if __name__ == "__main__":
                         "message": err_msg
                     }
 
-        # =========================================================================
-
-        # =========================================================================
 
         if feedback_r is not None and feedback_r.status_code == 204:
             print(
@@ -3150,7 +3064,7 @@ if __name__ == "__main__":
                 "is now waiting for webhook results."
             )
 
-            # 📡 Broadcast successful dispatch and waiting state
+            #  Broadcast successful dispatch and waiting state
             async_to_sync(channel_layer.group_send)(
                 channel_name,
                 {
@@ -3186,9 +3100,6 @@ if __name__ == "__main__":
 
             return resolved_repo_name
 
-        # =========================================================================
-
-        # =========================================================================
 
         else:
             status_code = feedback_r.status_code if feedback_r is not None else 0
@@ -3340,18 +3251,14 @@ def agentic_chat_follow_up(
 
     print("task_results:", task_results)
 
-    # -------------------------------------------------------------------------
     # Prompt Template
-    # -------------------------------------------------------------------------
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", short_followup_instruction),
         MessagesPlaceholder(variable_name="history"),
         ("human", "{input}")
     ])
 
-    # -------------------------------------------------------------------------
     # LLM Factory
-    # -------------------------------------------------------------------------
     if provider == "openai":
         llm = ChatOpenAI(
             model=model_name,
@@ -3368,9 +3275,7 @@ def agentic_chat_follow_up(
     structured_llm = llm.with_structured_output(OrchestratorAction)
     chain = prompt_template | structured_llm
 
-    # -------------------------------------------------------------------------
     # Restore Chat History
-    # -------------------------------------------------------------------------
     history_messages: List[Any] = []
 
     if history_payload:
@@ -3384,9 +3289,7 @@ def agentic_chat_follow_up(
                     AIMessage(content=item.get("content", ""))
                 )
 
-    # -------------------------------------------------------------------------
     # Build backend summary for the LLM
-    # -------------------------------------------------------------------------
     backend_event_input = f"""
         The following backend tasks have completely finished executing.
 
@@ -3422,9 +3325,7 @@ def agentic_chat_follow_up(
         final_chat_response = add_full_report_link(result.chat_response, pipeline_id)
         full_report_url = pipeline_report_url(pipeline_id) if pipeline_id else None
 
-        # -----------------------------------------------------------------
         # Save conversation
-        # -----------------------------------------------------------------
         with transaction.atomic():
 
             session = ChatSession.objects.get(pk=session_id)
@@ -3637,7 +3538,7 @@ def handle_backend_error_followup( self,
         # Save the friendly question the LLM built
         ChatMessage.objects.create(session=session, role="ai", content=result.chat_response)
 
-    # 📡 Broadcast the message down to the screen over WebSockets
+    #  Broadcast the message down to the screen over WebSockets
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         channel_name,
@@ -3682,14 +3583,11 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
             is_json_format = False
             print(f"⚠️ ALERT: {tool.upper()} payload is raw text (Possible infrastructure crash).")
 
-        # CASE A: THE PAYLOAD IS A CRASH TRACEBACK (Any Tool)
+        # THE PAYLOAD IS A CRASH TRACEBACK (Any Tool)
         if save_to_db:
             findings.append(repo_findings)  # Append any existing findings from the error logs processed from the view
-        # =====================================================================
-        # 📦 CASE B: THE PAYLOAD IS CLEAN VALID JSON (Normal Behavior)
-        # =====================================================================
-
-        print(f"DEBUG: Parsed JSON content for {tool}: {save_to_db}")  # Debug print to inspect the structure of the parsed JSON
+        #  or THE PAYLOAD IS CLEAN VALID JSON (Normal Behavior)
+        print(f"DEBUG: Parsed JSON content for {tool}: {save_to_db}")  
         if tool == 'bandit':
             totals = parsed_json.get('metrics', {}).get('_totals', {}) if parsed_json else {}
             loc = totals.get('loc', 0)
@@ -3743,9 +3641,7 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
             total_issues = summary.get('failed', 0)
             status = 'failed' if total_issues > 0 else 'passed'
 
-        # =====================================================================
-        # 🎯 OPTIMIZED MULTI-TENANT DB SAVE ENGINE (Single DB Trip)
-        # =====================================================================
+        #  OPTIMIZED MULTI-TENANT DB SAVE ENGINE (Single DB Trip)
         workspace = Workspace.objects.get(name = repository_owner)
 
         repo_result, created = RepositoryScan.objects.update_or_create(

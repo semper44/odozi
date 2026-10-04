@@ -7,7 +7,7 @@ export default function LiveTerminal() {
   const [autoscroll, setAutoscroll] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   
-  // 🎯 REAL-TIME LOADER STATES
+  //  REAL-TIME LOADER STATES
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [pipelineFinished, setPipelineFinished] = useState(false);
 
@@ -193,7 +193,7 @@ export default function LiveTerminal() {
           );
         })}
 
-        {/* 🎯 THE STREAMING LOADER WIDGET CONTAINER CARD */}
+        {/*  THE STREAMING LOADER WIDGET CONTAINER CARD */}
         {activeTool && !pipelineFinished && !isTyping && (
           <div className="flex items-center gap-3 p-3 bg-zinc-900/40 border border-zinc-800 rounded-lg my-4 max-w-md animate-pulse">
             <Loader2 className="w-4 h-4 text-purple-400 animate-spin flex-shrink-0" />

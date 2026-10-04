@@ -97,7 +97,7 @@ class WorkspaceRepositoryBridge(models.Model):
 
     class Meta:
         constraints = [
-            # 🚀 THE FIXED SENIOR FIX: Enforce uniqueness per workspace on the link table
+            #  THE FIXED SENIOR FIX: Enforce uniqueness per workspace on the link table
             models.UniqueConstraint(
                 fields=['workspace', 'repository'], 
                 name='unique_workspace_repository_link'
@@ -150,7 +150,7 @@ class UserLLMConfig(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.provider} ({self.model_name})"
 
-    # 🔒 INTERNAL VAULT LAYER: Automate symmetric encryption/decryption routines on access
+    #  INTERNAL VAULT LAYER: Automate symmetric encryption/decryption routines on access
     def set_api_key(self, raw_key: str):
         fernet = Fernet(settings.TOKEN_ENCRYPTION_KEY.encode())
         self.encrypted_api_key = fernet.encrypt(raw_key.strip().encode()).decode()

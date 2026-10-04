@@ -125,7 +125,7 @@ export const WorkspaceModal = ({
                   >
                     {/* Left item side containing shorthand avatars and label strings */}
                     <div className="flex items-center gap-3 min-w-0">
-                      {/* ✅ TWO-LETTER MINI BADGE AVATAR TAG: Highly space optimized! */}
+                      {/*  TWO-LETTER MINI BADGE AVATAR TAG: Highly space optimized! */}
                       <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 transition-colors ${
                         isChecked ? "bg-green-500 text-white" : "bg-gray-100 text-gray-500"
                       }`}>

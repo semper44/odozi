@@ -745,7 +745,7 @@ export default function Dashboard() {
 
                                                         <div className="relative w-full">                                                            
                                                             <button 
-                                                                type="button" // 🌟 Changed from "submit" to "button" to avoid form triggers
+                                                                type="button" //  Changed from "submit" to "button" to avoid form triggers
                                                                 onClick={() => {
                                                                 if (!isPending && prompt.trim()) {
                                                                     handleSendRequest(prompt);

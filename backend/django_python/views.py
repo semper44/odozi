@@ -123,7 +123,7 @@ def dashboard_view(request):
 
             expires_at = raw_payload["expires_at"]
 
-            # 🔥 INSTANT BURN RULE: Destroy transit ticket from RAM immediately
+            #  INSTANT BURN RULE: Destroy transit ticket from RAM immediately
             cache.delete(redis_ticket_key)
             print(444)
 
@@ -133,7 +133,7 @@ def dashboard_view(request):
                 cache.delete(redis_ticket_key)
             return JsonResponse({"error": f"Cryptographic parsing failed: {str(e)}"}, status=401)
 
-    # --- PATH B: SUBSEQUENT PAGE REFRESHES (HttpOnly Cookie Token Present) ---
+    # SUBSEQUENT PAGE REFRESHES (HttpOnly Cookie Token Present)
     
     elif stored_jwt_access_token and stored_jwt_access_token != None and stored_jwt_access_token != "None":
         print("idri111111111", stored_jwt_access_token)
@@ -478,7 +478,7 @@ class CreateRepoEnvKeys(APIView):
 
         try:
             result = create_repo_env_keys_service(
-                user=request.user, # 🛡️ Fixed: Uses the clean session user securely
+                user=request.user, # Uses the clean session user securely
                 repositories_data=repositories_data,
                 key_names=key_names,
                 workspace_name=workspace_name,
@@ -535,7 +535,7 @@ class DeleteRepoEnvKeysView(APIView):
         try:
 
             result = delete_repo_env_keys_service(
-                user=request.user, # 🛡️ Fixed: Uses the clean session user securely
+                user=request.user, #  Uses the clean session user securely
                 key_names=key_names,
                 selected_repo_ids=selected_repo_ids
             )
@@ -579,9 +579,7 @@ def receive_ci_results(request):
     save_to_db = False
 
 
-    # =========================================================================
-    # 🎯 FIX STATE A: PROCESSING PYTHON CHUNKING ENGINE Payloads (JSON or Trace text)
-    # =========================================================================
+    #  PROCESSING PYTHON CHUNKING ENGINE Payloads (JSON or Trace text)
     if request.content_type == 'application/json':
         raw_body_str = request.body.decode('utf-8')
         print(f"Raw JSON body string length: {raw_body_str}")  # Debugging line to check the raw body content size
@@ -615,9 +613,7 @@ def receive_ci_results(request):
             repo_name = "Economic/Calendar" # Temporary fallback target for my current sandboxed repo name
             tool_type = "pytest"
 
-    # =========================================================================
-    # 🎯 FIX STATE B: PROCESSING MULTIPART FORM DATA PAYLOADS (Bandit, Ruff, Odozi)
-    # =========================================================================
+    #  PROCESSING MULTIPART FORM DATA PAYLOADS (Bandit, Ruff, Odozi)
     else:
         run_id = request.POST.get('run_id')
         repo_name = request.POST.get('repo')
@@ -943,9 +939,6 @@ class LogStreamingResultsView(APIView):
         if not run_id:
             return Response({"error": "Missing run_id"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ---------------------------------------------------------------------
-
-        # ---------------------------------------------------------------------
         if not is_final_report:
             # We append logs into Redis memory cache so they build up fast without hitting DB
             redis_log_key = f"live_logs:{run_id}"
@@ -958,9 +951,7 @@ class LogStreamingResultsView(APIView):
             # Optional: Broadcast `incoming_logs` via WebSockets here for live dashboard visual scrolls!
             return Response({"status": "chunk_buffered"}, status=status.HTTP_200_OK)
 
-        # ---------------------------------------------------------------------
 
-        # ---------------------------------------------------------------------
         # Find or establish metadata database row placeholder
         try:
             repo_instance = GitHubRepository.objects.get(repo_full_name=repo_full_name)

@@ -19,7 +19,7 @@ class OdoziCustomRefreshToken(RefreshToken):
             from django.contrib.auth.models import User
             try:
                 user = User.objects.get(pk=user_id)
-                # 🚀 FORCE claims directly onto the payload before string serialization!
+                #  FORCE claims directly onto the payload before string serialization!
                 access["username"] = str(user.username)
                 access["id"] = int(user.pk)
             except User.DoesNotExist:

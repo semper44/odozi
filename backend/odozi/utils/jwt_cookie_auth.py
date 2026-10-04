@@ -18,6 +18,6 @@ class HttpOnlyCookieJWTAuthentication(JWTAuthentication):
         try:
             validated_token = self.get_validated_token(raw_token)
             user = self.get_user(validated_token)
-            return (user, validated_token) # ✅ Attaches the user directly to request.user!
+            return (user, validated_token) #  Attaches the user directly to request.user!
         except Exception:
             raise AuthenticationFailed("Invalid or expired session cookie.")

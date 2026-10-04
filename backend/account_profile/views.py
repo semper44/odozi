@@ -178,10 +178,10 @@ def github_callback_view(request):
         emails_url = "https://api.github.com/user/emails"
         emails_profile = requests.get(emails_url, headers=user_headers).json()
         # Find the primary verified email address from their list
-                # ✅ DEFENSIVE FIX: Ensure emails_profile is an actual list before looping
+                #  DEFENSIVE FIX: Ensure emails_profile is an actual list before looping
         if isinstance(emails_profile, list):
             for email_entry in emails_profile:
-                # ✅ DEFENSIVE FIX: Verify each item is a dict object, not a plain string error
+                #  DEFENSIVE FIX: Verify each item is a dict object, not a plain string error
                 if isinstance(email_entry, dict):
                     if email_entry.get("primary") and email_entry.get("verified"):
                         github_email = email_entry.get("email")
@@ -409,7 +409,7 @@ class GitHubRefreshView(APIView):
         print("new_access", new_access)
         print("")
 
-        # ❗ FIX: guard BEFORE parsing
+        #  FIX: guard BEFORE parsing
         if expires_at is None:
             print("expires at is:", expires_at)
             return JsonResponse({"error": "Missing expiration timestamp"}, status=400)
@@ -423,7 +423,7 @@ class GitHubRefreshView(APIView):
         # token = cache.get(cache_key)
 
         # if not token:
-        #     print(f"⚡ [TOKEN CACHE HIT] Reusing cached GitHub token for installation {installation_id}")
+        #     print(f" [TOKEN CACHE HIT] Reusing cached GitHub token for installation {installation_id}")
         #     print(f"⏳ [TOKEN CACHE MISS] Generating a fresh GitHub token...")
 
         #     fresh_token = get_installation_access_token(installation_id)
@@ -518,7 +518,7 @@ class GitHubRefreshView(APIView):
         else:
             print("GitHub expires at is None")
 
-        # ✅ FIX HERE (my crash)
+        #  FIX HERE (my crash)
         github_new_tokens["jwt_access_token"] = new_access
         github_new_tokens["jwt_refresh_token"] = str(refresh)
 
@@ -560,7 +560,7 @@ class GitHubRefreshView(APIView):
 
 
  
-# ✅ FIX A: Restrict the endpoint securely to POST requests only
+#  FIX A: Restrict the endpoint securely to POST requests only
 @csrf_exempt
 @require_POST
 @extend_schema(
@@ -626,7 +626,7 @@ def github_push_webhook(request):
         if not all([repo_name, repo_owner, commit_sha, installation_id]):
             return JsonResponse({"error": "Missing tracking metrics in payload structure"}, status=400)
 
-        # ⚠️ MOCK MAPPING: In production, my AI agent / DB fetches what the user requested.
+        #  MOCK MAPPING: In production, my AI agent / DB fetches what the user requested.
         # For this testing kickoff, we pass a default setup array.
         mock_user_rules = [
             {"rule_key": "check_auth", "params": {"function_prefix": "create", "decorator_name": "login_required"}},
@@ -676,7 +676,7 @@ def github_push_webhook(request):
         branch = pr_data.get('head', {}).get('ref')
         repo_url = data.get('repository', {}).get('clone_url')
         
-        # ✅ FIX B: Fixed the deep object pathing for Pull Request base branch extraction
+        #  FIX B: Fixed the deep object pathing for Pull Request base branch extraction
         base_branch = pr_data.get('base', {}).get('ref') or data.get('repository', {}).get('default_branch', 'main')
         
     else:

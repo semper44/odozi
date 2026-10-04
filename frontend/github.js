@@ -26,7 +26,7 @@ $(document).ready(function() {
         //                 break;
         //                 message = "Not found";
         //                 break;
-        //                 message = "⚠️ AI limit reached. Please try again next day.";
+        //                 message = " AI limit reached. Please try again next day.";
         //                 break;
         //                 message = "AI client error. Try again.";
         //                 break;
