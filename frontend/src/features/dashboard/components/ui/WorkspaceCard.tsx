@@ -57,7 +57,6 @@ export const WorkspaceDropdown = ({ workspaces, selectedWorkspace, onSelectWorks
             />
           </div>
 
-          {/* Scrollable list bounded to display roughly 3 items maximum at once */}
           <div className="max-h-[132px] overflow-y-auto space-y-0.5 custom-scrollbar">
             <div
               onClick={() => { onSelectWorkspace(""); setIsOpen(false); setSearchQuery(""); }}

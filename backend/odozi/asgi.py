@@ -30,7 +30,7 @@ application = ProtocolTypeRouter({
     # Explicitly map standard HTTP requests using Django's native application
     "http": django_asgi_app,
     
-    # Map WebSocket connections through your auth stack and router
+    # Map WebSocket connections through my auth stack and router
     "websocket": AllowedHostsOriginValidator(
         CookieJwtAuthMiddleware(
             URLRouter(

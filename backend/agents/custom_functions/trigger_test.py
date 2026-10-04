@@ -1,7 +1,7 @@
 # trigger_test.py
 from agents.tasks import run_agentic_pipeline
 
-# Mock user data to test your dynamic rule builder logic
+# Mock user data to test my dynamic rule builder logic
 mock_user_rules = [
     {
         "rule_key": "check_auth", 
@@ -13,7 +13,7 @@ mock_user_rules = [
     }
 ]
 
-# Use .apply() to execute the code synchronously on your screen right now
+# Use .apply() to execute the code synchronously on my screen right now
 print("Invoking pipeline synchronously...")
 run_agentic_pipeline.apply(
     args=("mock_owner", "mock_repo", "mock_token", "mock_sha", mock_user_rules)

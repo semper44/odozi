@@ -45,7 +45,6 @@ export const WorkspaceModal = ({
     onSubmit({ workspaceName: workspaceName.trim() });
   };
 
-  // Helper utility function to derive the first 2 letters of a repository name for avatar tags
   const getFirstTwoLetters = (fullName: string) => {
     // Extract name after slug slash: "owner/repo-name" -> "repo-name"
     const repoName = fullName.split("/")[1] || fullName;
@@ -110,7 +109,6 @@ export const WorkspaceModal = ({
               />
             </div>
 
-            {/* 📜 Scrollable List View Frame: Bounded to hold max 3 rows at once using strict CSS dimensions */}
             <div className="max-h-[148px] overflow-y-auto border border-gray-100 rounded-xl p-1 bg-gray-50/40 space-y-1 custom-scrollbar">
               {filteredRepos.map((repo) => {
                 const isChecked = selectedIds.has(String(repo.id));

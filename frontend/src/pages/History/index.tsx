@@ -38,7 +38,6 @@ export default function RunHistoryDetailsModal({ runId, onClose }: { runId: numb
     }
 
     setLogsLoading(true);
-    // Fetch directly from Cloudflare R2 via the presigned URL! 0% Django server strain.
     fetch(currentStep.log_download_url)
       .then(res => res.text())
       .then(text => {

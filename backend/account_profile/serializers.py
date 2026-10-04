@@ -9,10 +9,10 @@ class OdoziCustomRefreshToken(RefreshToken):
     """
     @property
     def access_token(self):
-        # 1. Generate the baseline standard access token object
+
         access = super().access_token
         
-        # 2. Extract the user identity safely from the current refresh payload
+
         user_id = self.payload.get("user_id")
         
         if user_id:

@@ -4,7 +4,7 @@ import {createRepoEnvKeys} from "../apis/CreateEnv"
 import { toast } from 'react-toastify';
 
 
-// Explicit type contract describing your database mapping structure
+// Explicit type contract describing my database mapping structure
 export interface GitHubRepoPayload {
     repo_id: number;
     repo_name: string;
@@ -82,7 +82,7 @@ export const useCreateEnvKeysMutation = () => {
 //   return useMutation({
 //     mutationFn: (name: string) => createWorkspaceApi(name),
 //     onSuccess: () => {
-//       // Invalidate your main repo cache to instantly refresh dropdown components with the new workspace ID options
+//       // Invalidate my main repo cache to instantly refresh dropdown components with the new workspace ID options
 //       queryClient.invalidateQueries({ queryKey: ["repos"] });
 //     },
 //   });

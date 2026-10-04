@@ -264,15 +264,15 @@ class FunctionLengthVisitor(ast.NodeVisitor):
         keyword = target.get("name_contains")
         max_lines = constraints.get("max_lines")
 
-        # 1. Filter by Class Inheritance (if specified in the rule)
+
         if required_parent and required_parent not in self._current_class_parents:
             return
 
-        # 2. Filter by Function Name Keyword (if specified in the rule)
+
         if keyword and keyword.lower() not in node.name.lower():
             return
 
-        # 3. Assert Max Line Constraint
+
         if max_lines:
             total_lines = node.end_lineno - node.lineno
             if total_lines > max_lines:
@@ -422,7 +422,7 @@ class PiiLeakageConstraintVisitor(ast.NodeVisitor):
         self.findings = []
 
     def visit_Call(self, node):
-        # Extract configuration keys from your unified layout structure
+        # Extract configuration keys from my unified layout structure
         target = self.rule.get("target", {})
         constraints = self.rule.get("constraints", {})
         
@@ -440,7 +440,7 @@ class PiiLeakageConstraintVisitor(ast.NodeVisitor):
                 is_log = True
             
         if is_log:
-            # 1. Scan positional arguments (e.g., logger.info(user_password))
+
             for arg in node.args:
                 arg_text = ast.unparse(arg)
                 if any(key.lower() in arg_text.lower() for key in sensitive_keywords if key):
@@ -451,7 +451,7 @@ class PiiLeakageConstraintVisitor(ast.NodeVisitor):
                         "line": node.lineno
                     })
                     
-            # 2. Scan keyword arguments (e.g., logger.info("auth error", token=user_token))
+
             for kwarg in node.keywords:
                 # We build a string combining the kwarg name (key) and its passed value
                 kwarg_text = f"{kwarg.arg}={ast.unparse(kwarg.value)}"
@@ -516,7 +516,7 @@ class PiiLeakageConstraintVisitor(ast.NodeVisitor):
 #       "inherits_from": "Model"
 #     },
 #     "constraints": {
-#       "max_lines": 150
+
 #     }
 #   },
 #   "FunctionLengthVisitor": {
@@ -525,7 +525,7 @@ class PiiLeakageConstraintVisitor(ast.NodeVisitor):
 #       "name_contains": "post"
 #     },
 #     "constraints": {
-#       "max_lines": 50
+
 #     }
 #   },
 #   "DocstringConstraintVisitor": {

@@ -88,7 +88,6 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
         <h2 className="text-xl font-bold mb-4">{parsed_llm_values?.activeProvider}</h2>
         
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Dropdown 1: Provider selection */}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">Select LLM Provider</label>
             <select
@@ -103,7 +102,6 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
             </select>
           </div>
 
-          {/* Dropdown 2: Dynamic downstream sub-models list mapping */}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">Select Model Variant</label>
             <select
@@ -119,7 +117,6 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
             </select>
           </div>
 
-          {/* Input 3: Platform API Key */}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">Provider API Key</label>
             <input

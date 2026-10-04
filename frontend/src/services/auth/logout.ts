@@ -9,7 +9,6 @@ export async function logout(): Promise<void> {
     headers: { "Content-Type": "application/json" },
   });
 
-  // A 401/403 means the server already considers this browser unauthenticated.
   tokenStore.clear();
 
   if (!response.ok && response.status !== 401 && response.status !== 403) {

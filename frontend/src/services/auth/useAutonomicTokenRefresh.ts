@@ -9,7 +9,6 @@ export const useAutonomicTokenRefresh = () => {
 
   useEffect(() => {
     const performBackgroundLifespanScrape = async () => {
-      // 1. Check if the token needs refreshing
       console.log("checking token lifespan in background...", !tokenStore.isNearingExpiration(), tokenStore.isNearingExpiration());
       if (tokenStore.isNearingExpiration() === false) {
         console.log("💤 Background check: Token lifecycle healthy. Going back to sleep.");
@@ -34,7 +33,7 @@ export const useAutonomicTokenRefresh = () => {
           const freshAccess = data.jwt_access_token;
           const freshRefresh = data.jwt_refresh_token || "";
           
-          // Fallback timestamp generation if your refresh view doesn't explicitly return an 'expiresAt' field
+          // Fallback timestamp generation if my refresh view doesn't explicitly return an 'expiresAt' field
           const futureTimestamp = data.expires_at || new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
           if (freshAccess && freshRefresh) {
@@ -58,7 +57,6 @@ export const useAutonomicTokenRefresh = () => {
     // Run the check once immediately on mounting the layout view
     performBackgroundLifespanScrape();
 
-    // ✅ FIX: Reduced from 30 minutes (1,800,000ms) down to 2 minutes (120,000ms) for high-speed testing loops
     const testIntervalMs = 120000; 
     const intervalId = setInterval(performBackgroundLifespanScrape, testIntervalMs);
 

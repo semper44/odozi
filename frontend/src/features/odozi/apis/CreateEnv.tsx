@@ -3,7 +3,6 @@ interface SyncPayload {
   repo_id: string[];
 }
 
-// 1. This is where createRepoEnvKeys lives!
 export const createRepoEnvKeys = async (payload: SyncPayload) => {
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
   

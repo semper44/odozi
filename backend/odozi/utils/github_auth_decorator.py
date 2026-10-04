@@ -9,7 +9,7 @@ from account_profile.models import GitHubRepository
 def require_github_auth(view_func):
     @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
-        # 1. Extract the temporary GITHUB_TOKEN sent by the runner
+
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
             return JsonResponse({'error': 'Missing authentication metadata'}, status=401)
@@ -19,7 +19,7 @@ def require_github_auth(view_func):
         except IndexError:
             return JsonResponse({'error': 'Malformed authorization token string'}, status=401)
         
-        # 2. ✅ HIGH-LEVEL FIX: Extract repo layout dynamically based on content encoding
+
         repo_name = None
         if request.content_type == 'application/json':
             try:
@@ -35,7 +35,7 @@ def require_github_auth(view_func):
         if not repo_name:
             return JsonResponse({'error': 'Missing target repository context parameters'}, status=400)
        
-        # 3. Request confirmation from GitHub's validation servers
+
         github_api_url = f"https://github.com/{repo_name}" # ◄— Points to official REST validation path
         headers = {
             "Authorization": f"token {github_token}",

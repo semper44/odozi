@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-b%qzdyvx!qapu)dok06xh)ydevyxl*ee(ae)y#^12&02=qp+p6'
@@ -52,13 +52,13 @@ CSRF_TRUSTED_ORIGINS = [
     "https://odozi.vercel.app",
 ]
 
-# 4. CRITICAL: Allow cookies to travel across different domains/ports
+# CRITICAL: Allow cookies to travel across different domains/ports
 # Changing this to 'None' breaks the barrier and allows cross-site cookie drops
 SESSION_COOKIE_SAMESITE = "None"
 CSRF_COOKIE_SAMESITE = "None"
 
-# 5. WARNING: Browsers WILL REJECT SameSite="None" cookies unless they are Secure (HTTPS).
-# However, browsers make a special exception for 'localhost' and '127.0.0.1' over HTTP.
+# WARNING: Browsers WILL REJECT SameSite="None" cookies unless they are Secure (HTTPS).
+
 # To be completely safe during local testing, set these to False.
 
 # SESSION_COOKIE_SECURE = False
@@ -84,7 +84,7 @@ INSTALLED_APPS = [
     'django_python',
     'general',
 
-    # 3rd party
+
     'rest_framework',
     'rest_framework_simplejwt',
     'django.contrib.sites',
@@ -140,7 +140,7 @@ WSGI_APPLICATION = 'odozi.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+
 
 DATABASES = {
     'default': {
@@ -154,7 +154,7 @@ DATABASES = {
 
 
 # Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
+
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -173,7 +173,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 # Internationalization
-# https://docs.djangoproject.com/en/6.0/topics/i18n/
+
 
 LANGUAGE_CODE = 'en-us'
 
@@ -185,7 +185,7 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/6.0/howto/static-files/
+
 
 SITE_ID = 1
 
@@ -209,18 +209,18 @@ SOCIALACCOUNT_PROVIDERS = {
     }
 }
 
-# 1. Use a custom adapter to block password-based registration only
+# Using a custom adapter to block password-based registration only
 ACCOUNT_ADAPTER = 'account_profile.NoPasswordRegistrationAdapter.NoPasswordRegistrationAdapter'
 
-# 2. Allauth Core Setup
+# Allauth Core Setup
 ACCOUNT_LOGIN_METHODS = {'email'}
 ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
 ACCOUNT_EMAIL_VERIFICATION = "none" # Change to "mandatory" or "optional" later if needed
 
-# 3. Handle GitHub Handshake Automatically
+# Handling GitHub Handshake Automatically
 SOCIALACCOUNT_AUTO_SIGNUP = True
 
-# 4. Django REST Framework & JWT Configuration
+# Django REST Framework & JWT Configuration
 REST_USE_JWT = True
 JWT_AUTH_COOKIE = 'my-app-auth'          # Stores access token in cookie
 JWT_AUTH_REFRESH_COOKIE = 'my-refresh'   # Stores refresh token in cookie
@@ -243,7 +243,7 @@ CLOUDINARY_API_KEY = config("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = config("CLOUDINARY_API_SECRET")
 
 # The public Django origin used in links sent from asynchronous Celery tasks.
-# Set PUBLIC_API_BASE_URL to your HTTPS/tunnel URL when deploying.
+# Set PUBLIC_API_BASE_URL to my HTTPS/tunnel URL when deploying.
 PUBLIC_API_BASE_URL = config("PUBLIC_API_BASE_URL", default="http://127.0.0.1:8000").rstrip("/")
 
 
@@ -294,11 +294,11 @@ WHITENOISE_MANIFEST_STRICT = False
 
 
 
-# 1. Store the exact local file path configuration
+# Store the exact local file path configuration
 PROJECT_ROOT = BASE_DIR.parent
 
 PRIVATE_KEY_PATH = os.path.join(PROJECT_ROOT, "odozy-ci-agent.2026-05-17.private-key.pem")
-# 2. Open and read the file text data into memory securely
+# Open and read the file text data into memory securely
 if os.path.exists(PRIVATE_KEY_PATH):
     print("part66")
     with open(PRIVATE_KEY_PATH, "r", encoding="utf-8") as key_file:

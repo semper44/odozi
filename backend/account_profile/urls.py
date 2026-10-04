@@ -5,7 +5,7 @@ from .views import  (github_callback_view, github_push_webhook, GitHubRefreshVie
 
 
 urlpatterns = [
-    # Matches: http://127.0.0
+
     path("api/auth/login/", github_login_view, name="login"),
     path("api/auth/github/callback/", github_callback_view, name="github_callback"),
     path("api/auth/github/setup/", InstallGithubApp.as_view(), name="github_setup"),

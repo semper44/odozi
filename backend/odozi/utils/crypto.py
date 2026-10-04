@@ -2,7 +2,7 @@ import os
 from cryptography.fernet import Fernet
 from django.conf import settings
 
-# This key lives ONLY in your .env file, NEVER in the code or DB
+# This key lives ONLY in my .env file, NEVER in the code or DB
 # cipher_suite = Fernet(os.getenv("TOKEN_ENCRYPTION_KEY").encode())
 cipher_suite = Fernet(settings.TOKEN_ENCRYPTION_KEY.encode())
 

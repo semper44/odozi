@@ -88,13 +88,13 @@ class ToolStrategyMapping(BaseModel):
 
 class WorkspaceCreationTask(BaseModel):
     new_workspace_name: str = Field(description="The workspace name to create (e.g., 'mom')")
-    # Your fine-tuned flat string list remains 100% untouched!
+
     repositories: List[str] = Field(description="List of repo names to put in this workspace")
 
 
 class WorkspaceDeletionTask(BaseModel):
     """Captures explicit ID and metadata to execute your delete_workspace_with_repos function."""
-    # 🌟 Fixed: Changed from a strict required int to an optional int with a fallback default 0!
+
     workspace_name: str = Field(description="The name of the workspace being targeted for deletion")
 
 

@@ -64,7 +64,7 @@ def dashboard_view(request):
     print("wahsahala")
     print("hmmm")
     # if request.method != "POST":
-    #     return JsonResponse({"error": "Method not allowed. Must use POST for security verification."}, status=405)
+
 
     # RETRIEVE INCOMING IDENTIFICATION CONTAINERS
     ticket_id = request.COOKIES.get("ticket_id")
@@ -119,7 +119,7 @@ def dashboard_view(request):
             print(3333)
             jwt_encrypted_refresh = raw_payload["jwt_refresh_token"]
             token_refresh_string = decrypt_token(jwt_encrypted_refresh)
-            # token_refresh_string = jwt_decrypted_bytes_refresh.decode("utf-8") if isinstance(jwt_decrypted_bytes, bytes) else jwt_decrypted_bytes
+
 
             expires_at = raw_payload["expires_at"]
 
@@ -141,7 +141,7 @@ def dashboard_view(request):
         print(stored_jwt_access_token != "None")
         print("")
         try:
-            # If your cookie stores raw unencrypted text, read directly; if encrypted, run decrypt_token()
+            # If my cookie stores raw unencrypted text, read directly; if encrypted, run decrypt_token()
             github_access_token = stored_jwt_access_token.decode("utf-8") if isinstance(stored_jwt_access_token, bytes) else stored_jwt_access_token
             token_refresh_string = request.COOKIES.get("jwt_refresh_token")
 
@@ -276,7 +276,7 @@ def dashboard_view(request):
         print("")
         print("user_details", user_details)
 
-        # Commit cleaned structures to Redis with a highly scalable 1-hour lifecycle TTL (3600s)
+
         if github_res_status == 200:
             cache.set(details_cache_key, user_details, timeout=28800)
             print(f"💾 [REDIS] Successfully cached repository state array for user '{user_details}'.")
@@ -315,7 +315,7 @@ def dashboard_view(request):
     response.set_cookie(
         key="jwt_access_token",
         value=str(token_string),
-        max_age=28800, # 8 Hours matching standard working cycles
+        max_age=28800,
         httponly=True,
         secure=True,     # Forces HTTPS requirement blocks
         samesite="None", # Permits local cross-origin development handshakes
@@ -327,7 +327,7 @@ def dashboard_view(request):
         response.set_cookie(
             key="jwt_refresh_token",
             value=str(token_refresh_string),
-            max_age=28800, # 8 Hours matching standard working cycles
+            max_age=28800,
             httponly=True,
             secure=True,     # Forces HTTPS requirement blocks
             samesite="None", # Permits local cross-origin development handshakes
@@ -528,12 +528,12 @@ class DeleteRepoEnvKeysView(APIView):
         },
     )
     def delete(self, request, *args, **kwargs):
-        # 1. Safely extract tracking parameters from request body payload
+
         key_names = request.data.get('key_names', [])
         selected_repo_ids = request.data.get('selected', []) # List of GitHub integer IDs
 
         try:
-            # 2. ⚡ FIRE SERVICE TRANSACTION: Route straight into your pure Python database layer
+
             result = delete_repo_env_keys_service(
                 user=request.user, # 🛡️ Fixed: Uses the clean session user securely
                 key_names=key_names,
@@ -611,8 +611,8 @@ def receive_ci_results(request):
             
             # Use regex matching to isolate details directly out of the traceback text if needed, 
             # or fallback safely to repo names extracted from the URL context paths
-            repository_owner = "unknown" # Temporary fallback target for your current sandboxed repo account
-            repo_name = "Economic/Calendar" # Temporary fallback target for your current sandboxed repo name
+            repository_owner = "unknown" # Temporary fallback target for my current sandboxed repo account
+            repo_name = "Economic/Calendar" # Temporary fallback target for my current sandboxed repo name
             tool_type = "pytest"
 
     # =========================================================================
@@ -733,10 +733,10 @@ class AITestSummaryView(APIView):
 
     def post(self, request):        
         user_input = request.data.get("message", "")
-        memory_history = []  # Loaded from your DB as shown earlier
+        memory_history = []  # Loaded from my DB as shown earlier
 
-        # 1. 🎯 DEFINING YOUR SYSTEM PROMPT RIGHT HERE
-        # Write your master orchestrator instructions and rule descriptions here.
+
+        # Write my master orchestrator instructions and rule descriptions here.
         system_instruction_text = """
             You are the AI Orchestrator Core for Project Odozi, an autonomous agentic CI/CD gateway. Your sole objective is to intercept a user's natural language project description or request, parse their intentions, and convert them into a strict, validated JSON infrastructure configuration schema.
             You have access to a proprietary library of native Python AST Static Analysis Tooling strategies:
@@ -844,26 +844,26 @@ class AITestSummaryView(APIView):
 
         # Note: We use double curly braces {{ }} above so Python doesn't confuse the JSON format with prompt variables.
 
-        # 2. BIND THE TEXT INTO A LANGCHAIN PROMPT TEMPLATE MATRIX
+
         prompt_template = ChatPromptTemplate.from_messages([
             ("system", system_instruction_text),
             MessagesPlaceholder(variable_name="chat_history"), # Tracks conversation state
             ("human", "{input}")                              # Captures the user's immediate message
         ])
 
-        # 3. INITIALIZE THE BASE LLM USING THE GOOGLE DRIVER
-        # We pass your API key and toggle temperature down to 0 for strict formatting adherence
+
+
         llm = ChatGoogleGenerativeAI(
             model="gemini-3.5-flash",
             temperature=0,
             google_api_key=settings.GEMINI_API_KEY
         )
 
-        # 4. PIPE THEM TOGETHER TO BUILD THE ACTIVE PIPELINE CHAIN
+
         # Test A uses StrOutputParser to catch the raw text configuration string
         chain = prompt_template | llm | StrOutputParser()
 
-        # 5. THE RUNTIME MONITORING WRAPPER
+
         with get_openai_callback() as cb:
             # The execution pipeline triggers right here inside the context block!
             raw_string_response = chain.invoke({
@@ -882,7 +882,7 @@ class AITestSummaryView(APIView):
             print(f"💰 TOTAL USD RUNTIME COST:     ${total_cost:.5f}")
             print("===========================================\n")
 
-        # 6. POST-PROCESSING CLEANUP
+
         # Strip away any markdown formatting elements if the model hallucinated them
         clean_json_string = raw_string_response.replace("```json", "").replace("```", "").strip()
         
@@ -934,7 +934,7 @@ class LogStreamingResultsView(APIView):
     def post(self, request, *args, **kwargs):
         print("login stream results")
         run_id = request.data.get('run_id')
-        repo_full_name = request.data.get('repo')  # e.g., "semper44/odozi"
+        repo_full_name = request.data.get('repo')
         incoming_logs = request.data.get('logs', []) # List of strings from YAML
         
         # Check if this is the final structured summary upload block (multipart/form-data)
@@ -944,13 +944,13 @@ class LogStreamingResultsView(APIView):
             return Response({"error": "Missing run_id"}, status=status.HTTP_400_BAD_REQUEST)
 
         # ---------------------------------------------------------------------
-        # PHASE 1: HANDLING LIVE CHUNK STREAM SESSIONS
+
         # ---------------------------------------------------------------------
         if not is_final_report:
             # We append logs into Redis memory cache so they build up fast without hitting DB
             redis_log_key = f"live_logs:{run_id}"
             
-            # Fetch existing buffered lines, append new lines, and update Redis cache (valid for 2 hours)
+
             existing_buffer = cache.get(redis_log_key, [])
             existing_buffer.extend(incoming_logs)
             cache.set(redis_log_key, existing_buffer, timeout=7200)
@@ -959,7 +959,7 @@ class LogStreamingResultsView(APIView):
             return Response({"status": "chunk_buffered"}, status=status.HTTP_200_OK)
 
         # ---------------------------------------------------------------------
-        # PHASE 2: FINAL TERMINAL COMPLETION (Upload completely to R2 Object Storage)
+
         # ---------------------------------------------------------------------
         # Find or establish metadata database row placeholder
         try:
@@ -992,11 +992,11 @@ class LogStreamingResultsView(APIView):
         if run_metadata.failed_tests > 0:
             run_metadata.status = "failed"
 
-        # Define destination layout key within Cloudflare R2 bucket storage container
+
         r2_file_key = f"logs/repo_{repo_instance.id}/run_{run_id}.log"
 
         try:
-            # Upload the heavy combined logs directly into Cloudflare R2
+
             settings.R2_CLIENT.put_object(
                 Bucket=settings.CF_R2_BUCKET_NAME,
                 Key=r2_file_key,

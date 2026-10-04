@@ -71,8 +71,8 @@ def verify_github_signature(request):
     if not signature_header:
         return False
     
-    # Calculate the expected signature using your secret
-    # Ensure WEBHOOK_SECRET is in your settings.py
+    # Calculate the expected signature using my secret
+    # Ensure WEBHOOK_SECRET is in my settings.py
     hash_object = hmac.new(
         settings.WEBHOOK_SECRET.encode('utf-8'),
         msg=request.body,
@@ -102,7 +102,7 @@ def github_callback_view(request):
     # response = HttpResponseRedirect(react_app_url)
     # return response
     
-    # 1. Catch the 'code' parameter sent by GitHub in the URL query string
+
     code = request.GET.get('code')
     if not code:
         return JsonResponse({"error": "No authorization code returned from GitHub"}, status=400)
@@ -126,8 +126,8 @@ def github_callback_view(request):
             status=400
         )
     print(request.GET, "jesu")
-    # 2. Prepare the background request to trade the code for an Access Token
-    # OAuth configuration credentials (keep your Client Secret in your settings.py env)
+
+    # OAuth configuration credentials (keep my Client Secret in my settings.py env)
     client_id = "Iv23liUEbKH7D09scRIZ"
     # Read the variable safely from settings.py. If it's missing, default to an empty string.
     client_secret = getattr(settings, "GITHUB_APP_CLIENT_SECRET", "")
@@ -161,7 +161,7 @@ def github_callback_view(request):
     if not github_access_token:
         return JsonResponse({"error": "Failed to exchange code for access token", "details": token_data}, status=400)
 
-    # 3. Use the fresh token to fetch the user's basic profile details
+
     user_url = "https://api.github.com/user"
     user_headers = {
         "Authorization": f"Bearer {github_access_token}",
@@ -173,7 +173,7 @@ def github_callback_view(request):
     github_email = user_profile.get("email")
     print("user_profile", user_profile)  # Debugging line to inspect the user profile data returned by GitHub
 
-    # 4. Fallback if user's email is private (GitHub returns empty email if hidden)
+
     if not github_email:
         emails_url = "https://api.github.com/user/emails"
         emails_profile = requests.get(emails_url, headers=user_headers).json()
@@ -208,7 +208,7 @@ def github_callback_view(request):
     if created:
         WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
 
-    # 5. DB MANAGEMENT: Locate or create the user record in Django
+
 
     user, created = User.objects.get_or_create(
         username=github_username,
@@ -233,13 +233,13 @@ def github_callback_view(request):
 
     raw_access_token = token_data.get("access_token")
     raw_refresh_token = token_data.get("refresh_token")
-    expires_in_seconds = int(token_data.get("expires_in", 28800)) # 8 Hours default
+    expires_in_seconds = int(token_data.get("expires_in", 28800))
 
-     # 2. CAPTURE DUAL-LOCK FINGERPRINT MATRIX Parameters
+
     browser_family = get_browser_family(request)
 
     expiration_time = timezone.now() + datetime.timedelta(seconds=expires_in_seconds)
-    expires_at_iso = expiration_time.isoformat() # Looks like: "2026-06-02T23:57:00.000Z"
+    expires_at_iso = expiration_time.isoformat()
     
     
 
@@ -254,7 +254,7 @@ def github_callback_view(request):
     login(request, user, backend='django.contrib.auth.backends.ModelBackend')
 
     print("Tokens encrypted and saved to database successfully.", encrypt_token(my_jwt_access_token))
-    # SEAL DATA PACKAGE INSIDE REDIS FOR EXACTLY 60 SECONDS, GENERATE THE SHORT-LIVED 60-SECOND TRANSIT TICKET
+
     ticket_id = str(uuid.uuid4())
     redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
     if my_jwt_refresh_token and my_jwt_access_token and raw_access_token:
@@ -275,7 +275,7 @@ def github_callback_view(request):
 
     # This deletes the entire key from Redis RAM instantly
     cache.delete(details_cache_key)
-    # 5. SECURE FRAGMENT REDIRECT
+
     # We use a URL Hash Fragment '#' so network routing nodes/logs can NEVER read it
     react_app_url = settings.REACT_URL
 
@@ -386,7 +386,7 @@ class GitHubRefreshView(APIView):
         github_new_tokens = {}
 
         # if request.method != "POST":
-        #     return JsonResponse({"error": "Method not allowed"}, status=405)
+
 
         try:
             print("Refresh token request body:", request.COOKIES)
@@ -425,9 +425,9 @@ class GitHubRefreshView(APIView):
         # if not token:
         #     print(f"⚡ [TOKEN CACHE HIT] Reusing cached GitHub token for installation {installation_id}")
         #     print(f"⏳ [TOKEN CACHE MISS] Generating a fresh GitHub token...")
-        #     # Call your original dynamic function to mint a fresh 1-hour token
+
         #     fresh_token = get_installation_access_token(installation_id)
-        #     cache.set(cache_key, fresh_token, timeout=55 * 60)
+
 
 
 
@@ -518,7 +518,7 @@ class GitHubRefreshView(APIView):
         else:
             print("GitHub expires at is None")
 
-        # ✅ FIX HERE (your crash)
+        # ✅ FIX HERE (my crash)
         github_new_tokens["jwt_access_token"] = new_access
         github_new_tokens["jwt_refresh_token"] = str(refresh)
 
@@ -580,10 +580,10 @@ def github_push_webhook(request):
     if not signature:
         return JsonResponse({"error": "Mising signature verification header"}, status=401)
 
-    # B. Read your raw request body string bytes
+    # B. Read my raw request body string bytes
     raw_payload_bytes = request.body
 
-    # C. Calculate your own secure HMAC hash string using your private webhook password
+    # C. Calculate my own secure HMAC hash string using my private webhook password
     secret_key_bytes = settings.GITHUB_APP_CLIENT_SECRET.encode('utf-8')
     computed_hash = hmac.new(secret_key_bytes, raw_payload_bytes, hashlib.sha256).hexdigest()
     expected_signature = f"sha256={computed_hash}"
@@ -593,24 +593,24 @@ def github_push_webhook(request):
         return JsonResponse({"error": "Invalid signature. Payload source untrusted."}, status=403)
 
 
-    # 1. Parse the JSON body safely
+
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return HttpResponseBadRequest("Invalid JSON payload structure")
 
-    # 2. Extract verification headers
+
     event_type = request.headers.get('X-GitHub-Event')
 
     if event_type == 'push':
         # For a push, the branch is parsed out of the reference string
-        # branch = data.get('ref', '').split('/')[-1]
+
         print(data, "data")
         repo_url = data.get('repository', {}).get('clone_url')
         default_branch = data.get('repository', {}).get('default_branch', 'master')
         base_branch = default_branch
 
-         # 3. Extract tracking variables from GitHub payload shape
+
         repo_data = data.get("repository", {})
         repo_name = repo_data.get("name")
         repo_owner = repo_data.get("owner", {}).get("login")
@@ -626,7 +626,7 @@ def github_push_webhook(request):
         if not all([repo_name, repo_owner, commit_sha, installation_id]):
             return JsonResponse({"error": "Missing tracking metrics in payload structure"}, status=400)
 
-        # ⚠️ MOCK MAPPING: In production, your AI agent / DB fetches what the user requested.
+        # ⚠️ MOCK MAPPING: In production, my AI agent / DB fetches what the user requested.
         # For this testing kickoff, we pass a default setup array.
         mock_user_rules = [
             {"rule_key": "check_auth", "params": {"function_prefix": "create", "decorator_name": "login_required"}},
@@ -635,16 +635,16 @@ def github_push_webhook(request):
 
 
 #         How to Fix the Pipeline Token Exchange
-# To ensure your dynamic code functions exactly like your hardcoded logic, you need to route the event loop exclusively through your GitHub App implementation framework.
-# Step 1: Update your Local Development Tunnel Target
-# Go to your GitHub Developer Settings -> GitHub Apps.
-# Select your App engine profile.
+# To ensure my dynamic code functions exactly like my hardcoded logic, I need to route the event loop exclusively through my GitHub App implementation framework.
+
+# Go to my GitHub Developer Settings -> GitHub Apps.
+# Select my App engine profile.
 # Scroll to the Webhook URL field configuration block.
-# Replace whatever old path is there with your current active localtunnel link: https://loca.lt.
-# Step 2: Remove Repository-Level Webhook Links
-# Go to your Taskmaster- code repository settings interface, open the Webhooks side tab, and Delete any manually created URL endpoints targeting your local machine. This ensures GitHub sends pure, App-authorized integration events containing genuine validation metadata.
-# Step 3: Implement Backend Fail-Safe Fallbacks
-# To protect your background Celery tasks from crashing when mixed payloads hit your webserver routing modules, implement a fallback pattern inside your view. If the incoming payload lacks a valid app context wrapper, fallback cleanly to your sandbox developer credential layout:
+# Replace whatever old path is there with my current active localtunnel link: https://loca.lt.
+
+# Go to my Taskmaster- code repository settings interface, open the Webhooks side tab, and Delete any manually created URL endpoints targeting my local machine. This ensures GitHub sends pure, App-authorized integration events containing genuine validation metadata.
+
+# To protect my background Celery tasks from crashing when mixed payloads hit my webserver routing modules, implement a fallback pattern inside my view. If the incoming payload lacks a valid app context wrapper, fallback cleanly to my sandbox developer credential layout:
 # python
 #         # Extract the real App installation payload signature block
 #         installation_id = data.get("installation", {}).get("id")
@@ -653,7 +653,7 @@ def github_push_webhook(request):
             # DEFENSIVE PROGRAMMING: Fallback 
 
 
-        # 4. HAND OFF TO CELERY: Trigger Phase 2 asynchronously out of sight
+
         
         run_agentic_pipeline.delay( #type: ignore
             repo_owner=repo_owner,
@@ -682,7 +682,7 @@ def github_push_webhook(request):
     else:
         return JsonResponse({"status": "ignored", "message": f"Event {event_type} not supported"}, status=200)
 
-    # 3. Structural Field Validations
+
     if not repo_url or not branch:
         return JsonResponse({"error": "Missing repository tracking or reference tracking keys"}, status=400)
 
@@ -778,16 +778,16 @@ class SaveLLMConfigView(APIView):
 #     Listens for real-time GitHub App installation events.
 #     Creates the Workspace container and links the managing User.
 #     """
-#     # 1. Parse the incoming webhook body payload safely
+
 #     try:
 #         payload = json.loads(request.body)
 #     except json.JSONDecodeError:
 #         return HttpResponseBadRequest("Malformed JSON payload")
 
-#     # 2. Verify this is explicitly an installation event step
+
 #     event_type = request.headers.get('X-GitHub-Event')
 #     if event_type != 'installation':
-#         return JsonResponse({"status": "ignored", "message": f"Event {event_type} ignored by this endpoint"}, status=200)
+
 
 #     action = payload.get("action")  # Can be "created", "deleted", or "suspend"
 #     installation_data = payload.get("installation", {})
@@ -799,13 +799,13 @@ class SaveLLMConfigView(APIView):
 #     print(" ")
 #     print(" ")
 #     print(payload,"payload")  # Debugging line to inspect the entire payload structure returned by GitHub
-#     github_account_name = account_data.get("login") # e.g., "benmore-tech" or "semper44"
+
 
 #     if not installation_id or not github_account_name:
-#         return JsonResponse({"error": "Missing critical architectural metadata"}, status=400)
+
 
 #     # =========================================================================
-#     # ACTION: CREATED (The User completes Step 2 Installation)
+
 #     # =========================================================================
 #     if action == "created":
 #         # Look up which Django user profile owns this matching GitHub handle
@@ -815,7 +815,7 @@ class SaveLLMConfigView(APIView):
 #             # Fallback fallback safety: if testing, map it to the first user or log it
 #             target_user = User.objects.first() 
 #             if not target_user:
-#                 return JsonResponse({"error": "No platform users exist to map this integration"}, status=404)
+
 
 #         # Create or fetch the core organization workspace block container
 #         workspace, ws_created = Workspace.objects.get_or_create(
@@ -848,7 +848,7 @@ class SaveLLMConfigView(APIView):
 #             workspace.delete() 
 #             return JsonResponse({"status": "uninstalled_cleanly"})
 #         except Workspace.DoesNotExist:
-#             return JsonResponse({"status": "already_purged"}, status=200)
+
 
 #     return JsonResponse({"status": "ignored_action", "action": action})
 

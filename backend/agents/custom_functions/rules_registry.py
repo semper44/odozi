@@ -11,7 +11,7 @@ from .rule_classes import (
     PiiLeakageConstraintVisitor
 )
 
-# Map your system configuration strings to the corrected 'ast' engines
+# Map my system configuration strings to the corrected 'ast' engines
 AST_TOOL_REGISTRY = {
     "check_api_auth": APIAuthVisitor,
     "check_general_auth": GeneralAuthenticationVisitor,

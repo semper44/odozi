@@ -209,22 +209,22 @@ def extract_test_coverage(path):
 
 user_payload = {
     "constraints": [
-        # Check 1: Must call transaction.atomic
+
         {
             "type": "check_required_call",
             "params": {"keyword": "payment", "required_call": "transaction.atomic"}
         },
-        # Check 2: Must call select_related
+
         {
             "type": "check_required_call",
             "params": {"keyword": "payment", "required_call": "select_related"}
         },
-        # Check 3: Must call prefetch_related
+
         {
             "type": "check_required_call",
             "params": {"keyword": "payment", "required_call": "prefetch_related"}
         },
-        # Check 4: Line count limit on payment functions
+
         {
             "type": "check_function_length", # We will define this template below
             "params": {"keyword": "payment", "max_lines": 200}
@@ -284,7 +284,7 @@ def find_matching_repos_from_redis(all_repos, user_provided_input, channel_name)
             default_branch.add(default__redis_branch)
 
     print("disrespect", default_branch)
-    # Convert back to a list to easily pass back to your LLM or user chat
+    # Convert back to a list to easily pass back to my LLM or user chat
     return {
         "matched_names":list(matched_names), 
         "default_branches": list(default_branch),
@@ -598,7 +598,7 @@ def ensure_orchestrator_yaml_is_online(
                             "is_github_error": True
                         })
                 else:
-                    # Client errors (4xx like 404, 401, 422) - retrying won't resolve client issues
+
                     errors.append({
                         "branch": branch,
                         "status": response.status_code,
@@ -790,7 +790,7 @@ Example Summary Output:
 # REDIS-DRIVEN AGENTIC PIPELINE STATE ENGINE
 # ============================================================================
 
-PIPELINE_STATE_TTL = 60 * 15  # 15 minutes
+PIPELINE_STATE_TTL = 60 * 15
 PIPELINE_TIMEOUT_SECONDS = 60 * 14
 FOLLOW_UP_LOCK_TTL = 60 * 5
 
@@ -1113,6 +1113,7 @@ def trigger_pipeline_follow_up_if_ready(pipeline_id: str):
         pipeline_id=pipeline_id,
     )
     return True
+
 @shared_task(
     bind=True,
     autoretry_for= UNIVERSAL_NETWORK_ERRORS,
@@ -1139,7 +1140,7 @@ def process_agentic_chat_turn_task(
     auditjob_id = None
 
     # -------------------------------------------------------------------------
-    # PHASE 1: FAST DATABASE READ (Get past records instantly)
+
     # -------------------------------------------------------------------------
     if not prompt_text:
         return
@@ -1262,7 +1263,7 @@ def process_agentic_chat_turn_task(
     try:
 
         # ---------------------------------------------------------------------
-        # PHASE 2: LONG NETWORK API CALL
+
         # ---------------------------------------------------------------------
 
         with get_openai_callback() as cb:
@@ -1299,7 +1300,7 @@ def process_agentic_chat_turn_task(
 
 
         # ---------------------------------------------------------------------
-        # PHASE 3: CONTEXT CONVERSATION OVERHAUL & BASELINE SEEDING
+
         # ---------------------------------------------------------------------
 
         ui_layout_route = result.ui_layout_route
@@ -1353,7 +1354,7 @@ def process_agentic_chat_turn_task(
 
 
         # ---------------------------------------------------------------------
-        # PHASE 3.5: USER / GITHUB REPOSITORY CONTEXT
+
         # ---------------------------------------------------------------------
 
         repo_owner = user.username
@@ -1497,12 +1498,12 @@ def process_agentic_chat_turn_task(
 
 
         # ---------------------------------------------------------------------
-        # PHASE 4: BUILD ASYNCHRONOUS EXECUTION PLAN
+
         # ---------------------------------------------------------------------
         pipeline_id = uuid.uuid4().hex
 
         # ---------------------------------------------------------------------
-        # PHASE 4A: BUILD TASK SIGNATURES
+
         # ---------------------------------------------------------------------
 
         intent_signatures = []
@@ -1816,7 +1817,7 @@ def process_agentic_chat_turn_task(
 
 
         # ---------------------------------------------------------------------
-        # PHASE 5: DETERMINE WHICH ORCHESTRATION PATH WE HAVE
+
         # ---------------------------------------------------------------------
         # Here I check if I have any executable tasks generated from the LLM.
         # If the user is just having a casual chat or asking an informational question
@@ -1907,7 +1908,7 @@ def process_agentic_chat_turn_task(
             print("🚀 Dispatching GitHub pipeline tasks asynchronously...")
             group(github_pipeline_signatures).apply_async()
 
-            # Safety net: If GitHub takes too long or drops webhooks, fire my partial follow-up after 14 mins
+
             pipeline_timeout_check.apply_async(
                 args=[pipeline_id],
                 countdown=PIPELINE_TIMEOUT_SECONDS,
@@ -2153,8 +2154,8 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
                 matched_repo_dict = next((repo for low_name, repo in cached_pairs if user_input in low_name), None)
                 
                 if matched_repo_dict:
-                    # 2. 🚀 FIX: Structure the exact schema fields your Serializer expects!
-                    # Adjust these keys ('repo_id', 'repo_name', etc.) to match your actual serializer fields
+
+                    # Adjust these keys ('repo_id', 'repo_name', etc.) to match my actual serializer fields
                     full_name = matched_repo_dict.get("full_name", "")
                     repo_owner = full_name.split("/")[0] if "/" in full_name else user.username
 
@@ -2172,7 +2173,7 @@ def async_handle_workspace_creation_task(workspaces,channel_name, user_id, paren
                         "message": f"Repository '{user_input}' not found."
                     }
 
-            # 3. Safe validation pass execution
+
             if len(repos_found) > 0:
                 workspace_and_repo_result = create_workspace_with_repos(user, ws_name, repos_found)
                 error_data.update(workspace_and_repo_result)
@@ -2232,7 +2233,7 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
     if len(deletion_list)>0:
         for ws_task in deletion_list:
             # Support lookups via 'workspace_id' integer keys, falling back to name parameters if required
-            # Adjust these parameter keys to match your exact Pydantic schema naming structure!
+            # Adjust these parameter keys to match my exact Pydantic schema naming structure!
             workspace_name = ws_task.get("workspace_name")
             print(f"oh chim- {workspace_name}")
 
@@ -2251,7 +2252,7 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
                 continue
             print("workspace_id", workspace_id)
             try:
-                # 1. Fire your decoupled service processing transaction logic block
+
                 execution_result = delete_workspace_with_repos(
                     user=user,
                     workspace_id=int(workspace_id)
@@ -2281,7 +2282,7 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
     bind=True,
     autoretry_for=(OperationalError,),
     retry_kwargs={'max_retries': 5},
-    retry_backoff=True,         # Exponential backoff (1s, 2s, 4s, 8s...)
+    retry_backoff=True,
     retry_backoff_max=15        # Max wait limit per retry
 )
 def async_handle_env_key_creation_task(self, env_key_requests, channel_name, user_id, ui_layout, parent_repo_list):
@@ -2335,8 +2336,8 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
             repos_not_found = []
             print("lisa",  raw_target_repos)
 
-            # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
-                    # 1. 🔍 Try to match explicitly passed repositories if they exist in the payload
+
+
             if raw_target_repos:
                 for raw_item in raw_target_repos:
                     # 🌟 FIX A: Extract the repository name string safely depending on data type
@@ -2360,7 +2361,7 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
                         # if the cache does not have this repository loaded yet
                         if isinstance(raw_item, dict):
                             incoming_id = raw_item.get("repo_id")
-                            # Only append if it's a real database primary key (not placeholder 0)
+
                             if incoming_id and incoming_id != 0:
                                 selected_repo_ids.append(incoming_id)
                                 continue
@@ -2377,11 +2378,11 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
                     continue
 
 
-            # 2. ⚡ MOVE TRY BLOCK INSIDE THE LOOP CONTEXT
+
             try:
                 print("qqqqqqqqqqqqqqqq - Target scope verified online.")
                 
-                # Invoke your business service function natively inside the loop
+                # Invoke my business service function natively inside the loop
                 service_result = create_repo_env_keys_service(
                     user=user,
                     repositories_data=parent_repo_list, 
@@ -2472,7 +2473,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
 
             print("ev-requests_list", requests_list,"rrr")
 
-            # Match loose string inputs to your parent cached array list items to gather specific IDs
+            # Match loose string inputs to my parent cached array list items to gather specific IDs
             for raw_name in raw_target_repos:
                 user_input = str(raw_name).lower().replace(" ", "-").strip()
                 
@@ -2543,7 +2544,7 @@ def run_agentic_pipeline(
     target_branch,
     installation_id,
     user_requested_rules,
-    pipeline_id,  # <<< CHANGED
+    pipeline_id,  
 ):
     """
     Asynchronous platform dispatcher.
@@ -2583,7 +2584,7 @@ def run_agentic_pipeline(
         print("=" * 80)
 
         # =========================================================================
-        # STEP 0: GENERATE INSTALLATION ACCESS TOKEN
+
         # =========================================================================
 
         try:
@@ -2607,9 +2608,7 @@ def run_agentic_pipeline(
                 "message": err_msg
             }
 
-        # =========================================================================
-        # STEP 1: ENSURE ORCHESTRATOR YAML EXISTS
-        # =========================================================================
+        # ENSURE ORCHESTRATOR YAML EXISTS
 
         resolved_repo_name = (
             ensure_orchestrator_yaml_is_online(
@@ -2622,10 +2621,7 @@ def run_agentic_pipeline(
             )
         )
 
-        print(
-            "Repository resolution result:",
-            resolved_repo_name
-        )
+        print("Repository resolution result:",resolved_repo_name)
 
         if resolved_repo_name.get("status") != "success":
             err_msg = resolved_repo_name.get("message")
@@ -2664,10 +2660,7 @@ def run_agentic_pipeline(
                 "error": err_msg
             }
 
-        # =========================================================================
-        # STEP 2: BUILD ODOZI VISITOR SCRIPT
-        # =========================================================================
-
+        # BUILD ODOZI VISITOR SCRIPT
         print("")
         print(
             "Building Odozi visitor script:",
@@ -2920,23 +2913,7 @@ if __name__ == "__main__":
             ).decode()
         )
 
-        # =========================================================================
-        # STEP 3: BUILD TOOL LIST
-        # =========================================================================
-
-        print(
-            "user_requested_rules",
-            user_requested_rules
-        )
-
-        print(
-            "TOOLS THAT WILL RUN:",
-            yaml_tools_list
-        )
-
-        # =========================================================================
-        # STEP 4: LOAD REGISTERED ENVIRONMENT KEYS
-        # =========================================================================
+        # LOAD REGISTERED ENVIRONMENT KEYS
 
         repo_merge = (
             f"{repo_owner}/{repo_name}"
@@ -2961,10 +2938,7 @@ if __name__ == "__main__":
             else "[]"
         )
 
-        # =========================================================================
-        # STEP 5: BUILD GITHUB DISPATCH URL
-        # =========================================================================
-
+        #  GITHUB DISPATCH URL
         matched_repo_name = (
             resolved_repo_name.get(
                 "repo"
@@ -2997,9 +2971,7 @@ if __name__ == "__main__":
             "User-Agent": "Django-Application-Gateway"
         }
 
-        # =========================================================================
-        # STEP 6: DISPATCH GITHUB WORKFLOW
-        # =========================================================================
+        # DISPATCH GITHUB WORKFLOW
 
         api_payload = {
             "ref": target_branch,
@@ -3098,7 +3070,7 @@ if __name__ == "__main__":
                     else:
                         break
                 else:
-                    # Client errors (4xx) - retrying will not help
+
                     break
             except requests.RequestException as e:
                 print(f"GitHub dispatch network error (attempt {attempt}/{max_dispatch_retries}): {e}")
@@ -3154,7 +3126,7 @@ if __name__ == "__main__":
                     }
 
         # =========================================================================
-        # STEP 7: GITHUB ACCEPTED DISPATCH
+
         # =========================================================================
 
         if feedback_r is not None and feedback_r.status_code == 204:
@@ -3215,7 +3187,7 @@ if __name__ == "__main__":
             return resolved_repo_name
 
         # =========================================================================
-        # STEP 8: GITHUB REJECTED DISPATCH
+
         # =========================================================================
 
         else:
@@ -3628,7 +3600,7 @@ def handle_backend_error_followup( self,
     error_data = error_data or {}
     error_data["child_errors"] = normalized_child_errors
     
-    # 1. Fetch past chat logs so the model knows what the user originally requested
+
     session = ChatSession.objects.get(pk=session_id)
     past_messages = list(session.messages.all().order_by('created_at')[:10])
     
@@ -3699,7 +3671,7 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
         loc = 0
         status = 'passed'
 
-        # 1. 🎯 GLOBAL DEFENSIVE GATE: Determine if payload is clean JSON or a raw Crash Traceback
+
         is_json_format = False
         parsed_json = None
         

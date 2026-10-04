@@ -17,7 +17,6 @@ interface LLMState {
   /** The currently selected LLM provider, e.g. "gemini" or "openai". */
   activeProvider: string;
 
-  /** The currently selected model for the active provider. 'gpt-4o', 'gpt-4o-mini' */
   activeModel: string;
 
   /** Updates the active LLM provider and model. */

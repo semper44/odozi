@@ -34,7 +34,7 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
     freshly_created_in_db = []
 
     with transaction.atomic():              
-        # 1. Create or fetch the Workspace shell
+
         workspace, workspace_created = Workspace.objects.get_or_create(
             name=workspace_name.strip(),
             owner=user,
@@ -44,7 +44,7 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
         if workspace_created:
             WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=user)
 
-        # 2. Process Repository Payloads
+
         if repositories_data:
             serializer = GitHubRepositorySerializer(data=repositories_data, many=True)
             if not serializer.is_valid():
@@ -89,7 +89,7 @@ def create_workspace_with_repos(user, workspace_name: str, repositories_data: li
                 
                 repos_attached.append(repo_instance)
 
-            # 3. Bulk attach relationships securely across your ManyToMany bridge canvas table
+
             if repos_attached:
                 workspace.repositories.add(*repos_attached)
 
@@ -133,19 +133,19 @@ def delete_workspace_with_repos(user, workspace_id: int) -> dict:
     print("celebrate")
 
     with transaction.atomic():
-        # 1. Gather all repositories currently attached to this workspace
+
         associated_repositories = list(workspace.repositories.all())
 
-        # 2. Delete the workspace (This cascades and unlinks the repos from this workspace)
+
         workspace.delete()
 
-        # 3. 🧹 UPGRADED GARBAGE COLLECTION ENGINE: Evaluate workspace-independent assets
+
         for repo in associated_repositories:
             
-            # Criterion 1: Is this repository linked to any remaining workspace?
+
             is_linked_to_workspaces = repo.workspaces.exists() if hasattr(repo, 'workspaces') else (repo.workspace is not None)
             
-            # Criterion 2: Does this repository have any standalone environment keys still assigned?
+
             has_isolated_env_keys = RepoEnvKey.objects.filter(repo=repo).exists()
 
             # 🌟 THE STRICT DOUBLE-LOCK PURGE CHECK: 
@@ -173,7 +173,7 @@ def delete_workspace_with_repos(user, workspace_id: int) -> dict:
                     "reason": "Preserved. " + " & ".join(preservation_reason)
                 })
         print("ada")
-        # 4. Evict user's repository state array from Redis cache so dashboard re-syncs instantly
+
         cache.delete(f"user:repos:{user.id}")
 
     return {
@@ -202,10 +202,10 @@ def create_repo_env_keys_service(user, repositories_data: list, key_names: list,
     print(selected_repo_ids, "ronus", workspace_name)
 
     with transaction.atomic():
-        # 1. Clean and uppercase key names to enforce case sanity
+
         cleaned_keys = list(set([str(name).strip().upper() for name in key_names if str(name).strip()]))
 
-        # 2. Securely resolve the Workspace context
+
         if workspace_name.lower() != "default":
             try:
                 repo_workspace = Workspace.objects.get(name=workspace_name, owner=user)
@@ -442,7 +442,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
         # =====================================================================
         print("personal")
         for repo in affected_repos:
-            # 🌟 FIX: Query your actual ManyToMany relationship field `workspace` safely using values_list
+            # 🌟 FIX: Query my actual ManyToMany relationship field `workspace` safely using values_list
             workspace_ids = list(repo.workspace.values_list('id', flat=True))
             is_in_any_workspace = repo.workspace.exists()
             
@@ -492,11 +492,11 @@ def unlink_or_purge_single_repo(user, workspace_id: int, repo_id: int) -> dict:
         raise ValidationError("Workspace or Repository mapping target not found.")
 
     with transaction.atomic():
-        # 1. Break the association link
+
         workspace.repositories.remove(repo)
         
         purged_globally = False
-        # 2. Check if it's an orphan now
+
         if not repo.workspaces.exists():
             repo.delete() # Purge to free up database rows
             purged_globally = True
@@ -515,21 +515,21 @@ def get_installation_access_token(installation_id):
     Uses your Private Key to mint a JWT, then exchanges it for a 
     short-lived 1-hour installation access token from GitHub.
     """
-    # 1. Prepare the cryptographic JWT claims payload
-    issued_at = int(time.time()) - 60  # Account for minor clock drifts (1 min ago)
-    expires_at = issued_at + (10 * 60) # JWTs have a maximum lifetime limit of 10 minutes
+
+    issued_at = int(time.time()) - 60
+    expires_at = issued_at + (10 * 60)
     
     payload = {
-        "iss": settings.ODOZI_APP_ID,  # Your GitHub App's unique identifier
+        "iss": settings.ODOZI_APP_ID,  # my GitHub App's unique identifier
         "iat": issued_at,
         "exp": expires_at,
     }
     
 
-    # 2. Encode and sign the JWT using your multi-line RSA Private Key
+
     encoded_jwt = jwt.encode(payload, settings.GITHUB_APP_PRIVATE_KEY, algorithm="RS256")
     
-    # 3. Request the temporary installation token from GitHub
+
     url = (
         f"https://api.github.com/app/installations/{installation_id}/access_tokens"
     )
@@ -545,7 +545,7 @@ def get_installation_access_token(installation_id):
     print("Response:", response.text)
     
     if response.status_code == 201:
-        # Success: Returns a dictionary containing your temporary token string
+        # Success: Returns a dictionary containing my temporary token string
         return response.json().get("token")
     else:
         raise Exception(f"Failed to generate installation token: {response.text}")

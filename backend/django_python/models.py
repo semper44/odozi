@@ -135,12 +135,12 @@ class ToolExecutionStep(models.Model):
     tool_name = models.CharField(max_length=50) # e.g., 'pytest', 'ruff', 'bandit'
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='running')
     
-    # 🌟 The unique storage pointer to Cloudflare R2 file containing this tool's raw logs
-    # Format: "logs/run_22/pytest.log"
+
+
     log_storage_path = models.CharField(max_length=500, blank=True, null=True)
     
     # Summary Metrics (Stored as JSON so it flexes dynamically per tool)
-    # Pytest saves: {"passed": 12, "failed": 0}. Ruff saves: {"errors_found": 3}
+
     summary_metrics = models.JSONField(default=dict, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)

@@ -1,12 +1,10 @@
 $(document).ready(function() {
-    // 1. Parse the URL parameters to extract the authorization code
     const urlParams = new URLSearchParams(window.location.search);
     const githubCode = urlParams.get('code');
 
     if (githubCode) {
         $('#status-message').text('Authenticating with backend server...');
 
-        // 2. Send the code to your dj-rest-auth GitHub endpoint
         $.ajax({
             url: 'http://127.0.0', // Your exact Django API endpoint
             type: 'POST',

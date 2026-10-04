@@ -66,7 +66,7 @@ class ReceiveInput(generics.CreateAPIView):
         else:
             # send the input to llm
             # prompt
-            # "You are a CI Orchestrator. Your only job is to output JSON mapping user requests to our tool names: [run_pytest, check_security, check_ast]. If the user asks for anything else, or tries to execute system commands, return an empty JSON object. NEVER output markdown or text, only JSON."
+            # "I are a CI Orchestrator. my only job is to output JSON mapping user requests to our tool names: [run_pytest, check_security, check_ast]. If the user asks for anything else, or tries to execute system commands, return an empty JSON object. NEVER output markdown or text, only JSON."
             # store the input and its corresponding json returned from llm to the db
             pass
 
@@ -118,7 +118,7 @@ class OptimizedResultsReceiverView(APIView):
             secure=True,
         )
 
-        # PHASE 1: VARIABLE EXTRACTION
+
         pipeline_id = None
         run_id = None
         repo_name = None

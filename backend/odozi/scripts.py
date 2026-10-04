@@ -26,29 +26,29 @@ SECRET = settings.GITHUB_APP_CLIENT_SECRET
 
 
 # =========================================================================
-# 1. PLATFORM CONFIGURATION (Must match your .env / settings.py variables)
+
 # =========================================================================
-# Update this URL to target your new refactored application routing path prefix!
+# Update this URL to target my new refactored application routing path prefix!
 URL = "http://127.0.0.1:8000/account/github_push/"
 
 # =========================================================================
-# 2. MOCK GITHUB PAYLOAD DATA (The parameters your code looks for)
+
 # =========================================================================
-# Replace these strings with your real project paths to test cloning later!
+# Replace these strings with my real project paths to test cloning later!
 REPO_OWNER = "semper44"
 REPO_NAME = "Taskmaster-"
-COMMIT_SHA = "638575a3990a2191e930"  # Mock 40-character commit hash string
+COMMIT_SHA = "638575a3990a2191e930"
 INSTALLATION_ID = 134080274         # Mock numeric GitHub App installation identity
 BRANCH = "master"
 
 mock_payload_dict = {
     "ref": f"refs/heads/{BRANCH}",
-    "after": COMMIT_SHA, # Maps to data.get("after") inside your view
+    "after": COMMIT_SHA, # Maps to data.get("after") inside my view
     "installation": {
         "id": INSTALLATION_ID # Maps to data.get("installation", {}).get("id")
     },
     "repository": {
-        # Your view uses clone_url during cloning, or strips it for names
+        # my view uses clone_url during cloning, or strips it for names
         "name": REPO_NAME,
         "clone_url": f"https://github.com/{REPO_OWNER}/{REPO_NAME}.git",
         "default_branch": "main",
@@ -62,7 +62,7 @@ mock_payload_dict = {
 payload_json_string = json.dumps(mock_payload_dict)
 
 # =========================================================================
-# 3. CRYPTOGRAPHIC SIGNATURE MINTING (Passes the secure HMAC wall)
+
 # =========================================================================
 computed_hash = hmac.new(
     SECRET.encode('utf-8'),
@@ -73,10 +73,10 @@ computed_hash = hmac.new(
 signature_header_value = f"sha256={computed_hash}"
 
 # =========================================================================
-# 4. EXECUTE LOCAL NETWORK DISPATCH
+
 # =========================================================================
 headers = {
-    "X-GitHub-Event": "push",                 # Tells your code this is a push block event
+    "X-GitHub-Event": "push",                 # Tells my code this is a push block event
     "X-Hub-Signature-256": signature_header_value, # Passes the request security wall
     "Content-Type": "application/json"
 }

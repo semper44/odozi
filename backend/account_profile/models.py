@@ -6,12 +6,12 @@ from cryptography.fernet import Fernet
 
 
 
-# Create your models here.
+# Create my models here.
 
 
 class UserProfileModel(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="user_profile")
-    # 2. ENCRYPTED FIELD: Tokens are saved as binary blobs, completely unreadable to hackers
+
     encrypted_access_token = models.BinaryField(blank=True, null=True)
     encrypted_refresh_token = models.BinaryField(blank=True, null=True)
     installation_id = models.BigIntegerField(unique=True, db_index=True, blank=True, null=True)    
@@ -33,9 +33,9 @@ class Workspace(models.Model):
         on_delete=models.CASCADE
     )
     # user = models.ForeignKey(UserProfileModel, on_delete=models.CASCADE, related_name="github_integration")
-    # 1. This is just a standard ID number, safe to keep as plain text
+
     # Store the name of the company or organization space cleanly
-    # e.g., "semper44", "company-a-org", "company-b-org"
+
     github_account_name = models.CharField(max_length=150)   
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -60,7 +60,7 @@ class GitHubRepository(models.Model):
     repo_id = models.BigIntegerField(db_index=True)
     repo_full_name = models.CharField(max_length=255, db_index=True) # e.g., "OdoziEngine/Taskmaster"
     
-    # Settings for your app orchestrator
+    # Settings for my app orchestrator
     is_active = models.BooleanField(default=False, db_index=True)
     is_private = models.BooleanField(default=False)
     branches_url = models.URLField(max_length=500, blank=True, null=True)
@@ -141,7 +141,7 @@ class UserLLMConfig(models.Model):
     """
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="llm_config")
     provider = models.CharField(max_length=50)  # e.g., 'openai', 'anthropic', 'google'
-    model_name = models.CharField(max_length=100) # e.g., 'claude-3-5-sonnet-latest'
+    model_name = models.CharField(max_length=100)
     
     # Stores the encrypted token string text
     encrypted_api_key = models.TextField()

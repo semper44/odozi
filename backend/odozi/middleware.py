@@ -97,7 +97,7 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
         scope["user"] = AnonymousUser()
         scope["github_token"] = None
 
-        # 1. Parse incoming cookies header string
+
         headers = dict(scope.get("headers", []))
         cookie_header = headers.get(b"cookie", b"").decode("utf-8")
 
@@ -107,7 +107,7 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
                 k, v = cookie.strip().split("=", 1)
                 cookies[k] = v
 
-        # 2. Extract my secure JWT access token (from cookie or optional query param fallback)
+
         encrypted_jwt = cookies.get("jwt_access_token")
         if not encrypted_jwt and scope.get("query_string"):
             query_params = parse_qs(scope["query_string"].decode("utf-8"))
@@ -115,18 +115,18 @@ class CookieJwtAuthMiddleware(BaseMiddleware):
 
         if encrypted_jwt:
             try:
-                # 3. Clean token string
+
                 token_string = encrypted_jwt.decode("utf-8") if isinstance(encrypted_jwt, bytes) else encrypted_jwt
 
-                # 4. Verify cryptographic signature locally
+
                 parsed_jwt = AccessToken(token_string)
                 user_id = parsed_jwt.get("id") or parsed_jwt.get("user_id")
 
-                # 5. Look up user and stored GitHub token in my database
+
                 user, db_github_token = await get_user_and_github_token_from_db(user_id)
                 scope["user"] = user
 
-                # 6. Prefer cached GitHub credentials if available, otherwise use my database token
+
                 details_cache_key = f"user:repos:{user_id}"
                 cached_details = cache.get(details_cache_key)
                 if cached_details and isinstance(cached_details, dict) and cached_details.get("github_access_token"):

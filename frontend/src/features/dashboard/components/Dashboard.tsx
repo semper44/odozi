@@ -168,7 +168,7 @@ export default function Dashboard() {
             clearAiResponseTimeout();
             console.log("Dashboard caught background worker crash or API block:", socketError);
             
-            // Append a system or error message to your chat interface display window
+            // Append a system or error message to my chat interface display window
             if (socketError.isImportant) {
                 enqueueAiMessage(socketError.message || "An unexpected error occurred. Please try again.");
             } 
@@ -267,7 +267,6 @@ export default function Dashboard() {
 
     const handleCreateWorkspace = (modalPayload: { workspaceName: string }) => {
         console.log("manage")
-        // if (selectedIdsSet.size === 0 || !data?.repositories) return;
         console.log("baby", data?.repositories)
 
         // Filter our cached collection matching the active Zustand Set configurations
@@ -308,7 +307,7 @@ export default function Dashboard() {
                     position: "top-right",   // Combines your gravity ("top") and position ("right")
                     pauseOnFocusLoss: true,  // Equivalent to stopOnFocus: true
                     
-                    // Custom styling to inject your linear gradient background
+                    // Custom styling to inject my linear gradient background
                     style: {
                         background: "linear-gradient(to right, #00b09b, #96c93d)",
                         color: "#fff"          // Ensures your text is readable over the gradient
@@ -432,19 +431,16 @@ export default function Dashboard() {
 
     console.log(selected,"filteredRep", selectedWorkspace)
     // Active when there is a search query AND exactly one match is found
-    // const isSingleMatch = searchQuery.trim() !== '' && filteredRepositories.length === 1;
 
-    // const isAuthError = error && ((error as any).status === 401 || (error as any).status === 403);
     // const serverDownError = (error && error instanceof TypeError && error.message === "Failed to fetch");
 
 
     // if (isAuthError){
-    //     console.log("Please log in with GitHub again to securely synchronize your workspace")
+    //     console.log("Please log in with GitHub again to securely synchronize my workspace")
     // }
     // if (serverDownError){
     //     console.log("Server is down. Please try again later.")
     // }
-    // console.log(error, "h1osana",data)
 
 
     function clearActiveChat(){
@@ -678,7 +674,6 @@ export default function Dashboard() {
                             <div className="space-y-4">
                                 {filteredRepositories.map((repo) => {
                                 // It is "ticked" if all are shown (no single match) OR if it is the single match
-                                // const isActive = !isSingleMatch || filteredRepositories[0].id === repo.id;
 
                                 return (
                                     <RepoCard
@@ -789,7 +784,7 @@ export default function Dashboard() {
 
                                     {(isAiOpen && isProcessingRequest) &&(
                                         <div className="w-full h-[80%]">
-                                        {/* The Chat box stays mounted on your dashboard screen layout permanently */}
+                                        {/* The Chat box stays mounted on my dashboard screen layout permanently */}
                                         <AIChat 
                                             messages={messages}
                                             onSendMessage={(text) => handleSendRequest(text)}
@@ -809,7 +804,7 @@ export default function Dashboard() {
                     {/* right bar */}
                     <div className="w-[25%] h-full pt-3 items-start gap-4 pl-4 hidden lg:flex flex-col justify-start">
 
-                        {/* Include your absolute rendering portal layer down at the bottom of the node string tree */}
+                        {/* Include my absolute rendering portal layer down at the bottom of the node string tree */}
                         <WorkspaceModal
                             isOpen={isModalOpen}
                             onClose={() => setIsModalOpen(false)}
