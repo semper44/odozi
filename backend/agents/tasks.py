@@ -356,7 +356,7 @@ def workflow_exists(url, headers, branch_name, channel_name=None):
                                     "type": "orchestration_result",
                                     "raw_output": {
                                         
-                                        "chat_response": f"⚠️ GitHub is currently experiencing server issues (HTTP {http_status}). Retrying workflow check on '{branch_name}' (attempt {attempt}/{max_retries})...",
+                                        "chat_response": f" GitHub is currently experiencing server issues (HTTP {http_status}). Retrying workflow check on '{branch_name}' (attempt {attempt}/{max_retries})...",
                                     },
                                 }
                             }
@@ -393,7 +393,7 @@ def workflow_exists(url, headers, branch_name, channel_name=None):
                                 "type": "orchestration_result",
                                 "raw_output": {
                                     
-                                    "chat_response": f"⚠️ Network issue connecting to GitHub. Retrying workflow check on '{branch_name}' (attempt {attempt}/{max_retries})...",
+                                    "chat_response": f" Network issue connecting to GitHub. Retrying workflow check on '{branch_name}' (attempt {attempt}/{max_retries})...",
                                 },
                             }
                         }
@@ -578,7 +578,7 @@ def ensure_orchestrator_yaml_is_online(
                                         "raw_output": {
                                             
                                             "chat_response": (
-                                                f"⚠️ GitHub is currently down or experiencing server issues (HTTP {response.status_code}). "
+                                                f" GitHub is currently down or experiencing server issues (HTTP {response.status_code}). "
                                                 f"Retrying workflow synchronization on '{branch}' (attempt {attempt}/{max_put_retries})..."
                                             ),
                                         },
@@ -620,7 +620,7 @@ def ensure_orchestrator_yaml_is_online(
                                     "raw_output": {
                                         
                                         "chat_response": (
-                                            f"⚠️ Network issue connecting to GitHub. "
+                                            f" Network issue connecting to GitHub. "
                                             f"Retrying workflow synchronization on '{branch}' (attempt {attempt}/{max_put_retries})..."
                                         ),
                                     },
@@ -846,7 +846,7 @@ def create_pipeline_state(
         "created_at": timezone.now().isoformat(),
     }
     cache.set(pipeline_redis_key(pipeline_id), state, timeout=PIPELINE_STATE_TTL)
-    print(f"🧠 REDIS PIPELINE CREATED: pipeline_id={pipeline_id} local_results_expected={local_results_expected} auditjob_id={auditjob_id}")
+    print(f"REDIS PIPELINE CREATED: pipeline_id={pipeline_id} local_results_expected={local_results_expected} auditjob_id={auditjob_id}")
     return state
 
 
@@ -889,14 +889,14 @@ def register_expected_github_result(pipeline_id: str, repository: str, tool: str
     if event_key not in expected:
         expected.append(event_key)
         save_pipeline_state(pipeline_id, state)
-    print(f"📝 EXPECTED GITHUB RESULT REGISTERED: {event_key} pipeline={pipeline_id}")
+    print(f" EXPECTED GITHUB RESULT REGISTERED: {event_key} pipeline={pipeline_id}")
 
 
 def add_local_results_to_pipeline(pipeline_id: str, results: List[Any]):
     """Stores all completed local Celery results and closes the local gate."""
     state = get_pipeline_state(pipeline_id)
     if not state:
-        print(f"⚠️ Cannot add local results. Pipeline missing: {pipeline_id}")
+        print(f" Cannot add local results. Pipeline missing: {pipeline_id}")
         return False
     existing = state.setdefault("local_results", [])
     if results:
@@ -904,7 +904,7 @@ def add_local_results_to_pipeline(pipeline_id: str, results: List[Any]):
     state["local_results_ready"] = True
     state["local_results_completed_at"] = timezone.now().isoformat()
     save_pipeline_state(pipeline_id, state)
-    print(f"📦 LOCAL RESULTS STORED: pipeline={pipeline_id} count={len(results or [])}")
+    print(f"LOCAL RESULTS STORED: pipeline={pipeline_id} count={len(results or [])}")
     return True
 
 
@@ -912,7 +912,7 @@ def add_github_result_to_pipeline(pipeline_id: str, repository: str, tool: str, 
     """Stores one GitHub result using the exact repo:tool correlation key."""
     state = get_pipeline_state(pipeline_id)
     if not state:
-        print(f"⚠️ GitHub result arrived for unknown pipeline: {pipeline_id}")
+        print(f" GitHub result arrived for unknown pipeline: {pipeline_id}")
         return False
     event_key = f"{repository}:{tool}"
     expected_list = state.get("expected_github_results", [])
@@ -925,13 +925,13 @@ def add_github_result_to_pipeline(pipeline_id: str, repository: str, tool: str, 
                 actual_event_key = exp
                 break
         else:
-            print(f"⚠️ UNEXPECTED GITHUB RESULT IGNORED: {event_key} pipeline={pipeline_id}")
+            print(f" UNEXPECTED GITHUB RESULT IGNORED: {event_key} pipeline={pipeline_id}")
             return False
 
     received = state.setdefault("github_results", [])
     for existing in received:
         if existing.get("event_key") == actual_event_key:
-            print(f"♻️ DUPLICATE GITHUB RESULT IGNORED: {actual_event_key}")
+            print(f" DUPLICATE GITHUB RESULT IGNORED: {actual_event_key}")
             return False
     received.append({
         "event_key": actual_event_key,
@@ -941,7 +941,7 @@ def add_github_result_to_pipeline(pipeline_id: str, repository: str, tool: str, 
         "received_at": timezone.now().isoformat(),
     })
     save_pipeline_state(pipeline_id, state)
-    print(f"📥 GITHUB RESULT STORED: {actual_event_key} pipeline={pipeline_id}")
+    print(f" GITHUB RESULT STORED: {actual_event_key} pipeline={pipeline_id}")
     return True
 
 
@@ -959,7 +959,7 @@ def record_github_dispatch_failure(
     """
     state = get_pipeline_state(pipeline_id)
     if not state:
-        print(f"⚠️ Cannot record dispatch failure. Pipeline missing: {pipeline_id}")
+        print(f" Cannot record dispatch failure. Pipeline missing: {pipeline_id}")
         return False
 
     expected_events = state.get("expected_github_results", [])
@@ -1009,7 +1009,7 @@ def record_github_dispatch_failure(
             result=failure_result,
         )
         recorded_any = True
-        print(f"❌ RECORDED GITHUB DISPATCH FAILURE IN REDIS: {event_key} -> {error_message}")
+        print(f" RECORDED GITHUB DISPATCH FAILURE IN REDIS: {event_key} -> {error_message}")
 
     # If no expected events were matched, record as local result so error is never lost
     if not recorded_any:
@@ -1025,11 +1025,11 @@ def record_github_dispatch_failure(
             "message": error_message,
         }
         add_local_results_to_pipeline(pipeline_id, [fallback_result])
-        print(f"❌ RECORDED FALLBACK DISPATCH FAILURE IN LOCAL RESULTS: pipeline={pipeline_id}")
+        print(f" RECORDED FALLBACK DISPATCH FAILURE IN LOCAL RESULTS: pipeline={pipeline_id}")
 
     # Immediately check and trigger follow-up if ready
     follow_up_launched = trigger_pipeline_follow_up_if_ready(pipeline_id)
-    print(f"🚀 PIPELINE CHECK AFTER DISPATCH FAILURE: pipeline={pipeline_id} follow_up_launched={follow_up_launched}")
+    print(f" PIPELINE CHECK AFTER DISPATCH FAILURE: pipeline={pipeline_id} follow_up_launched={follow_up_launched}")
     return True
 
 
@@ -1044,7 +1044,7 @@ def pipeline_is_ready(pipeline_id: str) -> bool:
     github_ready = expected.issubset(received)
     ready = local_ready and github_ready
     print(
-        f"🔎 PIPELINE CHECK: pipeline={pipeline_id} local_ready={local_ready} "
+        f"PIPELINE CHECK: pipeline={pipeline_id} local_ready={local_ready} "
         f"expected_github={len(expected)} received_github={len(received)} ready={ready}"
     )
     return ready
@@ -1097,7 +1097,7 @@ def trigger_pipeline_follow_up_if_ready(pipeline_id: str):
     save_pipeline_state(pipeline_id, state)
     combined_results = build_pipeline_follow_up_results(pipeline_id)
 
-    print(f"🚀 ALL PIPELINE EVENTS COMPLETE: Launching follow-up pipeline={pipeline_id}")
+    print(f"ALL PIPELINE EVENTS COMPLETE: Launching follow-up pipeline={pipeline_id}")
     agentic_chat_follow_up.delay(
         task_results=combined_results,
         provider=state.get("provider", ""),
@@ -1170,7 +1170,7 @@ def process_agentic_chat_turn_task(
         )
 
     with transaction.atomic():
-        # I read this session's history after creating or validating the row.
+        # reading this session's history after creating or validating the row.
         past_messages = list(
             session.messages.all()
             .order_by('created_at')[:15]
@@ -1184,10 +1184,7 @@ def process_agentic_chat_turn_task(
     for msg in past_messages:
 
         if msg.role == "user":
-
-            history_messages.append(
-                HumanMessage(content=msg.content)
-            )
+            history_messages.append(HumanMessage(content=msg.content))
 
             history_payload.append({
                 "role": "user",
@@ -1228,7 +1225,6 @@ def process_agentic_chat_turn_task(
         )
 
     else:
-
         key = settings.GEMINI_API_KEY
 
         llm = ChatGoogleGenerativeAI(
@@ -1247,8 +1243,8 @@ def process_agentic_chat_turn_task(
 
 
     try:
+        # track token usage
         with get_openai_callback() as cb:
-
             result = cast(
                 OrchestratorAction,
                 chain.invoke({
@@ -1265,14 +1261,7 @@ def process_agentic_chat_turn_task(
         print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
         print(result.active_rules)
 
-        print(
-            prompt_tokens,
-            "chim",
-            completion_tokens,
-            "uche",
-            total_cost
-        )
-
+        print(prompt_tokens,"chim",completion_tokens,"uche",total_cost)
         print(result)
 
 
@@ -1281,12 +1270,9 @@ def process_agentic_chat_turn_task(
         chat_response = result.chat_response
 
         with transaction.atomic():
-
                 # if result.evict_prior_history OVERHAUL
             if result.evict_prior_history:
-
                 session.messages.all().delete()
-
                 ChatMessage.objects.create(
                     session=session,
                     role="user",
@@ -1306,8 +1292,6 @@ def process_agentic_chat_turn_task(
                 )
 
             else:
-
-                # STANDARD WORKING MEMORY
                 ChatMessage.objects.create(
                     session=session,
                     role="user",
@@ -1323,35 +1307,24 @@ def process_agentic_chat_turn_task(
 
         repo_owner = user.username
 
-        print(
-            result.intents,
-            "and",
-            result.active_rules
-        )
+        print(result.intents,"and",result.active_rules)
 
         details_cache_key = f"user:repos:{user_id}"
 
-        cached_details = cache.get(
-            details_cache_key
-        )
+        cached_details = cache.get(details_cache_key)
 
 
         # LOAD REPOSITORIES FROM CACHE
         if cached_details is not None:
-
-            cached_repos = cached_details.get(
-                "repo_names",
-                {}
-            )
+            cached_repos = cached_details.get("repo_names",{})
 
             print(
-                f"⚡ [CACHE HIT] Celery successfully loaded repositories for key: {cached_repos}"
-            )
+                f"[CACHE HIT] Celery successfully loaded repositories for key: {cached_repos}")
 
         else:
 
             print(
-                f"⚠️ Cache Miss or Invalid Type for key: "
+                f"Cache Miss or Invalid Type for key: "
                 f"{details_cache_key}. "
                 f"Falling back to standard processing."
             )
@@ -1369,7 +1342,6 @@ def process_agentic_chat_turn_task(
 
 
             try:
-
                 github_res = requests.get(
                     repos_url,
                     headers=headers,
@@ -1380,10 +1352,7 @@ def process_agentic_chat_turn_task(
                     timeout=5.0
                 )
 
-                print(
-                    f"📊 [GITHUB API] External status responded: "
-                    f"{github_res.status_code}"
-                )
+                print(f"[GITHUB API] External status responded: "f"{github_res.status_code}")
 
                 repositories_data = (
                     github_res.json()
@@ -1393,17 +1362,12 @@ def process_agentic_chat_turn_task(
 
                 github_res_status = github_res.status_code
 
-                print(
-                    "github repositories_data",
-                    repositories_data
-                )
-
+                print("github repositories_data",repositories_data)
                 cleaned_repos = []
                 repo_names = []
 
 
                 for r in repositories_data:
-
                     if not isinstance(r, dict):
                         continue
 
@@ -1423,7 +1387,6 @@ def process_agentic_chat_turn_task(
 
 
                 if github_res_status == 200:
-
                     cached_details["repositories"] = cleaned_repos
 
                     cache.set(
@@ -1448,7 +1411,7 @@ def process_agentic_chat_turn_task(
                         "payload": {
                             "type": "error",
                             "message": (
-                                "❌ [GITHUB API] Error occurred "
+                                "[GITHUB API] Error occurred "
                                 f"while fetching repositories: {e}"
                             )
                         }
@@ -1516,14 +1479,12 @@ def process_agentic_chat_turn_task(
 
 
                 if not matched_repo:
-
                     continue
 
 
                 # Keeping GitHub tasks separately from local tasks.
                 # Most importantly, NO follow-up callback is attached to them.
                 github_pipeline_signatures.append(
-
                     run_agentic_pipeline.s(
 
                         channel_name=channel_name,
@@ -1551,7 +1512,6 @@ def process_agentic_chat_turn_task(
 
                         user_requested_rules=rule.strategies,
 
-                        # <<< CHANGED >>>
                         # This must eventually reach GitHub's workflow input.
                         pipeline_id=pipeline_id
                     )
@@ -1811,7 +1771,7 @@ def process_agentic_chat_turn_task(
                 )
 
             print("\n" + "=" * 80)
-            print("📦 GITHUB PIPELINE STATE STORED")
+            print(" GITHUB PIPELINE STATE STORED")
             print(f"   PIPELINE ID    : {pipeline_id}")
             print(f"   EXPECTED       : {github_expected_events}")
             print(f"   LOCAL TASKS    : {has_local_tasks}")
@@ -1819,7 +1779,7 @@ def process_agentic_chat_turn_task(
 
             # If I have local tasks running alongside GitHub, I chord them into collect_local_pipeline_results
             if intent_signatures:
-                print("🚀 Dispatching local tasks asynchronously...")
+                print(" Dispatching local tasks asynchronously...")
                 local_canvas = (
                     group(intent_signatures)
                     | signature(
@@ -1829,7 +1789,7 @@ def process_agentic_chat_turn_task(
                 )
                 local_canvas.apply_async()
 
-            print("🚀 Dispatching GitHub pipeline tasks asynchronously...")
+            print(" Dispatching GitHub pipeline tasks asynchronously...")
             group(github_pipeline_signatures).apply_async()
 
 
@@ -1886,17 +1846,17 @@ def process_agentic_chat_turn_task(
         provider_name = provider.capitalize() if provider else "AI"
         err_str = str(e).lower()
         if "quota" in err_str or "resource_exhausted" in err_str or "rate_limit" in err_str or "429" in err_str:
-            user_error_msg = f"⚠️ The {provider_name} AI model ({model_name}) exceeded its rate limit or daily quota. Please try again later or check your API key."
+            user_error_msg = f" The {provider_name} AI model ({model_name}) exceeded its rate limit or daily quota. Please try again later or check your API key."
         elif "timeout" in err_str or "timed out" in err_str or "deadline" in err_str:
-            user_error_msg = f"⚠️ The {provider_name} AI model ({model_name}) timed out and failed to respond. Please try again."
+            user_error_msg = f" The {provider_name} AI model ({model_name}) timed out and failed to respond. Please try again."
         elif "503" in err_str or "overloaded" in err_str or "unavailable" in err_str:
-            user_error_msg = f"⚠️ The {provider_name} AI service ({model_name}) is temporarily overloaded or unavailable. Please try again shortly."
+            user_error_msg = f" The {provider_name} AI service ({model_name}) is temporarily overloaded or unavailable. Please try again shortly."
         elif "authentication" in err_str or "api key" in err_str or "unauthorized" in err_str or "401" in err_str:
-            user_error_msg = f"⚠️ Authentication failed for {provider_name} AI model ({model_name}). Please verify your API key."
+            user_error_msg = f" Authentication failed for {provider_name} AI model ({model_name}). Please verify your API key."
         elif "github" in err_str:
-            user_error_msg = f"⚠️ GitHub communication error: {str(e)}"
+            user_error_msg = f" GitHub communication error: {str(e)}"
         else:
-            user_error_msg = f"⚠️ The {provider_name} AI model ({model_name}) failed to respond: {str(e)}"
+            user_error_msg = f" The {provider_name} AI model ({model_name}) failed to respond: {str(e)}"
 
         try:
             ChatMessage.objects.create(
@@ -1938,6 +1898,8 @@ def process_agentic_chat_turn_task(
             }
         )
 
+
+
 @shared_task
 def collect_local_pipeline_results(local_results, pipeline_id):
     """
@@ -1947,7 +1909,7 @@ def collect_local_pipeline_results(local_results, pipeline_id):
     here. I save them into my Redis pipeline state, mark local_results_ready = True,
     and call trigger_pipeline_follow_up_if_ready to check if my GitHub tasks also finished.
     """
-    print(f"\n📦 COLLECTING LOCAL RESULTS\npipeline={pipeline_id}")
+    print(f"\n COLLECTING LOCAL RESULTS\npipeline={pipeline_id}")
     add_local_results_to_pipeline(
         pipeline_id=pipeline_id,
         results=local_results or [],
@@ -1987,7 +1949,7 @@ def pipeline_timeout_check(pipeline_id):
 
     lock_key = f"agentic_pipeline:followup_lock:{pipeline_id}"
     if not cache.add(lock_key, "1", timeout=FOLLOW_UP_LOCK_TTL):
-        print(f"♻️ TIMEOUT: another worker owns follow-up lock {pipeline_id}")
+        print(f" TIMEOUT: another worker owns follow-up lock {pipeline_id}")
         return
 
     state = get_pipeline_state(pipeline_id)
@@ -2168,7 +2130,7 @@ def async_handle_workspace_deletion_task(self, workspaces_to_delete, channel_nam
 
 
             if not workspace_id:
-                print(f"⚠️ Deletion Skipped: Could not resolve a valid target ID for context: {workspace_name}")
+                print(f" Deletion Skipped: Could not resolve a valid target ID for context: {workspace_name}")
                 continue
             print("workspace_id", workspace_id)
             try:
@@ -2294,7 +2256,7 @@ def async_handle_env_key_creation_task(self, env_key_requests, channel_name, use
 
                 # If user targeted specific repos but none could be verified, halt this specific request
                 if not selected_repo_ids:
-                    print(f"⚠️ Env Key Warning: Explicit repositories targeted but none verified for: {raw_target_repos}")
+                    print(f" Env Key Warning: Explicit repositories targeted but none verified for: {raw_target_repos}")
                     continue
 
 
@@ -2407,7 +2369,7 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
                         selected_repo_names.add(matched_repo_dict.get("name"))
             print("diamond",workspace_name,"raw_key_names", raw_key_names, "masked", selected_repo_ids)
             if not selected_repo_ids and not raw_key_names and not workspace_name:
-                print(f"⚠️ Env Key Deletion Warning: Missing parameter targets inside request: {req}")
+                print(f" Env Key Deletion Warning: Missing parameter targets inside request: {req}")
                 continue
 
             try:
@@ -2497,7 +2459,7 @@ def run_agentic_pipeline(
         )
 
         print("\n" + "=" * 80)
-        print("🚀 GITHUB AGENTIC PIPELINE DISPATCHER")
+        print(" GITHUB AGENTIC PIPELINE DISPATCHER")
         print(f"PIPELINE ID : {pipeline_id}")
         print(f"REPOSITORY  : {repo_owner}/{repo_name}")
         print(f"TARGET      : {target_branch}")
@@ -2976,7 +2938,7 @@ if __name__ == "__main__":
                                     "raw_output": {
                                         
                                         "chat_response": (
-                                            f"⚠️ GitHub is currently down or experiencing server issues (HTTP {feedback_r.status_code}). "
+                                            f" GitHub is currently down or experiencing server issues (HTTP {feedback_r.status_code}). "
                                             f"Retrying workflow dispatch for '{matched_repo_name}' (attempt {attempt}/{max_dispatch_retries})..."
                                         ),
                                     },
@@ -3001,7 +2963,7 @@ if __name__ == "__main__":
                                 "raw_output": {
                                     
                                     "chat_response": (
-                                        f"⚠️ Network issue connecting to GitHub. "
+                                        f" Network issue connecting to GitHub. "
                                         f"Retrying workflow dispatch for '{matched_repo_name}' (attempt {attempt}/{max_dispatch_retries})..."
                                     ),
                                 },
@@ -3012,7 +2974,7 @@ if __name__ == "__main__":
                 else:
                     err_msg = f"GitHub is currently unreachable or experiencing connection issues: {str(e)}"
                     print(
-                        f"❌ GITHUB NETWORK ERROR: {e}"
+                        f" GITHUB NETWORK ERROR: {e}"
                     )
                     async_to_sync(channel_layer.group_send)(
                         channel_name,
@@ -3022,7 +2984,7 @@ if __name__ == "__main__":
                                 "type": "orchestration_result",
                                 "raw_output": {
                                     
-                                    "chat_response": f"❌ {err_msg}",
+                                    "chat_response": f" {err_msg}",
                                 },
                             }
                         }
@@ -3051,7 +3013,7 @@ if __name__ == "__main__":
                 "GitHub accepted the workflow dispatch."
             )
             print(
-                "⚠️ IMPORTANT:"
+                " IMPORTANT:"
             )
             print(
                 "This means ONLY that GitHub accepted the job."
@@ -3116,7 +3078,7 @@ if __name__ == "__main__":
                 is_gh_down = False
 
             print(
-                f"❌ GITHUB ERROR "
+                f" GITHUB ERROR "
                 f"[{status_code}]: "
                 f"{status_body}"
             )
@@ -3129,7 +3091,7 @@ if __name__ == "__main__":
                         "type": "orchestration_result",
                         "raw_output": {
                             
-                            "chat_response": f"❌ {err_msg}",
+                            "chat_response": f" {err_msg}",
                         },
                     }
                 }
@@ -3161,7 +3123,7 @@ if __name__ == "__main__":
 
     except Exception as exc:
         err_msg = f"Unexpected error during GitHub pipeline dispatch: {str(exc)}"
-        print(f"❌ UNEXPECTED ERROR IN run_agentic_pipeline: {exc}")
+        print(f" UNEXPECTED ERROR IN run_agentic_pipeline: {exc}")
         traceback.print_exc()
         record_github_dispatch_failure(
             pipeline_id=pipeline_id,
@@ -3581,7 +3543,7 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
             is_json_format = True
         except json.JSONDecodeError:
             is_json_format = False
-            print(f"⚠️ ALERT: {tool.upper()} payload is raw text (Possible infrastructure crash).")
+            print(f" ALERT: {tool.upper()} payload is raw text (Possible infrastructure crash).")
 
         # THE PAYLOAD IS A CRASH TRACEBACK (Any Tool)
         if save_to_db:
@@ -3684,7 +3646,7 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
         )
     
     except Exception as e:
-        print(f"❌ CRITICAL GENERAL TASK EXCEPTION: {str(e)}")
+        print(f" CRITICAL GENERAL TASK EXCEPTION: {str(e)}")
 
 
 
@@ -3696,7 +3658,7 @@ def process_scan_payload_task(run_id, repository_owner, repo, tool, raw_content_
 def cleanup_and_report(results, path):
     # Runing the transformation code
     clean_report = transform_ci_results(results)
-    print(f"📝 [SIMPLIFIED REPORT]:\n{json.dumps(clean_report, indent=2)}")
+    print(f" [SIMPLIFIED REPORT]:\n{json.dumps(clean_report, indent=2)}")
     shutil.rmtree(path) # FINALLY delete the sandbox
 
 
