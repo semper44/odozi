@@ -1,0 +1,52 @@
+[
+  {
+    "id": "capability-question-does-not-run-tools",
+    "input": "Can you explain which checks are available for the odozi repository?",
+    "assertions": {
+      "equals": {
+        "intents": ["technical_query"],
+        "evict_prior_history": false
+      },
+      "empty": ["active_rules"]
+    }
+  },
+  {
+    "id": "execution-without-branch-asks-for-clarification",
+    "input": "Run a security audit on the odozi repository.",
+    "assertions": {
+      "equals": {
+        "intents": ["technical_query"],
+        "ui_layout_route": "CHAT"
+      },
+      "empty": ["active_rules"]
+    }
+  },
+  {
+    "id": "explicit-test-run-selects-pytest",
+    "input": "Run pytest on the odozi repository using the master branch.",
+    "assertions": {
+      "equals": {
+        "intents": ["run_static_analysis"],
+        "active_rules.0.repo_name": "odozi",
+        "active_rules.0.target_branch": "master"
+      },
+      "contains": {
+        "active_rules.0.strategies": ["pytest"]
+      }
+    }
+  },
+  {
+    "id": "explicit-security-run-selects-required-tools",
+    "input": "Run a security audit on the odozi repository using the main branch.",
+    "assertions": {
+      "equals": {
+        "intents": ["run_static_analysis"],
+        "active_rules.0.repo_name": "odozi",
+        "active_rules.0.target_branch": "main"
+      },
+      "contains": {
+        "active_rules.0.strategies": ["bandit", "pii_leakage"]
+      }
+    }
+  }
+]
