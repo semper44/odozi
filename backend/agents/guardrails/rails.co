@@ -1,0 +1,11 @@
+import guardrails
+
+define bot refuse to respond
+  "I couldn't safely start that operation. Please restate the request with its exact target."
+
+define flow validate orchestrator action
+  $validation = execute validate_orchestrator_action(action_json=$bot_message)
+
+  if $validation.is_blocked
+    bot refuse to respond
+    stop

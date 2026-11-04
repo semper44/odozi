@@ -16,6 +16,7 @@ class AuditJob(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     history = models.CharField(max_length=500) #user input history
     report = models.CharField(max_length=50, blank=True, null=True) #llm follow_up report
+    evaluation = models.JSONField(default=dict, blank=True)
     execution_time_seconds = models.IntegerField(default=0)
     # One pipeline can dispatch any number of tools/runs.
     pipeline_id = models.UUIDField(db_index=True)
@@ -37,5 +38,4 @@ class AuditJob(models.Model):
 
     def __str__(self):
         return f"AuditJob {self.id}- {self.pipeline_id} {self.tool_name or 'summary'}"
-
 

@@ -144,3 +144,9 @@ class OrchestratorAction(BaseModel):
     env_keys_to_delete: List[RepoEnvKeyDeletionTask] = Field(default=[])
     active_rules: List[RepoExecutionRule] = Field(default=[])
 
+
+class FollowUpJudgment(BaseModel):
+    score: int = Field(ge=1, le=5)
+    passed: bool
+    rationale: str
+    issues: List[str] = Field(default_factory=list)

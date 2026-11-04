@@ -13,6 +13,7 @@ import traceback
 import subprocess
 import textwrap
 import ast
+import logging
 from toon import encode
 from typing import Any, Dict, List, Optional, cast
 from django.utils import timezone
@@ -26,6 +27,14 @@ from .custom_functions import rule_classes
 
 from account_profile.models import GitHubRepository, UserProfileModel, Workspace
 from django_python.schema import OrchestratorAction 
+from django_python.schema import FollowUpJudgment
+from agents.guardrails import check_orchestrator_action
+from agents.judging import (
+    compact_judge_evidence,
+    compact_task_results,
+    format_quality_note,
+    has_failed_results,
+)
 
 from odozi.service import (create_workspace_with_repos, get_installation_access_token, 
                            create_repo_env_keys_service,delete_repo_env_keys_service,  
@@ -66,6 +75,7 @@ UNIVERSAL_NETWORK_ERRORS = (
 )
 
 error_data = {}
+logger = logging.getLogger(__name__)
 
 def transform_ci_results(raw_results):
     """
@@ -1257,6 +1267,30 @@ def process_agentic_chat_turn_task(
             completion_tokens = cb.completion_tokens
             total_cost = cb.total_cost
 
+        rails_result = check_orchestrator_action(
+            current_request=prompt_text.strip(),
+            action_json=result.model_dump_json(),
+        )
+        rail_status = str(getattr(rails_result.status, "value", rails_result.status)).casefold()
+        if rail_status == "blocked":
+            result = result.model_copy(
+                update={
+                    "intents": ["technical_query"],
+                    "evict_prior_history": False,
+                    "condensed_history_summary": None,
+                    "ui_layout_route": "CHAT",
+                    "chat_response": (
+                        "I couldn't safely start that operation. Please restate the "
+                        "request with the exact repository and branch, or the exact "
+                        "workspace/repository and environment-key target."
+                    ),
+                    "workspaces_to_create": [],
+                    "workspaces_to_delete": [],
+                    "env_keys_to_create": [],
+                    "env_keys_to_delete": [],
+                    "active_rules": [],
+                }
+            )
 
         print("🗂️ FULL STRUCTURAL DATA RECOVERED:")
         print(result.active_rules)
@@ -2352,21 +2386,52 @@ def async_handle_env_key_deletion_task(self, env_key_requests, channel_name, use
             workspace_name= req.get("workspace_name", None)
             selected_repo_ids = []
             selected_repo_names = set()
+            unresolved_repo_names = []
 
             print("ev-requests_list", requests_list,"rrr")
 
-            # Match loose string inputs to my parent cached array list items to gather specific IDs
+            # Resolve every requested repository exactly; never apply a partial match.
             for raw_name in raw_target_repos:
                 user_input = str(raw_name).lower().replace(" ", "-").strip()
-                
-                matched_repo_dict = next((repo for low_name, repo in cached_map if user_input in low_name), None)
-
-                print("matched_repo_dict", matched_repo_dict, "env-raw_name", raw_name)
-                if matched_repo_dict:
+                matched_repositories = [
+                    repo for low_name, repo in cached_map if user_input == low_name
+                ]
+                if len(matched_repositories) == 1:
+                    matched_repo_dict = matched_repositories[0]
                     matched_id = matched_repo_dict.get("id")
                     if matched_id:
                         selected_repo_ids.append(matched_id)
                         selected_repo_names.add(matched_repo_dict.get("name"))
+                    else:
+                        unresolved_repo_names.append(user_input)
+                else:
+                    unresolved_repo_names.append(user_input)
+
+            if raw_target_repos and unresolved_repo_names:
+                key_deletion_summaries.append(
+                    {
+                        "status": "failed",
+                        "message": (
+                            "No environment keys were deleted because every requested "
+                            "repository could not be matched exactly."
+                        ),
+                        "unresolved_repositories": sorted(set(unresolved_repo_names)),
+                    }
+                )
+                continue
+
+            if raw_target_repos and len(selected_repo_ids) != len(raw_target_repos):
+                key_deletion_summaries.append(
+                    {
+                        "status": "failed",
+                        "message": (
+                            "No environment keys were deleted because every requested "
+                            "repository could not be verified."
+                        ),
+                    }
+                )
+                continue
+
             print("diamond",workspace_name,"raw_key_names", raw_key_names, "masked", selected_repo_ids)
             if not selected_repo_ids and not raw_key_names and not workspace_name:
                 print(f" Env Key Deletion Warning: Missing parameter targets inside request: {req}")
@@ -3211,8 +3276,6 @@ def agentic_chat_follow_up(
        intents=["technical_query"]
     """
 
-    print("task_results:", task_results)
-
     # Prompt Template
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", short_followup_instruction),
@@ -3241,15 +3304,18 @@ def agentic_chat_follow_up(
     history_messages: List[Any] = []
 
     if history_payload:
-        for item in history_payload:
+        for item in history_payload[-6:]:
             if item.get("role") == "user":
                 history_messages.append(
-                    HumanMessage(content=item.get("content", ""))
+                    HumanMessage(content=item.get("content", "")[:1000])
                 )
             else:
                 history_messages.append(
-                    AIMessage(content=item.get("content", ""))
+                    AIMessage(content=item.get("content", "")[:1000])
                 )
+
+    # Keep logs and large report payloads out of the follow-up prompt.
+    compact_results = compact_task_results(task_results)
 
     # Build backend summary for the LLM
     backend_event_input = f"""
@@ -3257,7 +3323,7 @@ def agentic_chat_follow_up(
 
         Task Results:
 
-        {json.dumps(task_results, indent=2, default=str)}
+        {compact_results}
 
         Instructions:
 
@@ -3284,7 +3350,59 @@ def agentic_chat_follow_up(
             print("📊 Follow-up Result")
             print(result)
 
+        evaluation = {
+            "status": "not_run",
+            "score": None,
+            "passed": None,
+            "rationale": "The judge runs only when a task result reports a failure.",
+            "issues": [],
+        }
+        if has_failed_results(task_results):
+            judge_prompt = ChatPromptTemplate.from_messages(
+                [
+                    (
+                        "system",
+                        "You are a strict quality judge for a CI results summary. "
+                        "Compare the report only with the supplied task evidence. "
+                        "Check factual accuracy, whether failures are explained, "
+                        "whether success is overstated, and whether internal "
+                        "secrets or stack traces are exposed. Do not invent facts. "
+                        "Score from 1 to 5; pass only when score is at least 4 and "
+                        "there are no material factual errors. Keep rationale and "
+                        "issues brief.",
+                    ),
+                    ("human", "{evidence}"),
+                ]
+            )
+            judge_chain = judge_prompt | llm.with_structured_output(FollowUpJudgment)
+            try:
+                judgment = cast(
+                    FollowUpJudgment,
+                    judge_chain.invoke(
+                        {
+                            "evidence": compact_judge_evidence(
+                                task_results,
+                                result.chat_response,
+                            )
+                        }
+                    ),
+                )
+                evaluation = {
+                    "status": "passed" if judgment.passed else "needs_review",
+                    **judgment.model_dump(),
+                }
+            except Exception:
+                logger.exception("Follow-up judge failed; keeping generated report.")
+                evaluation = {
+                    "status": "error",
+                    "score": None,
+                    "passed": None,
+                    "rationale": "The judge call failed; the generated report is unchanged.",
+                    "issues": [],
+                }
+
         final_chat_response = add_full_report_link(result.chat_response, pipeline_id)
+        final_chat_response += f"\n\n---\n\n{format_quality_note(evaluation)}"
         full_report_url = pipeline_report_url(pipeline_id) if pipeline_id else None
 
         # Save conversation
@@ -3307,7 +3425,8 @@ def agentic_chat_follow_up(
             auditjob = AuditJob.objects.filter(id=auditjob_id).first()
             if auditjob:
                 auditjob.report = final_chat_response
-                auditjob.save()
+                auditjob.evaluation = evaluation
+                auditjob.save(update_fields=["report", "evaluation"])
         print(f"stunned-{channel_name}")
         async_to_sync(get_channel_layer().group_send)(
             channel_name,
@@ -3320,6 +3439,7 @@ def agentic_chat_follow_up(
                         "ui_layout_route": result.ui_layout_route,
                         "chat_response": final_chat_response,
                         "task_results": task_results,
+                        "evaluation": evaluation,
                         "pipeline_id": pipeline_id,
                         "full_report_url": full_report_url,
                     },
@@ -3332,6 +3452,7 @@ def agentic_chat_follow_up(
         final_result["chat_response"] = final_chat_response
         final_result["pipeline_id"] = pipeline_id
         final_result["full_report_url"] = full_report_url
+        final_result["evaluation"] = evaluation
         return final_result
 
     except Exception as e:
@@ -3660,7 +3781,3 @@ def cleanup_and_report(results, path):
     clean_report = transform_ci_results(results)
     print(f" [SIMPLIFIED REPORT]:\n{json.dumps(clean_report, indent=2)}")
     shutil.rmtree(path) # FINALLY delete the sandbox
-
-
-
-

@@ -1,0 +1,7 @@
+colang_version: "1.0"
+enable_rails_exceptions: false
+
+rails:
+  output:
+    flows:
+      - validate orchestrator action

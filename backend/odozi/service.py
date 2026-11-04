@@ -5,6 +5,7 @@ import requests
 from django.conf import settings
 
 from django.db import transaction
+from django.db.models import Q
 from django.core.cache import cache
 from django.contrib.auth.models import User
 from rest_framework.exceptions import ValidationError, PermissionDenied
@@ -350,6 +351,7 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
         return error_data
 
     selected_repo_ids = selected_repo_ids or []
+    selected_repo_names = selected_repo_names or []
     cleaned_keys = list(set([str(name).strip().upper() for name in key_names if str(name).strip()]))
     
     affected_repos = set()
@@ -394,10 +396,19 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
             
             if user:
                 target_repos = target_repos.filter(repo_owner=user.username)
-                if not target_repos.exists():
+                resolved_repo_ids = set(target_repos.values_list("repo_id", flat=True))
+                resolved_repo_names = set(target_repos.values_list("repo_name", flat=True))
+                if (
+                    not selected_repo_names
+                    or resolved_repo_ids != set(selected_repo_ids)
+                    or resolved_repo_names != set(selected_repo_names)
+                ):
                     error_data["workspace_resolution"] = {
                         "status": "failed",
-                        "message": f"No Env found in {selected_repo_names} repositories."
+                        "message": (
+                            "One or more requested repositories were not found or "
+                            "could not be verified; no keys were deleted."
+                        ),
                     }
                     return error_data
             else:
@@ -425,13 +436,54 @@ def delete_repo_env_keys_service(user, key_names: list, delete_which: str, works
         #  DELETING GLOBAL VARIABLES BY EXACT KEY NAME
         
         if key_names and delete_which == "key_names":
-            print("delete_key_name")
-            delete_query = RepoEnvKey.objects.filter(
-                key_name__in=cleaned_keys
-            )
-            global_rows_dropped, _ = delete_query.delete()
-            total_deleted_accumulator += global_rows_dropped
-            print(cleaned_keys, "cleaned_keys global rows dropped:", global_rows_dropped)
+            delete_query = RepoEnvKey.objects.filter(key_name__in=cleaned_keys)
+            if workspace_name and selected_repo_names:
+                return {
+                    "delete_repo_env_keys_error": {
+                        "status": "failed",
+                        "message": "Choose either a workspace or repository scope.",
+                    }
+                }
+            if workspace_name:
+                target_workspace = Workspace.objects.filter(
+                    name__iexact=workspace_name.strip(),
+                    owner=user,
+                ).first()
+                if not target_workspace:
+                    return {
+                        "delete_repo_env_keys_error": {
+                            "status": "failed",
+                            "message": f"Workspace '{workspace_name}' was not found.",
+                        }
+                    }
+                delete_query = delete_query.filter(workspace=target_workspace)
+            elif selected_repo_ids or selected_repo_names:
+                target_repos = GitHubRepository.objects.filter(
+                    repo_id__in=selected_repo_ids,
+                    repo_owner=user.username,
+                )
+                resolved_repo_names = set(target_repos.values_list("repo_name", flat=True))
+                resolved_repo_ids = set(target_repos.values_list("repo_id", flat=True))
+                if (
+                    not selected_repo_ids
+                    or not selected_repo_names
+                    or resolved_repo_ids != set(selected_repo_ids)
+                    or resolved_repo_names != set(selected_repo_names)
+                ):
+                    return {
+                        "delete_repo_env_keys_error": {
+                            "status": "failed",
+                            "message": "One or more requested repositories were not found.",
+                        }
+                    }
+                delete_query = delete_query.filter(repo__in=target_repos)
+            else:
+                delete_query = delete_query.filter(
+                    Q(repo__repo_owner=user.username) | Q(workspace__owner=user)
+                )
+
+            key_name_rows_dropped, _ = delete_query.delete()
+            total_deleted_accumulator += key_name_rows_dropped
 
    
         
@@ -546,7 +598,4 @@ def get_installation_access_token(installation_id):
         return response.json().get("token")
     else:
         raise Exception(f"Failed to generate installation token: {response.text}")
-
-
-
 
