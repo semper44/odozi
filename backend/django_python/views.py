@@ -21,6 +21,7 @@ from odozi.utils.jwt_cookie_auth import HttpOnlyCookieJWTAuthentication
 from odozi.utils.crypto import decrypt_token  
 from odozi.utils.github_auth_decorator import require_github_auth
 from odozi.utils.auth import get_client_ip, get_browser_family, invalidate_user_session
+from odozi.telemetry import llm_call, record_llm_tokens
 
 
 
@@ -311,14 +312,17 @@ def dashboard_view(request):
     print("------------------------")
     print("")
 
+    is_secure = getattr(settings, "IS_PRODUCTION", False)
+    samesite_setting = "None" if is_secure else "Lax"
+
     # Renew the long-lived secure HttpOnly session storage identifier
     response.set_cookie(
         key="jwt_access_token",
         value=str(token_string),
         max_age=28800,
         httponly=True,
-        secure=True,     # Forces HTTPS requirement blocks
-        samesite="None", # Permits local cross-origin development handshakes
+        secure=is_secure,
+        samesite=samesite_setting,
         path="/"
     )
     # Only set a refresh cookie when we actually have a valid refresh token.
@@ -329,8 +333,8 @@ def dashboard_view(request):
             value=str(token_refresh_string),
             max_age=28800,
             httponly=True,
-            secure=True,     # Forces HTTPS requirement blocks
-            samesite="None", # Permits local cross-origin development handshakes
+            secure=is_secure,
+            samesite=samesite_setting,
             path="/"
         )
     else:
@@ -860,17 +864,25 @@ class AITestSummaryView(APIView):
         chain = prompt_template | llm | StrOutputParser()
 
 
-        with get_openai_callback() as cb:
-            # The execution pipeline triggers right here inside the context block!
-            raw_string_response = chain.invoke({
-                "chat_history": memory_history,
-                "input": user_input
-            })
-            
-            # Extract diagnostics metrics safely from the callback register box
-            prompt_tokens = cb.prompt_tokens      
-            completion_tokens = cb.completion_tokens  
-            total_cost = cb.total_cost            
+        with llm_call("ticket_analysis", "google", "gemini-3.5-flash") as llm_span:
+            with get_openai_callback() as cb:
+                # The execution pipeline triggers right here inside the context block!
+                raw_string_response = chain.invoke({
+                    "chat_history": memory_history,
+                    "input": user_input
+                })
+
+                # Extract diagnostics metrics safely from the callback register box
+                prompt_tokens = cb.prompt_tokens
+                completion_tokens = cb.completion_tokens
+                total_cost = cb.total_cost
+            record_llm_tokens(
+                llm_span,
+                "google",
+                "gemini-3.5-flash",
+                prompt_tokens,
+                completion_tokens,
+            )
 
             print("\n============ TOKEN DIAGNOSTICS ============")
             print(f"📥 PROMPT TOKENS (Input Size):  {prompt_tokens}")
@@ -1009,5 +1021,3 @@ class LogStreamingResultsView(APIView):
             "status": "archived_success",
             "message": "Logs offloaded to R2 bucket container seamlessly."
         }, status=status.HTTP_201_CREATED)
-
-

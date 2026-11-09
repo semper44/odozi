@@ -1,5 +1,4 @@
 import { tokenStore } from "@/services/auth/tokenStore";
-
 const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
 
 export async function logout(): Promise<void> {

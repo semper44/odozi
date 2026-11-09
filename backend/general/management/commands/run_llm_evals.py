@@ -6,6 +6,7 @@ from django.core.management.base import BaseCommand, CommandError
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
+from langchain_community.callbacks import get_openai_callback
 
 from agents.evals.evaluation import (
     DEFAULT_DATASET_PATH,
@@ -13,6 +14,7 @@ from agents.evals.evaluation import (
     load_dataset,
 )
 from django_python.schema import OrchestratorAction
+from odozi.telemetry import llm_call, record_llm_tokens
 
 
 class Command(BaseCommand):
@@ -76,7 +78,20 @@ class Command(BaseCommand):
 
         passed = 0
         for case in cases:
-            output = chain.invoke({"history": [], "input": case["input"]})
+            with llm_call(
+                "prompt_regression",
+                options["provider"],
+                options["model"],
+            ) as llm_span:
+                with get_openai_callback() as callback:
+                    output = chain.invoke({"history": [], "input": case["input"]})
+                record_llm_tokens(
+                    llm_span,
+                    options["provider"],
+                    options["model"],
+                    callback.prompt_tokens,
+                    callback.completion_tokens,
+                )
             failures = evaluate_expectations(output, case["assertions"])
             if failures:
                 self.stderr.write(self.style.ERROR(f"FAIL {case['id']}"))

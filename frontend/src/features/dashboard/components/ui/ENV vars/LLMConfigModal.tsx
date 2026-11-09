@@ -45,7 +45,6 @@ export function LLMConfigModal({ isOpen, onClose }: LLMConfigModalProps) {
    setIsSubmitting(true);
     try {
       const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
-      
       // Firing HTTP POST request down to my Class-Based View endpoint URL
       const response = await fetch(`${backendUrl}/account/api/ai/config/save/`, {
         method: "POST",

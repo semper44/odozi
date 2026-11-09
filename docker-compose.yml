@@ -1,9 +1,168 @@
-version: '3.8'
 
 services:
-  redis:
-    image: redis:latest
-    container_name: odozi_redis
+  migrate:
+    container_name: odozi-migrate
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: python manage.py migrate --noinput
+    env_file:
+      - .env
+    environment:
+      ODOZI_DOCKER: "1"
+      DOCKER_DB_HOST: db
+      DOCKER_DB_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      OTEL_ENABLED: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - odozi
+
+  frontend:
+    container_name: odozi-frontend-container
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     ports:
-      - "6379:6379"
-    restart: always # starts redis automatically with Docker
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - odozi
+
+  backend:
+    container_name: odozi-backend-container
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: daphne -b 0.0.0.0 -p 8000 --access-log - odozi.asgi:application
+    ports:
+      - "8000:8000" 
+    env_file:
+      - .env
+    environment:
+      ODOZI_DOCKER: "1"
+      DOCKER_DB_HOST: db
+      DOCKER_DB_PORT: "5432"
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: odozi-backend
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      REDIS_HOST: redis
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - odozi
+
+  celery:
+    container_name: odozi-celery-container
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: celery -A odozi worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      ODOZI_DOCKER: "1"
+      DOCKER_DB_HOST: db
+      DOCKER_DB_PORT: "5432"
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: odozi-celery
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - odozi
+
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.22.0
+    container_name: odozi-jaeger
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16686:16686"
+    networks:
+      - odozi
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: odozi-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "127.0.0.1:4318:4318"
+    depends_on:
+      - jaeger
+    networks:
+      - odozi
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: odozi-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - otel-collector
+    networks:
+      - odozi
+
+  redis:
+    container_name: odozi-redis-container
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - odozi
+
+  db:
+    container_name: odozi-postgres-container
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DOCKER_POSTGRES_DB:-odozi}
+      POSTGRES_USER: ${DOCKER_POSTGRES_USER:-odozi}
+      POSTGRES_PASSWORD: ${DOCKER_POSTGRES_PASSWORD:?Set DOCKER_POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - odozi
+
+networks:
+  odozi:
+
+volumes:
+  postgres_data:
+  redis_data:

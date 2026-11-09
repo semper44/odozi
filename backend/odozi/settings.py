@@ -29,6 +29,11 @@ SECRET_KEY = 'django-insecure-b%qzdyvx!qapu)dok06xh)ydevyxl*ee(ae)y#^12&02=qp+p6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
+# Environment resolution
+ENVIRONMENT = config("ENVIRONMENT", default="development").strip().lower()
+IS_RENDER = config("RENDER", default=False, cast=bool)
+IS_PRODUCTION = IS_RENDER or ENVIRONMENT in {"production", "prod"}
+
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
@@ -41,31 +46,43 @@ ALLOWED_HOSTS = [
 
 
 # CORS
-CORS_ALLOWED_ORIGINS = ["http://localhost:5501", "http://127.0.0.1:5501", "http://localhost:5173",
-                        "http://127.0.0.1:8000",'http://127.0.0.1',"http://127.0.0.1:5173", "https://odozi.vercel.app",
-                        "ws://127.0.0.1:8000", "ws://localhost:8000", "https://odozi.onrender.com", "https://fast-results-behave.loca.lt"]
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5501",
+    "http://127.0.0.1:5501",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1",
+    "https://odozi.vercel.app",
+    "ws://127.0.0.1:8000",
+    "ws://localhost:8000",
+    "ws://localhost:3000",
+    "ws://127.0.0.1:3000",
+    "https://odozi.onrender.com",
+    "https://fast-results-behave.loca.lt",
+]
 
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "https://odozi.onrender.com",
     "https://odozi.vercel.app",
 ]
 
-# CRITICAL: Allow cookies to travel across different domains/ports
-# Changing this to 'None' breaks the barrier and allows cross-site cookie drops
-SESSION_COOKIE_SAMESITE = "None"
-CSRF_COOKIE_SAMESITE = "None"
-
-# WARNING: Browsers WILL REJECT SameSite="None" cookies unless they are Secure (HTTPS).
-
-# To be completely safe during local testing, set these to False.
-
-# SESSION_COOKIE_SECURE = False
-# CSRF_COOKIE_SECURE = False
-
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+# Session & CSRF Cookie Security Configuration
+# In production (HTTPS), SameSite='None' and Secure=True are required for cross-site access.
+# In local development (HTTP), Secure=True causes browsers to reject cookies completely,
+# and SameSite='None' requires Secure. Therefore, use Lax and Secure=False locally.
+SESSION_COOKIE_SAMESITE = "None" if IS_PRODUCTION else "Lax"
+CSRF_COOKIE_SAMESITE = "None" if IS_PRODUCTION else "Lax"
+SESSION_COOKIE_SECURE = IS_PRODUCTION
+CSRF_COOKIE_SECURE = IS_PRODUCTION
 
 
 # Application definition
@@ -82,7 +99,7 @@ INSTALLED_APPS = [
     # apps
     'account_profile',
     'django_python',
-    'general',
+    'general.apps.GeneralConfig',
 
 
     'rest_framework',
@@ -102,6 +119,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'odozi.telemetry.OpenTelemetryRequestMiddleware',
     "odozi.middleware.RequestDebugMiddleware",
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
@@ -142,15 +160,27 @@ WSGI_APPLICATION = 'odozi.wsgi.application'
 # Database
 
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-        "OPTIONS": {
-            "timeout": 30, 
-        },
+if os.getenv("ODOZI_DOCKER", "").strip().lower() in {"1", "true", "yes"}:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DOCKER_POSTGRES_DB", "odozi"),
+            "USER": os.environ.get("DOCKER_POSTGRES_USER", "odozi"),
+            "PASSWORD": os.environ["DOCKER_POSTGRES_PASSWORD"],
+            "HOST": os.environ.get("DOCKER_DB_HOST", "db"),
+            "PORT": os.environ.get("DOCKER_DB_PORT", "5432"),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+            "OPTIONS": {
+                "timeout": 30,
+            },
+        }
+    }
 
 
 # Password validation
@@ -225,7 +255,7 @@ REST_USE_JWT = True
 JWT_AUTH_COOKIE = 'my-app-auth'          # Stores access token in cookie
 JWT_AUTH_REFRESH_COOKIE = 'my-refresh'   # Stores refresh token in cookie
 JWT_AUTH_HTTPONLY = True                 # Protects against XSS attacks
-JWT_AUTH_SECURE = True                   # Enforces HTTPS (Set to False ONLY during local development)
+JWT_AUTH_SECURE = IS_PRODUCTION                   # Enforces HTTPS only in production
 
 
 
@@ -252,23 +282,24 @@ PUBLIC_API_BASE_URL = config("PUBLIC_API_BASE_URL", default="http://127.0.0.1:80
 
 STATIC_URL = 'static/'
 
-# Development keeps the existing local Redis layout. Production uses the
-# managed Redis connection supplied in REDIS_URL for cache, Celery and
-# Django Channels, so every deployed process communicates through one Redis.
-ENVIRONMENT = config("ENVIRONMENT", default="development").strip().lower()
-# Render automatically provides RENDER=true at runtime. ENVIRONMENT remains
-# useful for another production host, staging, or a local production test.
-IS_RENDER = config("RENDER", default=False, cast=bool)
-IS_PRODUCTION = IS_RENDER or ENVIRONMENT in {"production", "prod"}
-REDIS_URL = config("REDIS_URL", default="").strip()
+# os.getenv("REDIS_URL") reads system environment variables directly (e.g. from Docker Compose or Render).
+# In Docker Compose, REDIS_URL="redis://redis:6379/0" is passed via the container environment.
+# In local non-docker development, os.getenv("REDIS_URL") is not set, so it uses local Redis on 127.0.0.1.
+REDIS_URL = os.getenv("REDIS_URL")
 
-if IS_PRODUCTION:
-    if not REDIS_URL:
-        raise RuntimeError("REDIS_URL must be configured in production.")
+if REDIS_URL:
     CACHE_REDIS_LOCATION = REDIS_URL
     CELERY_REDIS_LOCATION = REDIS_URL
     CHANNEL_REDIS_HOSTS = [REDIS_URL]
+elif IS_PRODUCTION:
+    prod_redis = config("REDIS_URL", default="").strip()
+    if not prod_redis:
+        raise RuntimeError("REDIS_URL must be configured in production.")
+    CACHE_REDIS_LOCATION = prod_redis
+    CELERY_REDIS_LOCATION = prod_redis
+    CHANNEL_REDIS_HOSTS = [prod_redis]
 else:
+    # Local non-docker development settings
     CACHE_REDIS_LOCATION = "redis://127.0.0.1:6379/1"
     CELERY_REDIS_LOCATION = "redis://127.0.0.1:6379/0"
     CHANNEL_REDIS_HOSTS = [("127.0.0.1", 6379)]
@@ -327,8 +358,8 @@ SIMPLE_JWT = {
     # Cookie configurations for the refresh token
     'AUTH_COOKIE': 'refresh_token',
     'AUTH_COOKIE_HTTPONLY': True,
-    'AUTH_COOKIE_SECURE': True,       # True for HTTPS/Production/Loca.lt
-    'AUTH_COOKIE_SAMESITE': 'Lax',     # Use 'None' if completely cross-domain
+    'AUTH_COOKIE_SECURE': IS_PRODUCTION,
+    'AUTH_COOKIE_SAMESITE': 'None' if IS_PRODUCTION else 'Lax',
     "TOKEN_OBTAIN_SERIALIZER": "account_profile.serializers.OdoziCustomTokenSerializer"
 
 }

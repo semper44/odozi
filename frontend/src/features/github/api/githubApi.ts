@@ -41,7 +41,6 @@ export interface FetchReposResponse {
 
 export const fetchRepos = async (): Promise<FetchReposResponse> => {
   const backendUrl = import.meta.env.VITE_DJANGO_BACKEND_URL;
-
   const response = await fetch(`${backendUrl}/dashboard/`, {
     method: "POST",
     credentials: "include",

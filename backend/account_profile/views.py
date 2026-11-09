@@ -24,6 +24,7 @@ from django.shortcuts import redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
+from django.core import signing
 from django.core.cache import cache
 from django.db import transaction
 from django.utils.decorators import method_decorator
@@ -51,14 +52,24 @@ from channels.db import database_sync_to_async
 def github_login_view(request):
     print("github_login_view called", settings.GITHUB_CLIENT_ID)
 
-    state = secrets.token_urlsafe(32)
+    state_payload = {
+        "nonce": secrets.token_urlsafe(16),
+        "ts": int(time.time()),
+        "frontend": settings.REACT_URL,
+    }
+    state = signing.dumps(state_payload, salt="github_oauth_state")
 
     request.session["github_oauth_state"] = state
+    request.session.modified = True
+    request.session.save()
+
+    redirect_uri = f"{settings.DJANGO_URL}/account/api/auth/github/callback/"
 
     github_url = (
         "https://github.com/login/oauth/authorize"
         f"?client_id={settings.GITHUB_CLIENT_ID}"
         f"&state={state}"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri, safe='')}"
     )
 
     return redirect(github_url)
@@ -109,31 +120,37 @@ def github_callback_view(request):
     installation_id = request.GET.get('installation_id')
 
     returned_state = request.GET.get("state")
+    stored_state = request.session.get("github_oauth_state")
 
-    stored_state = request.session.get(
-        "github_oauth_state"
-    )
+    is_valid_state = False
+    state_payload = None
 
-    if not stored_state:
+    if stored_state and returned_state == stored_state:
+        is_valid_state = True
+        try:
+            state_payload = signing.loads(returned_state, salt="github_oauth_state", max_age=600)
+        except Exception:
+            pass
+    elif returned_state:
+        try:
+            state_payload = signing.loads(returned_state, salt="github_oauth_state", max_age=600)
+            is_valid_state = True
+        except (signing.BadSignature, signing.SignatureExpired) as e:
+            print("Cryptographic OAuth state verification failed:", e)
+            is_valid_state = False
+
+    if not is_valid_state:
         return JsonResponse(
-            {"error": "Missing OAuth state"},
-            status=400
-        )
-
-    if returned_state != stored_state:
-        return JsonResponse(
-            {"error": "Invalid OAuth state"},
+            {"error": "Missing or invalid OAuth state"},
             status=400
         )
     print(request.GET, "jesu")
-
     # OAuth configuration credentials (keep my Client Secret in my settings.py env)
     client_id = "Iv23liUEbKH7D09scRIZ"
     # Read the variable safely from settings.py. If it's missing, default to an empty string.
     client_secret = getattr(settings, "GITHUB_APP_CLIENT_SECRET", "")
     DJANGO_URL = getattr(settings, "DJANGO_URL", "")
     print("client_secret", client_secret)  # Debugging line to confirm the value is being read correctly
-
     if not client_secret:
         return JsonResponse({"error": "Platform misconfiguration: GITHUB_APP_CLIENT_SECRET is missing from settings."}, status=500)
         
@@ -153,8 +170,7 @@ def github_callback_view(request):
     if token_response.status_code != 200:
         return JsonResponse({"error": "SOMETHING IS WRONG WITH gITHUB"})
     token_data = token_response.json()
-
-    print("token_data", token_data)  # Debugging line to inspect the response from GitHub's token endpoint
+    print("token_data", token_data)  # Debugging line to inspect the GitHub token response
 
     # Extract the token string
     github_access_token = token_data.get("access_token")
@@ -168,10 +184,10 @@ def github_callback_view(request):
         "Accept": "application/vnd.github.v3+json"
     }
     user_profile = requests.get(user_url, headers=user_headers).json()
+    print("user_profile", user_profile)  # Debugging line to inspect the GitHub user profile
     
     github_username = user_profile.get("login")
     github_email = user_profile.get("email")
-    print("user_profile", user_profile)  # Debugging line to inspect the user profile data returned by GitHub
 
 
     if not github_email:
@@ -253,8 +269,6 @@ def github_callback_view(request):
      # Log the user into the active Django session layer
     login(request, user, backend='django.contrib.auth.backends.ModelBackend')
 
-    print("Tokens encrypted and saved to database successfully.", encrypt_token(my_jwt_access_token))
-
     ticket_id = str(uuid.uuid4())
     redis_ticket_key = f"ws_transit_ticket:{ticket_id}"
     if my_jwt_refresh_token and my_jwt_access_token and raw_access_token:
@@ -267,6 +281,7 @@ def github_callback_view(request):
         }
         cache.set(f"redis_auth_{redis_ticket_key}", ticket_payload, timeout=60)
 
+        print("Tokens encrypted and saved to database successfully.", encrypt_token(my_jwt_access_token))
         print("PPPPPPPPPP")
     else:
         return JsonResponse({"error": "Key Token missing"}, status=500)
@@ -277,26 +292,29 @@ def github_callback_view(request):
     cache.delete(details_cache_key)
 
     # We use a URL Hash Fragment '#' so network routing nodes/logs can NEVER read it
-    react_app_url = settings.REACT_URL
+    react_app_url = (state_payload and state_payload.get("frontend")) or settings.REACT_URL
 
     response = HttpResponseRedirect(react_app_url)
 
+    is_secure = getattr(settings, "IS_PRODUCTION", False)
+    samesite_setting = "None" if is_secure else "Lax"
+
     response.set_cookie(
         "ticket_id",
-        str(ticket_id),  # Placeholder token value for testing
+        str(ticket_id),
         max_age=28800,       
         httponly=True,       
-        secure=True,         # <--- FORCE TO TRUE! Browser drops SameSite="None" if Secure is False over HTTPS
-        samesite="None",     # <--- Keep this on None for cross-origin flights
+        secure=is_secure,
+        samesite=samesite_setting,
         path="/"
     )
     response.set_cookie(
         "expires_at",
-        str(expires_at_iso),  # Placeholder token value for testing
+        str(expires_at_iso),
         max_age=28800,       
         httponly=True,       
-        secure=True,         # <--- FORCE TO TRUE! Browser drops SameSite="None" if Secure is False over HTTPS
-        samesite="None",     # <--- Keep this on None for cross-origin flights
+        secure=is_secure,
+        samesite=samesite_setting,
         path="/"
     )
     # react_app_url = f"https://spicy-flowers-scream.loca.lt/"
@@ -531,13 +549,16 @@ class GitHubRefreshView(APIView):
         print("------------------------")
         print("")
 
+        is_secure = getattr(settings, "IS_PRODUCTION", False)
+        samesite_setting = "None" if is_secure else "Lax"
+
         response.set_cookie(
             key="jwt_access_token",
             value=str(new_access),
             max_age=28800,
             httponly=True,
-            secure=True,
-            samesite="None",
+            secure=is_secure,
+            samesite=samesite_setting,
             path="/"
         )
 
@@ -549,8 +570,8 @@ class GitHubRefreshView(APIView):
                 value=refresh_str,  
                 max_age=28800,
                 httponly=True,
-                secure=True,
-                samesite="None",
+                secure=is_secure,
+                samesite=samesite_setting,
                 path="/"
             )
         else:
@@ -828,7 +849,7 @@ class SaveLLMConfigView(APIView):
 #             user=target_user,
 #             workspace=workspace,
 #             defaults={"role": "admin", "is_active": True}
-#         )
+#     m)
         
 #         # If they were previously fired/deleted, restore access cleanly
 #         if not membership.is_active:
@@ -851,4 +872,3 @@ class SaveLLMConfigView(APIView):
 
 
 #     return JsonResponse({"status": "ignored_action", "action": action})
-

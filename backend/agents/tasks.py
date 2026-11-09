@@ -35,6 +35,7 @@ from agents.judging import (
     format_quality_note,
     has_failed_results,
 )
+from odozi.telemetry import llm_call, record_llm_tokens, trace_span
 
 from odozi.service import (create_workspace_with_repos, get_installation_access_token, 
                            create_repo_env_keys_service,delete_repo_env_keys_service,  
@@ -1254,24 +1255,34 @@ def process_agentic_chat_turn_task(
 
     try:
         # track token usage
-        with get_openai_callback() as cb:
-            result = cast(
-                OrchestratorAction,
-                chain.invoke({
-                    "history": history_messages,
-                    "input": prompt_text.strip()
-                })
+        with llm_call("orchestrator", provider, model_name) as llm_span:
+            with get_openai_callback() as cb:
+                result = cast(
+                    OrchestratorAction,
+                    chain.invoke({
+                        "history": history_messages,
+                        "input": prompt_text.strip()
+                    })
+                )
+
+                prompt_tokens = cb.prompt_tokens
+                completion_tokens = cb.completion_tokens
+                total_cost = cb.total_cost
+            record_llm_tokens(
+                llm_span,
+                provider,
+                model_name,
+                prompt_tokens,
+                completion_tokens,
             )
 
-            prompt_tokens = cb.prompt_tokens
-            completion_tokens = cb.completion_tokens
-            total_cost = cb.total_cost
-
-        rails_result = check_orchestrator_action(
-            current_request=prompt_text.strip(),
-            action_json=result.model_dump_json(),
-        )
+        with trace_span("guardrails.output_validation") as guardrail_span:
+            rails_result = check_orchestrator_action(
+                current_request=prompt_text.strip(),
+                action_json=result.model_dump_json(),
+            )
         rail_status = str(getattr(rails_result.status, "value", rails_result.status)).casefold()
+        guardrail_span.set_attribute("guardrails.status", rail_status)
         if rail_status == "blocked":
             result = result.model_copy(
                 update={
@@ -3337,16 +3348,25 @@ def agentic_chat_follow_up(
 
     try:
 
-        with get_openai_callback() as cb:
+        with llm_call("follow_up_summary", provider, model_name) as llm_span:
+            with get_openai_callback() as cb:
+                result = cast(
+                    OrchestratorAction,
+                    chain.invoke({
+                        "history": history_messages,
+                        "input": backend_event_input
+                    })
+                )
+                prompt_tokens = cb.prompt_tokens
+                completion_tokens = cb.completion_tokens
 
-            result = cast(
-                OrchestratorAction,
-                chain.invoke({
-                    "history": history_messages,
-                    "input": backend_event_input
-                })
+            record_llm_tokens(
+                llm_span,
+                provider,
+                model_name,
+                prompt_tokens,
+                completion_tokens,
             )
-
             print("📊 Follow-up Result")
             print(result)
 
@@ -3376,17 +3396,28 @@ def agentic_chat_follow_up(
             )
             judge_chain = judge_prompt | llm.with_structured_output(FollowUpJudgment)
             try:
-                judgment = cast(
-                    FollowUpJudgment,
-                    judge_chain.invoke(
-                        {
-                            "evidence": compact_judge_evidence(
-                                task_results,
-                                result.chat_response,
-                            )
-                        }
-                    ),
-                )
+                with llm_call(
+                    "follow_up_judge", provider, model_name
+                ) as judge_span:
+                    with get_openai_callback() as judge_callback:
+                        judgment = cast(
+                            FollowUpJudgment,
+                            judge_chain.invoke(
+                                {
+                                    "evidence": compact_judge_evidence(
+                                        task_results,
+                                        result.chat_response,
+                                    )
+                                }
+                            ),
+                        )
+                    record_llm_tokens(
+                        judge_span,
+                        provider,
+                        model_name,
+                        judge_callback.prompt_tokens,
+                        judge_callback.completion_tokens,
+                    )
                 evaluation = {
                     "status": "passed" if judgment.passed else "needs_review",
                     **judgment.model_dump(),
@@ -3609,10 +3640,19 @@ def handle_backend_error_followup( self,
     chain = prompt_template | structured_llm
 
     # Run the error analysis
-    result = chain.invoke({
-        "history": history_messages,
-        "input": json.dumps(error_data) # Send the error dictionary here
-    })
+    with llm_call("error_follow_up", provider, model_name) as llm_span:
+        with get_openai_callback() as callback:
+            result = chain.invoke({
+                "history": history_messages,
+                "input": json.dumps(error_data) # Send the error dictionary here
+            })
+        record_llm_tokens(
+            llm_span,
+            provider,
+            model_name,
+            callback.prompt_tokens,
+            callback.completion_tokens,
+        )
 
 
     with transaction.atomic():

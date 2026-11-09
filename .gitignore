@@ -9,5 +9,6 @@ backend/.env
 Readme.md
 README.md
 /backend/.env
+/.env
 /frontend/.env
 readmetask.md

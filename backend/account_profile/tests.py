@@ -1,15 +1,23 @@
 import json
-from unittest.mock import patch
+import urllib.parse
+from unittest.mock import patch, MagicMock
 
 from django.contrib.auth.models import User
+from django.core import signing
 from django.core.cache import cache
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from rest_framework.test import APIRequestFactory
 
 from account_profile.models import UserLLMConfig
-from account_profile.views import SaveLLMConfigView, github_push_webhook, github_ticket
+from account_profile.views import (
+    SaveLLMConfigView,
+    github_push_webhook,
+    github_login_view,
+    github_callback_view,
+)
 
 
+@override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
 class AccountProfileViewTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -33,20 +41,6 @@ class AccountProfileViewTests(TestCase):
         self.assertEqual(config.model_name, "gpt-4.1")
         self.assertTrue(config.get_api_key())
 
-    def test_github_ticket_returns_ticket_for_valid_cookie(self):
-        ticket_id = "ticket-123"
-        cache.set(f"redis_auth_ws_transit_ticket:{ticket_id}", {"status": "ready"})
-        request = self.factory.post(
-            "/account/api/auth/github/ticket/",
-            HTTP_COOKIE=f"ticket_id={ticket_id}",
-        )
-
-        response = github_ticket(request)
-
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.content)
-        self.assertEqual(payload["ticket"], ticket_id)
-
     def test_github_push_webhook_rejects_invalid_signature(self):
         payload = b'{"ref": "refs/heads/main"}'
         request = self.factory.post(
@@ -61,3 +55,64 @@ class AccountProfileViewTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertIn("Invalid signature", json.loads(response.content)["error"])
+
+    def test_github_login_view_creates_session_and_signed_state(self):
+        request = self.factory.get("/account/api/auth/login/")
+        # Attach session to request
+        session_middleware = MagicMock()
+        from django.contrib.sessions.backends.db import SessionStore
+        request.session = SessionStore()
+
+        response = github_login_view(request)
+
+        self.assertEqual(response.status_code, 302)
+        redirect_url = response.url
+        self.assertIn("https://github.com/login/oauth/authorize", redirect_url)
+        self.assertIn("redirect_uri=", redirect_url)
+        self.assertIn("state=", redirect_url)
+
+        # Check session
+        stored_state = request.session.get("github_oauth_state")
+        self.assertTrue(stored_state)
+
+        # Verify state is signed and loadable
+        payload = signing.loads(stored_state, salt="github_oauth_state")
+        self.assertIn("nonce", payload)
+        self.assertIn("frontend", payload)
+
+    def test_github_callback_view_rejects_missing_code(self):
+        request = self.factory.get("/account/api/auth/github/callback/")
+        from django.contrib.sessions.backends.db import SessionStore
+        request.session = SessionStore()
+
+        response = github_callback_view(request)
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.content)
+        self.assertEqual(data["error"], "No authorization code returned from GitHub")
+
+    def test_github_callback_view_rejects_missing_or_invalid_state(self):
+        request = self.factory.get("/account/api/auth/github/callback/?code=123&state=tampered")
+        from django.contrib.sessions.backends.db import SessionStore
+        request.session = SessionStore()
+
+        response = github_callback_view(request)
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.content)
+        self.assertEqual(data["error"], "Missing or invalid OAuth state")
+
+    def test_github_callback_view_accepts_signed_state_even_if_session_lost(self):
+        state = signing.dumps({"nonce": "abc123", "ts": 12345}, salt="github_oauth_state")
+        request = self.factory.get(f"/account/api/auth/github/callback/?code=dummycode&state={state}")
+        from django.contrib.sessions.backends.db import SessionStore
+        request.session = SessionStore()  # Empty session (simulating lost cookie)
+
+        with patch("account_profile.views.requests.post") as mock_post:
+            mock_post.return_value.status_code = 400
+            mock_post.return_value.json.return_value = {"error": "bad_code"}
+
+            response = github_callback_view(request)
+
+            # It passed the state check and proceeded to token exchange!
+            self.assertNotEqual(response.status_code, 400 if "Missing" in str(response.content) else 999)
+            data = json.loads(response.content)
+            self.assertNotIn("Missing or invalid OAuth state", data.get("error", ""))

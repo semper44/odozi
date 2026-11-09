@@ -1,6 +1,7 @@
 import json
 from celery import current_app
 from channels.generic.websocket import AsyncWebsocketConsumer
+from odozi.telemetry import trace_span
 
 class ChatConsumer(AsyncWebsocketConsumer):
 
@@ -56,25 +57,29 @@ class ChatConsumer(AsyncWebsocketConsumer):
             print("WWWWWWWWWWWWWWWWWWWWW", msg_type)
 
             #  INSTANTLY OFFLOAD EVERYTHING TO CELERY
-            current_app.send_task(  # type: ignore
-                "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches my celery task path string exactly!
-                kwargs={
-                    "channel_name": self.user_group,
-                    "user_id": self.user.pk,
-                    "username": self.user.username,
-                    "token": self.token,
-                    # I pass None for a fresh chat so the Celery task can create
-                    # a session and let Django assign its primary key.
-                    "session_id": data.get('session_id'),
-                    # I echo this token so the browser can ignore stale session acknowledgements.
-                    "session_request_id": data.get('session_request_id'),
-                    "prompt_text": data.get('prompt', ''),
-                    "repos": data.get('repos', []),
-                    "provider": data.get('provider', 'google'),
-                    "model_name": data.get('model_name', 'gemini-2.5-flash'),
-                    "api_key": data.get('user_api_key', '')
-                }
-            )
+            with trace_span(
+                "websocket.chat.dispatch",
+                {"celery.task.name": "agents.tasks.process_agentic_chat_turn_task"},
+            ):
+                current_app.send_task(  # type: ignore
+                    "agents.tasks.process_agentic_chat_turn_task", # Ensure this matches my Celery task path string exactly!
+                    kwargs={
+                        "channel_name": self.user_group,
+                        "user_id": self.user.pk,
+                        "username": self.user.username,
+                        "token": self.token,
+                        # I pass None for a fresh chat so the Celery task can create
+                        # a session and let Django assign its primary key.
+                        "session_id": data.get('session_id'),
+                        # I echo this token so the browser can ignore stale session acknowledgements.
+                        "session_request_id": data.get('session_request_id'),
+                        "prompt_text": data.get('prompt', ''),
+                        "repos": data.get('repos', []),
+                        "provider": data.get('provider', 'google'),
+                        "model_name": data.get('model_name', 'gemini-2.5-flash'),
+                        "api_key": data.get('user_api_key', '')
+                    }
+                )
 
             print("sexy")
 
