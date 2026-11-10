@@ -8,7 +8,7 @@ from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from rest_framework.test import APIRequestFactory
 
-from account_profile.models import UserLLMConfig
+from account_profile.models import UserLLMConfig, Workspace, WorkspaceMembership
 from account_profile.views import (
     SaveLLMConfigView,
     github_push_webhook,
@@ -116,3 +116,48 @@ class AccountProfileViewTests(TestCase):
             self.assertNotEqual(response.status_code, 400 if "Missing" in str(response.content) else 999)
             data = json.loads(response.content)
             self.assertNotIn("Missing or invalid OAuth state", data.get("error", ""))
+
+    @patch("account_profile.views.requests.post")
+    @patch("account_profile.views.requests.get")
+    @patch("account_profile.views.cache")
+    @patch("account_profile.views.get_browser_family", return_value="test-browser")
+    def test_github_callback_uses_github_user_for_workspace_owner(
+        self, _mock_browser_family, _mock_cache, mock_get, mock_post
+    ):
+        state = signing.dumps(
+            {"nonce": "abc123", "ts": 12345, "frontend": "http://localhost:5173"},
+            salt="github_oauth_state",
+        )
+        request = self.factory.get(
+            "/account/api/auth/github/callback/",
+            {"code": "dummycode", "state": state},
+        )
+        from django.contrib.auth.models import AnonymousUser
+        from django.contrib.sessions.backends.db import SessionStore
+
+        request.user = AnonymousUser()
+        request.session = SessionStore()
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {
+            "access_token": "github-access-token",
+            "refresh_token": "github-refresh-token",
+            "expires_in": 3600,
+        }
+        mock_get.return_value.json.return_value = {
+            "login": "github-test-user",
+            "email": "github-test@example.com",
+        }
+
+        response = github_callback_view(request)
+
+        self.assertEqual(response.status_code, 302)
+        user = User.objects.get(username="github-test-user")
+        workspace = Workspace.objects.get(name="github-test-user")
+        self.assertEqual(workspace.owner, user)
+        self.assertTrue(
+            WorkspaceMembership.objects.filter(
+                workspace=workspace,
+                members=user,
+                role="admin",
+            ).exists()
+        )

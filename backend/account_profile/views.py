@@ -108,7 +108,6 @@ def verify_github_signature(request):
     },
 )
 def github_callback_view(request):
-    print("boyfriend wahala")
     # react_app_url = settings.REACT_URL  
     # response = HttpResponseRedirect(react_app_url)
     # return response
@@ -117,8 +116,6 @@ def github_callback_view(request):
     code = request.GET.get('code')
     if not code:
         return JsonResponse({"error": "No authorization code returned from GitHub"}, status=400)
-    installation_id = request.GET.get('installation_id')
-
     returned_state = request.GET.get("state")
     stored_state = request.session.get("github_oauth_state")
 
@@ -135,8 +132,7 @@ def github_callback_view(request):
         try:
             state_payload = signing.loads(returned_state, salt="github_oauth_state", max_age=600)
             is_valid_state = True
-        except (signing.BadSignature, signing.SignatureExpired) as e:
-            print("Cryptographic OAuth state verification failed:", e)
+        except (signing.BadSignature, signing.SignatureExpired):
             is_valid_state = False
 
     if not is_valid_state:
@@ -144,13 +140,11 @@ def github_callback_view(request):
             {"error": "Missing or invalid OAuth state"},
             status=400
         )
-    print(request.GET, "jesu")
     # OAuth configuration credentials (keep my Client Secret in my settings.py env)
     client_id = "Iv23liUEbKH7D09scRIZ"
     # Read the variable safely from settings.py. If it's missing, default to an empty string.
     client_secret = getattr(settings, "GITHUB_APP_CLIENT_SECRET", "")
     DJANGO_URL = getattr(settings, "DJANGO_URL", "")
-    print("client_secret", client_secret)  # Debugging line to confirm the value is being read correctly
     if not client_secret:
         return JsonResponse({"error": "Platform misconfiguration: GITHUB_APP_CLIENT_SECRET is missing from settings."}, status=500)
         
@@ -165,12 +159,9 @@ def github_callback_view(request):
 
     # Make the HTTP POST call to GitHub's token engine
     token_response = requests.post(token_url, json=token_payload, headers=token_headers)
-    print(token_response.status_code)
-    print(token_response.text)
     if token_response.status_code != 200:
         return JsonResponse({"error": "SOMETHING IS WRONG WITH gITHUB"})
     token_data = token_response.json()
-    print("token_data", token_data)  # Debugging line to inspect the GitHub token response
 
     # Extract the token string
     github_access_token = token_data.get("access_token")
@@ -184,7 +175,6 @@ def github_callback_view(request):
         "Accept": "application/vnd.github.v3+json"
     }
     user_profile = requests.get(user_url, headers=user_headers).json()
-    print("user_profile", user_profile)  # Debugging line to inspect the GitHub user profile
     
     github_username = user_profile.get("login")
     github_email = user_profile.get("email")
@@ -202,36 +192,32 @@ def github_callback_view(request):
                     if email_entry.get("primary") and email_entry.get("verified"):
                         github_email = email_entry.get("email")
                         break
-        else:
-            print(f"Warning: GitHub emails API did not return a valid list. Payload: {emails_profile}")
 
 
     if not github_username:
         return JsonResponse({"error": "Could not extract user details from profile"}, status=400)
 
-    workspace, created = Workspace.objects.get_or_create(
-        name = github_username,
-            # Django searches the DB using these lookup fields:
-        
-        # If not found, Django creates it using lookup fields + these defaults:
-        defaults={
-            "owner": request.user,
-            "github_account_name": github_username,
-        }
-    )
-    print("wahala", request.user)
-    # workspace= Workspace.objects.create(name=company, owner=request.user, installation_id=installation_id, github_account_name=github_username)
-    if created:
-        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=request.user)
-
-
-
-    user, created = User.objects.get_or_create(
+    user, _ = User.objects.get_or_create(
         username=github_username,
         defaults={
             "email": github_email or ""
         }
     )
+
+    # I use the GitHub user because callback requests may not have a Django session.
+    workspace, workspace_created = Workspace.objects.get_or_create(
+        name = github_username,
+            # Django searches the DB using these lookup fields:
+        
+        # If not found, Django creates it using lookup fields + these defaults:
+        defaults={
+            "owner": user,
+            "github_account_name": github_username,
+        }
+    )
+    if workspace_created:
+        WorkspaceMembership.objects.create(role="admin", workspace=workspace, members=user)
+
     refresh = RefreshToken.for_user(user)
     access = refresh.access_token
     access['username'] = str(github_username)
@@ -239,13 +225,9 @@ def github_callback_view(request):
     my_jwt_access_token = str(access)
     my_jwt_refresh_token = str(refresh)
 
-    print("breakpoint", installation_id)
-
     profile, _ = UserProfileModel.objects.get_or_create(
         user=user,
     )
-
-    print("installation_id", profile)
 
     raw_access_token = token_data.get("access_token")
     raw_refresh_token = token_data.get("refresh_token")
@@ -280,9 +262,6 @@ def github_callback_view(request):
             "expires_at": expires_at_iso
         }
         cache.set(f"redis_auth_{redis_ticket_key}", ticket_payload, timeout=60)
-
-        print("Tokens encrypted and saved to database successfully.", encrypt_token(my_jwt_access_token))
-        print("PPPPPPPPPP")
     else:
         return JsonResponse({"error": "Key Token missing"}, status=500)
     

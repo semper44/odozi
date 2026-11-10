@@ -20,7 +20,7 @@ services:
     restart: "no"
     networks:
       - odozi
-
+      
   frontend:
     container_name: odozi-frontend-container
     build:

@@ -12,7 +12,7 @@ from odozi.utils.crypto import decrypt_token
 import time
 
 
-print("🔥🔥🔥 ODOZI MIDDLEWARE.PY LOADED 🔥🔥🔥", flush=True)
+print("ODOZI MIDDLEWARE.PY LOADED", flush=True)
 
 
 
